@@ -16,6 +16,9 @@ struct ChatMessageView: View {
 
     let message: ChatMessage
 
+    /// バッジ定義ストア（BadgeImageView のURL解決に使用）
+    let badgeStore: BadgeStore
+
     /// ダウンロード済みエモート画像（キー: エモートID）
     @State private var emoteImages: [String: NSImage] = [:]
 
@@ -107,26 +110,12 @@ struct ChatMessageView: View {
         }
     }
 
-    /// バッジを絵文字で表示
+    /// バッジを画像で表示（未取得時は絵文字フォールバック）
     private var badgesView: some View {
         HStack(spacing: 2) {
             ForEach(message.badges, id: \.name) { badge in
-                Text(badgeEmoji(for: badge.name))
-                    .font(.system(size: 11))
+                BadgeImageView(badge: badge, store: badgeStore)
             }
-        }
-    }
-
-    /// バッジ名に対応する絵文字を返す
-    private func badgeEmoji(for badgeName: String) -> String {
-        switch badgeName {
-        case "broadcaster": return "📡"
-        case "moderator": return "⚔️"
-        case "subscriber": return "★"
-        case "vip": return "💎"
-        case "partner": return "✓"
-        case "staff": return "🔧"
-        default: return "•"
         }
     }
 

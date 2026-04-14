@@ -57,6 +57,12 @@ final class ChatViewModel {
     private let ircClient: any TwitchIRCClientProtocol
     private var receiveTask: Task<Void, Never>?
 
+    /// バッジ定義ストア（View からバッジ画像URLの解決に使用）
+    let badgeStore = BadgeStore()
+
+    /// チャンネルバッジ取得済みフラグ
+    private var channelBadgesFetched = false
+
     // MARK: - 初期化
 
     /// ChatViewModel を初期化する
@@ -77,6 +83,10 @@ final class ChatViewModel {
         channelName = channel
         connectionState = .connecting
         messages = []
+        channelBadgesFetched = false
+
+        // グローバルバッジ定義を並行フェッチ
+        Task { await badgeStore.fetchGlobalBadges() }
 
         receiveTask = Task { [weak self] in
             // メッセージ受信ループを別タスクで開始
@@ -109,6 +119,11 @@ final class ChatViewModel {
 
     /// メッセージをリストに追加し、上限を超えた場合は古いものを削除する
     private func appendMessage(_ message: ChatMessage) {
+        // 最初の room-id 取得時にチャンネルバッジをフェッチ
+        if !channelBadgesFetched, let roomId = message.roomId {
+            channelBadgesFetched = true
+            Task { await badgeStore.fetchChannelBadges(channelId: roomId) }
+        }
         messages.append(message)
         if messages.count > Self.maxMessages {
             messages.removeFirst(messages.count - Self.maxMessages)

@@ -54,7 +54,7 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.messages) { message in
-                        ChatMessageView(message: message)
+                        ChatMessageView(message: message, badgeStore: viewModel.badgeStore)
                             .id(message.id)
                     }
                 }

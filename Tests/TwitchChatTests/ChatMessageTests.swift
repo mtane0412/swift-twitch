@@ -150,4 +150,28 @@ struct ChatMessageTests {
         #expect(chatMessage?.badges[1].name == "subscriber")
         #expect(chatMessage?.colorHex == "#0000FF")
     }
+
+    @Test("PRIVMSG の room-id タグが roomId プロパティに反映される")
+    func PRIVMSGのroomIdタグがroomIdプロパティに反映される() {
+        let rawMessage = "@room-id=12345678;display-name=視聴者;color=#FF0000 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #haishinsha :こんにちは！"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage?.roomId == "12345678")
+    }
+
+    @Test("room-id タグがない場合は roomId が nil になる")
+    func roomIdタグがない場合はnilになる() {
+        let rawMessage = "@display-name=視聴者;color=#FF0000 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #haishinsha :こんにちは！"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage?.roomId == nil)
+    }
 }
