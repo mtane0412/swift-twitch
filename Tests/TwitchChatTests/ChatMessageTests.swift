@@ -98,6 +98,40 @@ struct ChatMessageTests {
         #expect(badges.isEmpty)
     }
 
+    // MARK: - エモートのパース
+
+    @Test("emotes タグが空の場合 segments はテキスト全体の1セグメントになる")
+    func emotesタグが空の場合segmentsはテキスト全体の1セグメントになる() {
+        // 前提: emotes タグが空（エモートなし）のメッセージ
+        let rawMessage = "@emotes=;id=abc-001 :ユーザー001!ユーザー001@ユーザー001.tmi.twitch.tv PRIVMSG #テストチャンネル :こんにちは！"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+        // 検証: segments がテキスト全体の1セグメントになる
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage?.segments == [.text("こんにちは！")])
+        #expect(chatMessage?.emotes.isEmpty == true)
+    }
+
+    @Test("emotes タグがある場合 segments にエモートセグメントが含まれる")
+    func emotesタグがある場合segmentsにエモートセグメントが含まれる() {
+        // 前提: Kappa(0-4) を含むメッセージ
+        // "Kappa 配信中" — Kappa は K(0) a(1) p(2) p(3) a(4)
+        let rawMessage = "@emotes=25:0-4;id=abc-002 :はいしんしゃ!はいしんしゃ@はいしんしゃ.tmi.twitch.tv PRIVMSG #テストチャンネル :Kappa 配信中"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+        // 検証: エモート → テキストの2セグメントになる
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage?.emotes.count == 1)
+        #expect(chatMessage?.emotes.first?.emoteId == "25")
+        #expect(chatMessage?.segments.count == 2)
+        #expect(chatMessage?.segments[0] == .emote(id: "25", name: "Kappa"))
+        #expect(chatMessage?.segments[1] == .text(" 配信中"))
+    }
+
     @Test("PRIVMSG のバッジタグが正しく ChatMessage に反映される")
     func PRIVMSGのバッジタグが正しくChatMessageに反映される() {
         let rawMessage = "@badges=broadcaster/1,subscriber/12;color=#0000FF;display-name=配信者 :haishinsha!haishinsha@haishinsha.tmi.twitch.tv PRIVMSG #haishinsha :配信開始！"

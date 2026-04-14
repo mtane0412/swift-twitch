@@ -52,6 +52,12 @@ struct ChatMessage: Sendable, Identifiable {
     /// バッジ一覧
     let badges: [Badge]
 
+    /// パース済みエモート位置情報
+    let emotes: [EmotePosition]
+
+    /// メッセージのセグメント分割結果（テキストとエモートの交互配列）
+    let segments: [MessageSegment]
+
     /// メッセージの受信時刻
     let receivedAt: Date
 
@@ -77,6 +83,9 @@ struct ChatMessage: Sendable, Identifiable {
         self.text = text
         self.colorHex = ircMessage.tags["color"]?.isEmpty == false ? ircMessage.tags["color"] : nil
         self.badges = Badge.parse(ircMessage.tags["badges"] ?? "")
+        let parsedEmotes = EmoteParser.parse(ircMessage.tags["emotes"] ?? "")
+        self.emotes = parsedEmotes
+        self.segments = MessageSegment.segments(from: text, emotePositions: parsedEmotes)
         self.receivedAt = Date()
     }
 }
