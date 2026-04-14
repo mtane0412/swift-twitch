@@ -56,7 +56,8 @@ enum EmoteParser {
                 let range = position.split(separator: "-", maxSplits: 1)
                 guard range.count == 2,
                       let start = Int(range[0]),
-                      let end = Int(range[1]) else { continue }
+                      let end = Int(range[1]),
+                      start <= end else { continue }
 
                 result.append(EmotePosition(emoteId: emoteId, startIndex: start, endIndex: end))
             }

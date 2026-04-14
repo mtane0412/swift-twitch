@@ -9,7 +9,7 @@ import SwiftUI
 /// 各子ビューを左から右に並べ、コンテナ幅を超える場合は次の行に折り返す。
 /// テキストセグメントとエモート画像を自然に混在させるために使用する。
 ///
-/// - Note: 各行内の子ビューは垂直方向の中央に揃える（テキストとエモートのベースラインを統一）
+/// - Note: 各行内の子ビューは垂直方向の中央揃えで配置する（テキストとエモートの高さが揃う）
 struct FlowLayout: Layout {
 
     /// 子ビュー間の水平スペース
@@ -18,16 +18,44 @@ struct FlowLayout: Layout {
     /// 行間の垂直スペース
     var verticalSpacing: CGFloat = 2
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+    // MARK: - Layout キャッシュ
+
+    /// レイアウト計算結果のキャッシュ
+    ///
+    /// `sizeThatFits` と `placeSubviews` が同じ幅で呼ばれる場合、計算を再利用する。
+    struct CacheData {
+        var result: LayoutResult
+        var maxWidth: CGFloat
+    }
+
+    func makeCache(subviews: Subviews) -> CacheData? { nil }
+
+    func updateCache(_ cache: inout CacheData?, subviews: Subviews) {
+        // サブビューが変わったらキャッシュを無効化する
+        cache = nil
+    }
+
+    // MARK: - Layout プロトコル
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CacheData?) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
         let result = computeLayout(subviews: subviews, maxWidth: maxWidth)
+        // 次の placeSubviews で再利用できるようキャッシュに保存
+        cache = CacheData(result: result, maxWidth: maxWidth)
         return result.totalSize
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
-        let result = computeLayout(subviews: subviews, maxWidth: bounds.width)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CacheData?) {
+        // 同じ幅ならキャッシュを再利用し、二重計算を避ける
+        let result: LayoutResult
+        if let cached = cache, cached.maxWidth == bounds.width {
+            result = cached.result
+        } else {
+            result = computeLayout(subviews: subviews, maxWidth: bounds.width)
+        }
+
         for (index, (origin, size)) in zip(result.origins, result.sizes).enumerated() {
-            // 行高に対して垂直中央揃え
+            // 行高に対して垂直中央揃え（テキストとエモートの高さが揃う）
             let rowHeight = result.rowHeights[result.rowIndices[index]]
             let centeredY = origin.y + (rowHeight - size.height) / 2
             subviews[index].place(
@@ -40,7 +68,7 @@ struct FlowLayout: Layout {
     // MARK: - プライベートメソッド
 
     /// レイアウト計算結果
-    private struct LayoutResult {
+    struct LayoutResult {
         /// 各子ビューの配置原点（ローカル座標）
         var origins: [CGPoint]
         /// 各子ビューのサイズ

@@ -39,7 +39,9 @@ struct ChatMessageView: View {
                     .fixedSize()
 
                 // メッセージ本文のセグメント
-                ForEach(Array(message.segments.enumerated()), id: \.offset) { _, segment in
+                // segments は message 生成後に変更されないため、インデックスを安定 ID として使用する
+                ForEach(message.segments.indices, id: \.self) { index in
+                    let segment = message.segments[index]
                     switch segment {
                     case .text(let str):
                         Text(str)
@@ -73,7 +75,7 @@ struct ChatMessageView: View {
         }
     }
 
-    /// 必要なエモート画像を非同期ダウンロードする
+    /// 必要なエモート画像を非同期ダウンロードし、@State を一括更新する
     private func loadEmoteImages() async {
         // ユニークなエモートIDを収集
         let emoteIds = Set(message.segments.compactMap { segment -> String? in
@@ -82,7 +84,9 @@ struct ChatMessageView: View {
         })
         guard !emoteIds.isEmpty else { return }
 
-        // 並行ダウンロード
+        // ローカル辞書に結果を集積してから @State を一括更新することで
+        // 不必要な View 再描画を抑制する
+        var downloaded: [String: NSImage] = [:]
         await withTaskGroup(of: (String, NSImage?).self) { group in
             for id in emoteIds {
                 group.addTask {
@@ -92,9 +96,14 @@ struct ChatMessageView: View {
             }
             for await (id, image) in group {
                 if let image {
-                    emoteImages[id] = image
+                    downloaded[id] = image
                 }
             }
+        }
+
+        // メインスレッドで @State を一括更新
+        await MainActor.run {
+            emoteImages.merge(downloaded) { _, new in new }
         }
     }
 

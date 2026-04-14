@@ -124,12 +124,16 @@ struct ChatMessageTests {
             return
         }
         // 検証: エモート → テキストの2セグメントになる
-        let chatMessage = ChatMessage(from: ircMessage)
-        #expect(chatMessage?.emotes.count == 1)
-        #expect(chatMessage?.emotes.first?.emoteId == "25")
-        #expect(chatMessage?.segments.count == 2)
-        #expect(chatMessage?.segments[0] == .emote(id: "25", name: "Kappa"))
-        #expect(chatMessage?.segments[1] == .text(" 配信中"))
+        guard let chatMessage = ChatMessage(from: ircMessage) else {
+            Issue.record("ChatMessage への変換に失敗しました")
+            return
+        }
+        #expect(chatMessage.emotes.count == 1)
+        #expect(chatMessage.emotes.first?.emoteId == "25")
+        let segments = chatMessage.segments
+        #expect(segments.count == 2)
+        #expect(segments[0] == .emote(id: "25", name: "Kappa"))
+        #expect(segments[1] == .text(" 配信中"))
     }
 
     @Test("PRIVMSG のバッジタグが正しく ChatMessage に反映される")

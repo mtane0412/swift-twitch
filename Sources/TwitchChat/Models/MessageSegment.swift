@@ -43,10 +43,11 @@ extension MessageSegment {
         var currentOffset = 0
 
         for pos in sorted {
-            // 範囲チェック: 不正なオフセットはスキップ
+            // 範囲チェック: 不正なオフセット・逆転レンジはスキップ
             guard pos.startIndex >= currentOffset,
                   pos.startIndex < utf16Count,
-                  pos.endIndex < utf16Count else { continue }
+                  pos.endIndex < utf16Count,
+                  pos.startIndex <= pos.endIndex else { continue }
 
             // エモート前のテキスト部分
             if pos.startIndex > currentOffset {
@@ -67,8 +68,8 @@ extension MessageSegment {
             currentOffset = pos.endIndex + 1
         }
 
-        // 残りのテキスト部分
-        if currentOffset <= utf16Count {
+        // 残りのテキスト部分（currentOffset が utf16Count 未満の場合のみ）
+        if currentOffset < utf16Count {
             let start = String.Index(utf16Offset: currentOffset, in: text)
             let remaining = String(text[start...])
             if !remaining.isEmpty {

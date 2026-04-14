@@ -110,8 +110,8 @@ struct MessageSegmentTests {
         #expect(result[2] == .emote(id: "25", name: "Kappa"))
     }
 
-    @Test("テキストのみのセグメントで全体がエモートの場合を分割できる")
-    func テキストのみのセグメントで全体がエモートの場合を分割できる() {
+    @Test("メッセージ全体がエモートのみの場合を分割できる")
+    func メッセージ全体がエモートのみの場合を分割できる() {
         // 前提: "Kappa" — メッセージ全体が1つのエモート
         let emotes = [EmotePosition(emoteId: "25", startIndex: 0, endIndex: 4)]
         let result = MessageSegment.segments(from: "Kappa", emotePositions: emotes)

@@ -55,8 +55,10 @@ struct EmoteParserTests {
         #expect(result.count == 2)
         #expect(result[0].emoteId == "25")
         #expect(result[0].startIndex == 0)
+        #expect(result[0].endIndex == 4)
         #expect(result[1].emoteId == "1902")
         #expect(result[1].startIndex == 6)
+        #expect(result[1].endIndex == 10)
     }
 
     @Test("startIndex 昇順でソートされる")
@@ -68,18 +70,23 @@ struct EmoteParserTests {
         #expect(result.count == 2)
         #expect(result[0].emoteId == "25")
         #expect(result[0].startIndex == 0)
+        #expect(result[0].endIndex == 4)
         #expect(result[1].emoteId == "1902")
         #expect(result[1].startIndex == 6)
+        #expect(result[1].endIndex == 10)
     }
 
     @Test("単一エモートが 3 箇所に登場する場合をパースできる")
     func 単一エモートが3箇所に登場する場合をパースできる() {
         // 前提: 同じエモートがメッセージ内に 3 回登場する
         let result = EmoteParser.parse("25:0-4,6-10,12-16")
-        // 検証: 3件の EmotePosition が startIndex 昇順で返る
+        // 検証: 3件の EmotePosition が startIndex 昇順で返り、emoteId も全て "25" になる
         #expect(result.count == 3)
+        #expect(result[0].emoteId == "25")
         #expect(result[0].startIndex == 0)
+        #expect(result[1].emoteId == "25")
         #expect(result[1].startIndex == 6)
+        #expect(result[2].emoteId == "25")
         #expect(result[2].startIndex == 12)
     }
 
@@ -116,5 +123,33 @@ struct EmoteParserTests {
         // 検証: 正常な1件のみ返る
         #expect(result.count == 1)
         #expect(result[0].emoteId == "25")
+    }
+
+    @Test("コロン後が空のレンジはスキップされる")
+    func コロン後が空のレンジはスキップされる() {
+        // 前提: エモートIDの後にコロンはあるが位置文字列が空
+        let result = EmoteParser.parse("25:")
+        // 検証: スキップされて空配列が返る
+        #expect(result.isEmpty)
+    }
+
+    @Test("endIndex が startIndex より小さい逆転レンジはスキップされる")
+    func endIndexがstartIndexより小さい逆転レンジはスキップされる() {
+        // 前提: start(10) > end(4) の不正なレンジ
+        let result = EmoteParser.parse("25:10-4")
+        // 検証: 不正なレンジはスキップされて空配列が返る
+        #expect(result.isEmpty)
+    }
+
+    @Test("非常に大きなインデックス値を処理できる")
+    func 非常に大きなインデックス値を処理できる() {
+        // 前提: Int に収まる大きなインデックス値
+        // 実際の Twitch メッセージで発生しうる範囲を超える値
+        let result = EmoteParser.parse("25:0-99999")
+        // 検証: パースは成功し、EmotePosition が生成される（範囲チェックは MessageSegment 側で行う）
+        #expect(result.count == 1)
+        #expect(result[0].emoteId == "25")
+        #expect(result[0].startIndex == 0)
+        #expect(result[0].endIndex == 99999)
     }
 }

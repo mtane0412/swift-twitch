@@ -10,6 +10,7 @@ import Foundation
 ///
 /// - アニメーション版 URL（`/animated/`）を先に試み、失敗時はスタティック版（`/default/`）にフォールバック
 /// - NSCache によるメモリキャッシュ（メモリプレッシャー時に自動解放）
+/// - 同一エモートへの並行リクエストを1回のダウンロードに集約する in-flight 管理
 /// - NSImage.size を `emoteDisplaySize` に設定してテキスト行高と一致させる
 /// - シングルトンで全 View 間でキャッシュを共有
 final class EmoteImageCache: @unchecked Sendable {
@@ -34,18 +35,24 @@ final class EmoteImageCache: @unchecked Sendable {
     /// アニメーション版が存在するエモートIDの集合
     private var animatedEmoteIds: Set<String> = []
 
-    /// animatedEmoteIds へのアクセスを保護するロック
+    /// 進行中のダウンロードタスク（キー: エモートID）
+    ///
+    /// 同一エモートへの並行リクエストを1回のダウンロードに集約し、重複ネットワーク通信を防ぐ。
+    private var inFlightTasks: [String: Task<NSImage?, Never>] = [:]
+
+    /// animatedEmoteIds / inFlightTasks へのアクセスを保護するロック
     private let lock = NSLock()
 
     private init() {}
 
     // MARK: - 画像取得
 
-    /// エモートIDから画像を取得する（キャッシュ優先）
+    /// エモートIDから画像を取得する（キャッシュ優先・並行重複排除付き）
     ///
-    /// キャッシュにある場合は即時返却。ない場合は以下の順で取得する:
-    /// 1. アニメーション版 URL（`/animated/`）を試みる
-    /// 2. 失敗した場合はスタティック版 URL（`/default/`）にフォールバック
+    /// 取得順序:
+    /// 1. キャッシュヒットなら即時返却
+    /// 2. 進行中タスクがあれば結果を待つ（重複ダウンロード回避）
+    /// 3. 新規タスクを作成: アニメーション版 → スタティック版の順でダウンロード
     ///
     /// - Parameter emoteId: Twitch エモートID（例: "25"）
     /// - Returns: ダウンロード済みの NSImage（`emoteDisplaySize` にリサイズ済み）。取得失敗時は nil
@@ -57,19 +64,32 @@ final class EmoteImageCache: @unchecked Sendable {
             return cached
         }
 
-        // アニメーション版を先に試みる
-        if let image = await download(emoteId: emoteId, type: "animated") {
-            store(image, for: emoteId, isAnimated: true)
-            return image
+        // 進行中タスクへの相乗り、または新規タスクの作成（排他制御）
+        let task: Task<NSImage?, Never> = lock.withLock {
+            if let existing = inFlightTasks[emoteId] {
+                return existing
+            }
+            let newTask = Task { [weak self] in
+                guard let self else { return nil as NSImage? }
+                defer { self.lock.withLock { self.inFlightTasks.removeValue(forKey: emoteId) } }
+
+                // アニメーション版を先に試みる
+                if let image = await self.download(emoteId: emoteId, type: "animated") {
+                    self.store(image, for: emoteId, isAnimated: true)
+                    return image
+                }
+                // スタティック版にフォールバック
+                if let image = await self.download(emoteId: emoteId, type: "default") {
+                    self.store(image, for: emoteId, isAnimated: false)
+                    return image
+                }
+                return nil
+            }
+            inFlightTasks[emoteId] = newTask
+            return newTask
         }
 
-        // スタティック版にフォールバック
-        if let image = await download(emoteId: emoteId, type: "default") {
-            store(image, for: emoteId, isAnimated: false)
-            return image
-        }
-
-        return nil
+        return await task.value
     }
 
     /// エモートがアニメーション版かどうかを返す
@@ -88,13 +108,15 @@ final class EmoteImageCache: @unchecked Sendable {
     /// `https://static-cdn.jtvnw.net/emoticons/v2/{id}/{type}/dark/{scale}`
     ///
     /// - Parameters:
-    ///   - emoteId: Twitch エモートID（例: "25"）
+    ///   - emoteId: Twitch エモートID（例: "25"）。URL パスコンポーネントとして percent-encode される
     ///   - type: 画像タイプ（`"default"` = スタティック PNG、`"animated"` = アニメーション GIF）
     ///   - scale: 画像スケール（デフォルト: `"2.0"`。Retina ディスプレイ対応）
     /// - Returns: 画像取得用 URL
     static func emoteURL(emoteId: String, type: String = "default", scale: String = "2.0") -> URL {
-        // URL は固定形式のため force unwrap は安全
-        URL(string: "https://static-cdn.jtvnw.net/emoticons/v2/\(emoteId)/\(type)/dark/\(scale)")!
+        // emoteId を URL パスコンポーネントとして安全にエンコード
+        let encodedId = emoteId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? emoteId
+        // Twitch の emoteId は常に数値文字列のため URL 構築は必ず成功する
+        return URL(string: "https://static-cdn.jtvnw.net/emoticons/v2/\(encodedId)/\(type)/dark/\(scale)")!
     }
 
     // MARK: - プライベートメソッド

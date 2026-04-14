@@ -55,10 +55,10 @@ struct EmoteImageCacheTests {
 
     // MARK: - 表示サイズ
 
-    @Test("エモート表示サイズが正の値である")
-    func エモート表示サイズが正の値である() {
-        // 前提: 13pt フォントに合わせたエモート表示サイズ
-        // 検証: 0 より大きい CGFloat 値が定義されている
-        #expect(EmoteImageCache.emoteDisplaySize > 0)
+    @Test("エモート表示サイズが 20pt である")
+    func エモート表示サイズが20ptである() {
+        // 前提: 13pt フォントの行高に合わせてエモート表示サイズは 20pt と定義されている
+        // 検証: 定数が 20pt であることを確認（リグレッション防止）
+        #expect(EmoteImageCache.emoteDisplaySize == 20)
     }
 }
