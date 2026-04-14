@@ -174,4 +174,16 @@ struct ChatMessageTests {
         let chatMessage = ChatMessage(from: ircMessage)
         #expect(chatMessage?.roomId == nil)
     }
+
+    @Test("room-id タグが空文字の場合は roomId が nil になる")
+    func roomIdタグが空文字の場合はnilになる() {
+        let rawMessage = "@room-id=;display-name=視聴者 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #haishinsha :こんにちは！"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage?.roomId == nil)
+    }
 }

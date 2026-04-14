@@ -60,6 +60,12 @@ final class ChatViewModel {
     /// バッジ定義ストア（View からバッジ画像URLの解決に使用）
     let badgeStore = BadgeStore()
 
+    /// グローバルバッジフェッチタスク（切断時にキャンセル）
+    private var globalBadgeFetchTask: Task<Void, Never>?
+
+    /// チャンネルバッジフェッチタスク（切断時にキャンセル）
+    private var channelBadgeFetchTask: Task<Void, Never>?
+
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false
 
@@ -85,8 +91,8 @@ final class ChatViewModel {
         messages = []
         channelBadgesFetched = false
 
-        // グローバルバッジ定義を並行フェッチ
-        Task { await badgeStore.fetchGlobalBadges() }
+        // グローバルバッジ定義を並行フェッチ（切断時にキャンセルできるよう保持）
+        globalBadgeFetchTask = Task { await badgeStore.fetchGlobalBadges() }
 
         receiveTask = Task { [weak self] in
             // メッセージ受信ループを別タスクで開始
@@ -111,6 +117,8 @@ final class ChatViewModel {
     /// チャンネルから切断する
     func disconnect() async {
         receiveTask?.cancel()
+        globalBadgeFetchTask?.cancel()
+        channelBadgeFetchTask?.cancel()
         await ircClient.disconnect()
         connectionState = .disconnected
     }
@@ -119,10 +127,10 @@ final class ChatViewModel {
 
     /// メッセージをリストに追加し、上限を超えた場合は古いものを削除する
     private func appendMessage(_ message: ChatMessage) {
-        // 最初の room-id 取得時にチャンネルバッジをフェッチ
+        // 最初の room-id 取得時にチャンネルバッジをフェッチ（切断時にキャンセルできるよう保持）
         if !channelBadgesFetched, let roomId = message.roomId {
             channelBadgesFetched = true
-            Task { await badgeStore.fetchChannelBadges(channelId: roomId) }
+            channelBadgeFetchTask = Task { await badgeStore.fetchChannelBadges(channelId: roomId) }
         }
         messages.append(message)
         if messages.count > Self.maxMessages {

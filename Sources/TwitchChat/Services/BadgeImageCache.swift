@@ -4,6 +4,7 @@
 
 import AppKit
 import Foundation
+import os
 
 /// Twitch バッジ画像のキャッシュ管理クラス
 ///
@@ -33,6 +34,9 @@ final class BadgeImageCache: @unchecked Sendable {
 
     /// inFlightTasks へのアクセスを保護するロック
     private let lock = NSLock()
+
+    /// バッジ画像取得失敗時のログ出力に使用するロガー
+    private let logger = Logger(subsystem: "dev.mtane.TwitchChat", category: "BadgeImageCache")
 
     private init() {}
 
@@ -89,11 +93,25 @@ final class BadgeImageCache: @unchecked Sendable {
 
     /// 指定 URL から画像をダウンロードする
     private func download(from url: URL) async -> NSImage? {
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
-              let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200,
-              let image = NSImage(data: data) else { return nil }
-        return image
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                logger.warning("バッジ画像レスポンスが HTTPURLResponse でない: \(url)")
+                return nil
+            }
+            guard httpResponse.statusCode == 200 else {
+                logger.warning("バッジ画像取得 HTTP \(httpResponse.statusCode): \(url)")
+                return nil
+            }
+            guard let image = NSImage(data: data) else {
+                logger.warning("バッジ画像データを NSImage に変換できない: \(url)")
+                return nil
+            }
+            return image
+        } catch {
+            logger.warning("バッジ画像ダウンロード失敗: \(url) - \(error)")
+            return nil
+        }
     }
 
     /// 画像をキャッシュに保存し、表示サイズを設定する

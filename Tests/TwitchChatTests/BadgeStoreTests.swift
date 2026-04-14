@@ -103,4 +103,52 @@ struct BadgeStoreTests {
         #expect(mapping["moderator"]?["1"] == "https://example.com/moderator.png")
         #expect(mapping["invalid"] == nil)
     }
+
+    @Test("バッジ定義が未設定の場合はnilを返す")
+    func testImageURLReturnsNilWhenNoBadgesSet() async {
+        let store = BadgeStore()
+        // setGlobalBadges/setChannelBadges を呼ばない状態
+        let badge = Badge(name: "broadcaster", version: "1")
+        let url = await store.imageURL(for: badge)
+        #expect(url == nil)
+    }
+
+    @Test("空のバッジ名でも安全にnilを返す")
+    func testEmptyBadgeNameReturnsNil() async {
+        let store = BadgeStore()
+        await store.setGlobalBadges(["broadcaster": ["1": "https://example.com/badge.png"]])
+        let emptyNameBadge = Badge(name: "", version: "1")
+        let url = await store.imageURL(for: emptyNameBadge)
+        #expect(url == nil)
+    }
+
+    @Test("空のバージョンでも安全にnilを返す")
+    func testEmptyVersionReturnsNil() async {
+        let store = BadgeStore()
+        await store.setGlobalBadges(["broadcaster": ["1": "https://example.com/badge.png"]])
+        let emptyVersionBadge = Badge(name: "broadcaster", version: "")
+        let url = await store.imageURL(for: emptyVersionBadge)
+        #expect(url == nil)
+    }
+
+    @Test("並行アクセスしても安全に動作する")
+    func testConcurrentAccessIsSafe() async {
+        let store = BadgeStore()
+        // 複数タスクが並行して読み書きしてもクラッシュしないことを確認
+        await withTaskGroup(of: Void.self) { group in
+            for i in 0..<10 {
+                group.addTask {
+                    await store.setGlobalBadges(
+                        ["broadcaster": ["1": "https://example.com/badge-\(i).png"]]
+                    )
+                }
+                group.addTask {
+                    _ = await store.imageURL(for: Badge(name: "broadcaster", version: "1"))
+                }
+            }
+        }
+        // 全タスク完了後に結果が一貫していることを確認
+        let url = await store.imageURL(for: Badge(name: "broadcaster", version: "1"))
+        #expect(url != nil)
+    }
 }

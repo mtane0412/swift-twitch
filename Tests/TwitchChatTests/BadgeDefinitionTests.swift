@@ -34,13 +34,16 @@ struct BadgeDefinitionTests {
         let response = try JSONDecoder().decode(GQLBadgesResponse.self, from: data)
 
         #expect(response.data.badges.count == 2)
+        // id フィールドが正しくデコードされていることを確認
+        #expect(response.data.badges[0].id == "YnJvYWRjYXN0ZXI7MTs=")
         #expect(response.data.badges[0].title == "Broadcaster")
         #expect(response.data.badges[0].imageURL == "https://static-cdn.jtvnw.net/badges/v1/abc123/2")
+        #expect(response.data.badges[1].id == "bW9kZXJhdG9yOzE7")
         #expect(response.data.badges[1].title == "Moderator")
     }
 
     @Test("GQLバッジのbase64 IDから名前とバージョンを抽出できる")
-    func testDecodeGQLBadgeID() throws {
+    func testDecodeGQLBadgeID() {
         // "broadcaster;1;" の base64
         let broadcasterBadge = GQLBadgeItem(
             id: "YnJvYWRjYXN0ZXI7MTs=",
@@ -53,7 +56,7 @@ struct BadgeDefinitionTests {
     }
 
     @Test("チャンネル固有バッジのbase64 IDから名前とバージョンを抽出できる")
-    func testDecodeChannelBadgeID() throws {
+    func testDecodeChannelBadgeID() {
         // "subscriber;0;37402112" の base64
         let subscriberBadge = GQLBadgeItem(
             id: "c3Vic2NyaWJlcjswOzM3NDAyMTEy",
@@ -108,8 +111,23 @@ struct BadgeDefinitionTests {
         let data = Data(json.utf8)
         let response = try JSONDecoder().decode(GQLChannelBadgesResponse.self, from: data)
 
-        #expect(response.data.user.broadcastBadges.count == 1)
-        #expect(response.data.user.broadcastBadges[0].imageURL == "https://static-cdn.jtvnw.net/badges/v1/xyz789/2")
+        #expect(response.data.user?.broadcastBadges.count == 1)
+        #expect(response.data.user?.broadcastBadges[0].imageURL == "https://static-cdn.jtvnw.net/badges/v1/xyz789/2")
+    }
+
+    @Test("user が null のチャンネルバッジレスポンスをデコードできる")
+    func testDecodeChannelBadgesResponseWithNullUser() throws {
+        let json = """
+        {
+            "data": {
+                "user": null
+            }
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(GQLChannelBadgesResponse.self, from: data)
+
+        #expect(response.data.user == nil)
     }
 
     @Test("バッジが0件のレスポンスをデコードできる")

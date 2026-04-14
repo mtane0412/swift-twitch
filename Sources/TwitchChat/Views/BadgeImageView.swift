@@ -32,6 +32,8 @@ struct BadgeImageView: View {
             }
         }
         .task(id: badge.name + "/" + badge.version) {
+            // タスク再実行時に古い画像をクリアしてフォールバックを表示してから再取得する
+            badgeImage = nil
             badgeImage = await BadgeImageCache.shared.image(for: badge, store: store)
         }
     }

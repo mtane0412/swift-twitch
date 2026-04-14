@@ -13,6 +13,7 @@ typealias BadgeURLMapping = [String: [String: String]]
 /// - グローバルバッジ（broadcaster, moderator, vip 等）は接続時に1回フェッチ
 /// - チャンネルバッジ（subscriber 等の独自アート）は room-id 取得後にフェッチ
 /// - imageURL(for:) はチャンネルバッジを優先し、なければグローバルにフォールバック
+/// - 並行フェッチの重複実行を Task-based deduplication で防止
 actor BadgeStore {
 
     // MARK: - 定数
@@ -22,6 +23,9 @@ actor BadgeStore {
 
     /// Twitch GQL Client-ID（公開クライアントID）
     private static let gqlClientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+
+    /// GQL リクエストのタイムアウト秒数
+    private static let requestTimeout: TimeInterval = 10
 
     // MARK: - 状態
 
@@ -34,31 +38,48 @@ actor BadgeStore {
     /// グローバルバッジ取得済みフラグ
     private var isGlobalLoaded = false
 
+    /// 進行中のグローバルバッジフェッチタスク（並行重複排除用）
+    private var globalBadgesTask: Task<Void, Never>?
+
     // MARK: - 公開メソッド
 
     /// グローバルバッジ定義をフェッチする
     ///
-    /// 二重フェッチを防止するため、取得済みの場合はスキップする
+    /// 並行して複数回呼ばれた場合でも、ネットワークリクエストは1回のみ実行される
     func fetchGlobalBadges() async {
         guard !isGlobalLoaded else { return }
-        guard let response = try? await fetchGQL(
-            query: "{ badges { id title imageURL(size: DOUBLE) } }",
-            responseType: GQLBadgesResponse.self
-        ) else { return }
-        globalBadges = Self.buildMapping(from: response.data.badges)
-        isGlobalLoaded = true
+        // 進行中タスクがあれば完了を待って返す（TOCTOU 防止）
+        if let existing = globalBadgesTask {
+            await existing.value
+            return
+        }
+        let task = Task {
+            if let response = try? await self.fetchGQL(
+                query: "{ badges { id title imageURL(size: DOUBLE) } }",
+                responseType: GQLBadgesResponse.self
+            ) {
+                self.globalBadges = Self.buildMapping(from: response.data.badges)
+                self.isGlobalLoaded = true
+            }
+        }
+        globalBadgesTask = task
+        await task.value
+        globalBadgesTask = nil
     }
 
     /// チャンネルバッジ定義をフェッチする
     ///
-    /// - Parameter channelId: Twitch チャンネルID（IRCの room-id タグの値）
+    /// - Parameter channelId: Twitch チャンネルID（IRCの room-id タグの値、数字のみ）
     func fetchChannelBadges(channelId: String) async {
+        // Twitch の room-id は数字のみで構成される（GQL injection 対策）
+        guard !channelId.isEmpty, channelId.allSatisfy(\.isNumber) else { return }
         let query = "{ user(id: \"\(channelId)\") { broadcastBadges { id title imageURL(size: DOUBLE) } } }"
         guard let response = try? await fetchGQL(
             query: query,
             responseType: GQLChannelBadgesResponse.self
-        ) else { return }
-        channelBadges = Self.buildMapping(from: response.data.user.broadcastBadges)
+        ),
+        let userBadges = response.data.user else { return }
+        channelBadges = Self.buildMapping(from: userBadges.broadcastBadges)
     }
 
     /// バッジの画像 URL を解決する
@@ -76,6 +97,7 @@ actor BadgeStore {
 
     // MARK: - テスト用メソッド
 
+#if DEBUG
     /// グローバルバッジのURLマッピングを直接設定する（テスト用）
     func setGlobalBadges(_ mapping: BadgeURLMapping) {
         globalBadges = mapping
@@ -86,6 +108,7 @@ actor BadgeStore {
     func setChannelBadges(_ mapping: BadgeURLMapping) {
         channelBadges = mapping
     }
+#endif
 
     // MARK: - 静的ユーティリティ
 
@@ -107,12 +130,24 @@ actor BadgeStore {
 
     // MARK: - プライベートメソッド
 
+    /// GQL レスポンスのエラー情報を保持する内部型
+    private struct GQLErrorContainer: Decodable {
+        struct GQLError: Decodable {
+            let message: String
+        }
+        let errors: [GQLError]?
+    }
+
     /// GQL リクエストを送信して結果をデコードする
+    ///
+    /// - タイムアウト: `requestTimeout` 秒
+    /// - GQL レベルのエラーが含まれている場合は `URLError(.badServerResponse)` をスロー
     private func fetchGQL<T: Decodable>(query: String, responseType: T.Type) async throws -> T {
         var request = URLRequest(url: Self.gqlEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(Self.gqlClientID, forHTTPHeaderField: "Client-Id")
+        request.timeoutInterval = Self.requestTimeout
 
         let body = ["query": query]
         request.httpBody = try JSONEncoder().encode(body)
@@ -122,6 +157,13 @@ actor BadgeStore {
               httpResponse.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
+
+        // GQL レベルのエラーチェック（data フィールドが正常でも errors が含まれる場合がある）
+        if let errorContainer = try? JSONDecoder().decode(GQLErrorContainer.self, from: data),
+           let errors = errorContainer.errors, !errors.isEmpty {
+            throw URLError(.badServerResponse)
+        }
+
         return try JSONDecoder().decode(T.self, from: data)
     }
 }

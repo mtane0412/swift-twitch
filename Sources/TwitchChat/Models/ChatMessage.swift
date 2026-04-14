@@ -86,9 +86,9 @@ struct ChatMessage: Sendable, Identifiable {
             ? ircMessage.tags["display-name"]!
             : username
         self.text = text
-        self.colorHex = ircMessage.tags["color"]?.isEmpty == false ? ircMessage.tags["color"] : nil
+        self.colorHex = ircMessage.tags["color"].flatMap { $0.isEmpty ? nil : $0 }
         self.badges = Badge.parse(ircMessage.tags["badges"] ?? "")
-        self.roomId = ircMessage.tags["room-id"]?.isEmpty == false ? ircMessage.tags["room-id"] : nil
+        self.roomId = ircMessage.tags["room-id"].flatMap { $0.isEmpty ? nil : $0 }
         let parsedEmotes = EmoteParser.parse(ircMessage.tags["emotes"] ?? "")
         self.emotes = parsedEmotes
         self.segments = MessageSegment.segments(from: text, emotePositions: parsedEmotes)

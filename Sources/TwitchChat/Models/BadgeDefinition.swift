@@ -24,8 +24,10 @@ struct GQLChannelBadgesResponse: Decodable, Sendable {
 }
 
 /// GQL チャンネルバッジデータ
+///
+/// GQL の `user(id:)` フィールドは存在しないユーザーIDの場合に null を返すため Optional
 struct GQLChannelBadgesData: Decodable, Sendable {
-    let user: GQLUserBadges
+    let user: GQLUserBadges?
 }
 
 /// GQL ユーザーのバッジ情報
