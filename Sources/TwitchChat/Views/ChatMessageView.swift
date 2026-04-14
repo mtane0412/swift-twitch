@@ -36,7 +36,7 @@ struct ChatMessageView: View {
                     .foregroundStyle(usernameColor)
                     + Text(": ")
                     .foregroundStyle(.secondary))
-                    .fixedSize()
+                    .fixedSize(horizontal: false, vertical: true)
 
                 // メッセージ本文のセグメント
                 // segments は message 生成後に変更されないため、インデックスを安定 ID として使用する

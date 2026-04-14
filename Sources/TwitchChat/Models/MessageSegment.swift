@@ -77,6 +77,9 @@ extension MessageSegment {
             }
         }
 
+        // 全エモートがスキップされた場合のフォールバック
+        if result.isEmpty { return [.text(text)] }
+
         return result
     }
 }

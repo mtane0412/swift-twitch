@@ -113,10 +113,13 @@ final class EmoteImageCache: @unchecked Sendable {
     ///   - scale: 画像スケール（デフォルト: `"2.0"`。Retina ディスプレイ対応）
     /// - Returns: 画像取得用 URL
     static func emoteURL(emoteId: String, type: String = "default", scale: String = "2.0") -> URL {
-        // emoteId を URL パスコンポーネントとして安全にエンコード
-        let encodedId = emoteId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? emoteId
-        // Twitch の emoteId は常に数値文字列のため URL 構築は必ず成功する
-        return URL(string: "https://static-cdn.jtvnw.net/emoticons/v2/\(encodedId)/\(type)/dark/\(scale)")!
+        // URLComponents でパスコンポーネントを安全にパーセントエンコードする
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "static-cdn.jtvnw.net"
+        components.path = "/emoticons/v2/\(emoteId)/\(type)/dark/\(scale)"
+        // emoteId は数値文字列、type・scale は固定値のため URL 構築は常に成功する
+        return components.url!
     }
 
     // MARK: - プライベートメソッド

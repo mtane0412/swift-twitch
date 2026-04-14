@@ -92,10 +92,15 @@ struct FlowLayout: Layout {
         var lineHeight: CGFloat = 0
         var currentRow = 0
         var rowHeights: [CGFloat] = []
+        // 実際に使用した最大幅（maxWidth が .infinity の場合の totalSize 計算に使用）
+        var maxUsedWidth: CGFloat = 0
 
         for subview in subviews {
-            // 子ビューの理想サイズを取得
-            let size = subview.sizeThatFits(.unspecified)
+            // 子ビューのサイズを取得（テキストが折り返せるよう利用可能幅を伝える）
+            let proposal = maxWidth.isInfinite
+                ? ProposedViewSize.unspecified
+                : ProposedViewSize(width: maxWidth, height: nil)
+            let size = subview.sizeThatFits(proposal)
 
             // 現在行にはみ出す場合、かつ行頭でない場合は改行
             if currentX > 0 && currentX + size.width > maxWidth {
@@ -111,6 +116,8 @@ struct FlowLayout: Layout {
             sizes.append(size)
             rowIndices.append(currentRow)
 
+            // 実際に使用した幅を追跡（trailing spacing は含めない）
+            maxUsedWidth = max(maxUsedWidth, currentX + size.width)
             currentX += size.width + horizontalSpacing
             lineHeight = max(lineHeight, size.height)
         }
@@ -119,7 +126,9 @@ struct FlowLayout: Layout {
         rowHeights.append(lineHeight)
 
         let totalHeight = currentY + lineHeight
-        let totalSize = CGSize(width: maxWidth, height: max(totalHeight, 0))
+        // maxWidth が .infinity の場合は実際の使用幅を返す（.infinity を返すと SwiftUI のレイアウトが壊れる）
+        let totalWidth = maxWidth.isInfinite ? maxUsedWidth : maxWidth
+        let totalSize = CGSize(width: max(totalWidth, 0), height: max(totalHeight, 0))
 
         return LayoutResult(
             origins: origins,
