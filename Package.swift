@@ -10,6 +10,10 @@ let package = Package(
     platforms: [
         .macOS(.v15)
     ],
+    dependencies: [
+        // Swift Testing フレームワーク（CommandLineTools 環境でのテスト実行に使用）
+        .package(url: "https://github.com/swiftlang/swift-testing.git", branch: "main")
+    ],
     targets: [
         .executableTarget(
             name: "TwitchChat",
@@ -17,22 +21,16 @@ let package = Package(
         ),
         .testTarget(
             name: "TwitchChatTests",
-            dependencies: ["TwitchChat"],
-            path: "Tests/TwitchChatTests",
-            swiftSettings: [
-                // CommandLineTools 環境での Testing フレームワーク参照
-                .unsafeFlags([
-                    "-F",
-                    "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
-                ])
+            dependencies: [
+                "TwitchChat",
+                .product(name: "Testing", package: "swift-testing")
             ],
+            path: "Tests/TwitchChatTests",
             linkerSettings: [
+                // CommandLineTools 環境で lib_TestingInterop を見つけるためのパス設定
                 .unsafeFlags([
-                    "-F",
-                    "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
-                    "-framework", "Testing",
-                    "-Xlinker", "-rpath",
-                    "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-L",
+                    "/Library/Developer/CommandLineTools/Library/Developer/usr/lib",
                     "-Xlinker", "-rpath",
                     "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
                 ])
