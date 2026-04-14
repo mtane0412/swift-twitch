@@ -41,6 +41,8 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
     private let webSocketClient: any WebSocketClientProtocol
     private var messageContinuation: AsyncStream<ChatMessage>.Continuation?
+    /// 受信ループのタスク（disconnect() でキャンセルするために保持）
+    private var receiveLoopTask: Task<Void, Never>?
 
     /// 受信した ChatMessage を配信する AsyncStream
     let messageStream: AsyncStream<ChatMessage>
@@ -67,13 +69,16 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         let normalizedChannel = channel.lowercased()
         try await webSocketClient.connect(to: Self.websocketURL)
         try await sendAuthSequence(channel: normalizedChannel)
-        await receiveLoop()
+        // receiveLoop を別タスクで起動し、connect() がブロックされないようにする
+        receiveLoopTask = Task { await receiveLoop() }
     }
 
     /// IRC 接続を切断する
     func disconnect() async {
+        receiveLoopTask?.cancel()
+        receiveLoopTask = nil
         await webSocketClient.disconnect()
-        messageContinuation?.finish()
+        // messageContinuation?.finish() を呼ばない → 再接続時に同じストリームを再利用できる
     }
 
     // MARK: - プライベートメソッド

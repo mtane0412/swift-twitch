@@ -78,12 +78,14 @@ final class ChatViewModel {
         connectionState = .connecting
         messages = []
 
-        receiveTask = Task {
+        receiveTask = Task { [weak self] in
             // メッセージ受信ループを別タスクで開始
-            let stream = await ircClient.messageStream
+            // weak self で循環参照を回避する
+            guard let self else { return }
+            let stream = await self.ircClient.messageStream
             for await message in stream {
                 guard !Task.isCancelled else { break }
-                appendMessage(message)
+                self.appendMessage(message)
             }
         }
 

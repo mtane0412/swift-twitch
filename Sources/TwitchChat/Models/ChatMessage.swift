@@ -66,8 +66,8 @@ struct ChatMessage: Sendable, Identifiable {
               let text = ircMessage.trailing,
               let rawPrefix = ircMessage.prefix else { return nil }
 
-        // プレフィックス "nick!user@host" から nick 部分を抽出
-        let username = String(rawPrefix.split(separator: "!").first ?? Substring(rawPrefix))
+        // プレフィックス "nick!user@host" から nick 部分を抽出し小文字に正規化
+        let username = String(rawPrefix.split(separator: "!").first ?? Substring(rawPrefix)).lowercased()
 
         self.id = ircMessage.tags["id"] ?? UUID().uuidString
         self.username = username

@@ -26,8 +26,9 @@ protocol WebSocketClientProtocol: Sendable {
 
 /// URLSessionWebSocketTask を使った WebSocket クライアント実装
 ///
+/// actor を使用してスレッドセーフな状態管理を実現する
 /// - Note: macOS 15+ の URLSession WebSocket API を使用する
-final class URLSessionWebSocketClient: WebSocketClientProtocol, @unchecked Sendable {
+actor URLSessionWebSocketClient: WebSocketClientProtocol {
     private let session: URLSession
     private var task: URLSessionWebSocketTask?
 

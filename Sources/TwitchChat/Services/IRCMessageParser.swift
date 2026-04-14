@@ -63,8 +63,9 @@ enum IRCMessageParser {
     /// - Returns: キーと値のディクショナリ
     private static func parseTags(_ tagsString: String) -> [String: String] {
         var result: [String: String] = [:]
-        let pairs = tagsString.split(separator: ";", omittingEmptySubsequences: false)
+        let pairs = tagsString.split(separator: ";", omittingEmptySubsequences: true)
         for pair in pairs {
+            guard !pair.isEmpty else { continue }
             let keyValue = pair.split(separator: "=", maxSplits: 1)
             let key = String(keyValue[0])
             let value = keyValue.count > 1 ? unescapeTagValue(String(keyValue[1])) : ""
