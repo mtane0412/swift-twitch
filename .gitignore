@@ -3,3 +3,4 @@
 *.xcworkspace/
 .DS_Store
 Package.resolved
+.swiftpm/xcode/xcuserdata/
