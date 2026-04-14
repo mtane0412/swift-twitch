@@ -4,6 +4,20 @@
 
 import Foundation
 
+/// Twitch IRC クライアントの抽象化プロトコル
+///
+/// ViewModel がこのプロトコルに依存することで、テスト時にモックへの差し替えが可能になる
+protocol TwitchIRCClientProtocol: Actor {
+    /// 受信した ChatMessage を配信する AsyncStream
+    var messageStream: AsyncStream<ChatMessage> { get }
+
+    /// 指定チャンネルに接続する
+    func connect(to channel: String) async throws
+
+    /// IRC 接続を切断する
+    func disconnect() async
+}
+
 /// Twitch IRC クライアント
 ///
 /// Twitch IRC WebSocket サーバーに匿名接続し、チャットメッセージを AsyncStream で配信する
@@ -16,7 +30,7 @@ import Foundation
 /// }
 /// try await client.connect(to: "channelname")
 /// ```
-actor TwitchIRCClient {
+actor TwitchIRCClient: TwitchIRCClientProtocol {
     // MARK: - 定数
 
     private static let websocketURL = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
