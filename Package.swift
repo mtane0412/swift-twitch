@@ -17,7 +17,16 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "TwitchChat",
-            path: "Sources/TwitchChat"
+            path: "Sources/TwitchChat",
+            linkerSettings: [
+                // Info.plist をバイナリに埋め込み、macOS が GUI アプリとして認識できるようにする
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/TwitchChat/Info.plist"
+                ])
+            ]
         ),
         .testTarget(
             name: "TwitchChatTests",
