@@ -135,7 +135,8 @@ public final class AuthState {
             // ユーザーが認証するまでポーリング
             let tokenResponse = try await authClient.pollForToken(
                 deviceCode: deviceResponse.deviceCode,
-                interval: deviceResponse.interval
+                interval: deviceResponse.interval,
+                expiresIn: deviceResponse.expiresIn
             )
             let validateResponse = try await authClient.validateToken(accessToken: tokenResponse.accessToken)
 
@@ -154,9 +155,14 @@ public final class AuthState {
         } catch TwitchAuthError.userCancelled {
             // ユーザーが認証を拒否した場合はログアウト状態に戻す
             deviceFlowInfo = nil
+            await keychainStore.deleteAll()
+            accessToken = nil
             status = .loggedOut
         } catch {
+            // 途中で保存されたトークンをロールバックして不整合を防ぐ
             deviceFlowInfo = nil
+            await keychainStore.deleteAll()
+            accessToken = nil
             loginError = error.localizedDescription
             status = .loggedOut
         }
@@ -176,7 +182,7 @@ public final class AuthState {
     /// アクセストークンを Twitch サーバーで失効させ、Keychain からすべてのトークンを削除する
     func logout() async {
         if let token = accessToken {
-            try? await authClient.revokeToken(accessToken: token)
+            await authClient.revokeToken(accessToken: token)
         }
         await keychainStore.deleteAll()
         accessToken = nil
@@ -207,6 +213,9 @@ public final class AuthState {
     /// リフレッシュトークンで新しいアクセストークンを取得する
     private func tryRefreshToken() async {
         guard let refreshTokenValue = await keychainStore.load(key: "refresh_token") else {
+            // リフレッシュトークンがない場合は認証情報を破棄してログアウト
+            await keychainStore.deleteAll()
+            accessToken = nil
             status = .loggedOut
             return
         }

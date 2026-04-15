@@ -76,7 +76,7 @@ struct LoginView: View {
     private func deviceFlowView(_ deviceFlow: DeviceFlowInfo) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("twitch.tv/activate でコードを入力:")
+                Text("\(deviceFlow.verificationUri) でコードを入力:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(deviceFlow.userCode)

@@ -14,7 +14,6 @@ struct KeychainStoreTests {
     func アクセストークンを保存して取得できる() async throws {
         // テストごとに一意のサービス名を使用して Keychain の干渉を防ぐ
         let store = KeychainStore(service: "com.test.KeychainStore.save")
-        defer { Task { await store.deleteAll() } }
 
         // 保存
         try await store.save(key: "access_token", value: "テスト用アクセストークン1234")
@@ -22,6 +21,9 @@ struct KeychainStoreTests {
         // 取得できることを確認
         let loaded = await store.load(key: "access_token")
         #expect(loaded == "テスト用アクセストークン1234")
+
+        // テスト後に Keychain をクリーンアップ
+        await store.deleteAll()
     }
 
     @Test("存在しないキーを取得するとnilを返す")
@@ -35,7 +37,6 @@ struct KeychainStoreTests {
     @Test("同じキーで保存すると値が上書きされる")
     func 同じキーで保存すると値が上書きされる() async throws {
         let store = KeychainStore(service: "com.test.KeychainStore.overwrite")
-        defer { Task { await store.deleteAll() } }
 
         // 初回保存
         try await store.save(key: "refresh_token", value: "古いリフレッシュトークン")
@@ -45,6 +46,9 @@ struct KeychainStoreTests {
         // 最新の値が取得できることを確認
         let loaded = await store.load(key: "refresh_token")
         #expect(loaded == "新しいリフレッシュトークン")
+
+        // テスト後に Keychain をクリーンアップ
+        await store.deleteAll()
     }
 
     // MARK: - delete

@@ -104,14 +104,18 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     ///   - accessToken: OAuth アクセストークン（`nil` の場合は匿名接続）
     ///   - userLogin: ログインユーザー名（`accessToken` 指定時に使用）
     private func sendAuthSequence(channel: String, accessToken: String?, userLogin: String?) async throws {
-        if let token = accessToken, let login = userLogin {
+        switch (accessToken, userLogin) {
+        case let (.some(token), .some(login)):
             // 認証接続: PASS oauth:<token> + NICK <userLogin>
             try await webSocketClient.send("PASS oauth:\(token)")
             try await webSocketClient.send("NICK \(login)")
-        } else {
+        case (.none, .none):
             // 匿名接続: justinfan 方式（読み取り専用）
             try await webSocketClient.send("PASS \(Self.anonymousPassword)")
             try await webSocketClient.send("NICK \(Self.anonymousNick)")
+        default:
+            // 片方だけ指定された不整合状態は早期失敗させる
+            throw TwitchIRCClientError.invalidAuthParameters
         }
         try await webSocketClient.send("CAP REQ :twitch.tv/tags twitch.tv/commands")
         try await webSocketClient.send("JOIN #\(channel)")
@@ -155,6 +159,21 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
         default:
             break
+        }
+    }
+}
+
+// MARK: - エラー定義
+
+/// TwitchIRCClient のエラー
+enum TwitchIRCClientError: Error, LocalizedError {
+    /// accessToken と userLogin の指定が不整合（片方のみ指定された場合）
+    case invalidAuthParameters
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidAuthParameters:
+            return "accessToken と userLogin はどちらも指定するか、どちらも省略してください"
         }
     }
 }

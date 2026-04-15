@@ -85,5 +85,39 @@ struct TwitchAuthClientTests {
         await #expect(throws: TwitchAuthError.networkError) {
             _ = try await mockClient.validateToken(accessToken: "トークン")
         }
+        await #expect(throws: TwitchAuthError.networkError) {
+            _ = try await mockClient.refreshToken(refreshToken: "リフレッシュトークン")
+        }
+    }
+
+    @Test("モッククライアントはリフレッシュトークンで新しいアクセストークンを返す")
+    @MainActor
+    func モッククライアントはリフレッシュトークンで新しいアクセストークンを返す() async throws {
+        // リフレッシュ後に返すトークンレスポンスを設定
+        let mockClient = MockTwitchAuthClient(
+            tokenResponse: TwitchTokenResponse(
+                accessToken: "新しいアクセストークン",
+                refreshToken: "新しいリフレッシュトークン",
+                expiresIn: 14400,
+                tokenType: "bearer",
+                scope: ["chat:read"]
+            )
+        )
+
+        let response = try await mockClient.refreshToken(refreshToken: "古いリフレッシュトークン")
+
+        #expect(response.accessToken == "新しいアクセストークン")
+        #expect(response.refreshToken == "新しいリフレッシュトークン")
+    }
+
+    @Test("revokeToken を呼び出しても例外は発生しない")
+    @MainActor
+    func revokeTokenを呼び出しても例外は発生しない() async {
+        let mockClient = MockTwitchAuthClient()
+
+        // revokeToken は non-throwing のため、呼び出してもクラッシュしないことを確認
+        await mockClient.revokeToken(accessToken: "失効対象アクセストークン")
+
+        #expect(mockClient.revokeCallCount == 1)
     }
 }

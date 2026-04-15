@@ -24,7 +24,6 @@ struct AuthStateTests {
     @Test("保存済みの有効なトークンがある場合はログイン状態に復元される")
     func 保存済みの有効なトークンがある場合はログイン状態に復元される() async throws {
         let store = makeTestKeychainStore()
-        defer { Task { await store.deleteAll() } }
 
         // アクセストークン・ユーザー情報を事前保存
         try await store.save(key: "access_token", value: "保存済みアクセストークン")
@@ -48,50 +47,50 @@ struct AuthStateTests {
         // ログイン状態に復元されることを確認
         #expect(authState.status == .loggedIn(userLogin: "テスト配信者"))
         #expect(authState.accessToken == "保存済みアクセストークン")
+
+        await store.deleteAll()
     }
 
     @Test("保存済みトークンが期限切れの場合はリフレッシュしてログイン状態に復元される")
     func 保存済みトークンが期限切れの場合はリフレッシュしてログイン状態に復元される() async throws {
         let store = makeTestKeychainStore()
-        defer { Task { await store.deleteAll() } }
 
         try await store.save(key: "access_token", value: "期限切れアクセストークン")
         try await store.save(key: "refresh_token", value: "有効なリフレッシュトークン")
         try await store.save(key: "user_login", value: "テスト配信者")
 
-        let mockClient = MockTwitchAuthClient()
-        // validateToken は tokenExpired を返し、refreshToken は新しいトークンを返す
-        mockClient.errorToThrow = TwitchAuthError.tokenExpired
+        // validateToken は最初の呼び出しで tokenExpired を返すモックを設定
+        // refreshToken 後の validateToken は成功するよう別途設定する
+        let mockClient = MockTwitchAuthClientWithFirstCallExpiry(
+            refreshResponse: TwitchTokenResponse(
+                accessToken: "新しいアクセストークン",
+                refreshToken: "新しいリフレッシュトークン",
+                expiresIn: 14400,
+                tokenType: "bearer",
+                scope: ["chat:read"]
+            ),
+            validateResponse: TwitchValidateResponse(
+                clientId: "testclientid",
+                login: "テスト配信者",
+                userId: "12345678",
+                scopes: ["chat:read"],
+                expiresIn: 14400
+            )
+        )
         let authState = makeAuthState(authClient: mockClient, keychainStore: store)
 
-        // 1. 検証でエラー → 自動リフレッシュ試行
-        // リフレッシュ後は有効なトークンが返るよう設定
-        mockClient.errorToThrow = nil
-        mockClient.tokenResponse = TwitchTokenResponse(
-            accessToken: "新しいアクセストークン",
-            refreshToken: "新しいリフレッシュトークン",
-            expiresIn: 14400,
-            tokenType: "bearer",
-            scope: ["chat:read"]
-        )
-        mockClient.validateResponse = TwitchValidateResponse(
-            clientId: "testclientid",
-            login: "テスト配信者",
-            userId: "12345678",
-            scopes: ["chat:read"],
-            expiresIn: 14400
-        )
-
-        // validateToken を期限切れにし、その後リフレッシュに成功するシナリオ
-        // Note: このテストはリフレッシュ後の状態を確認する
+        // restoreSession: 保存済みトークンを検証 → 期限切れ → リフレッシュ → 新しいトークンで再検証
         await authState.restoreSession()
 
-        // ログイン状態になることを確認（リフレッシュ成功）
-        if case .loggedIn = authState.status {
-            // 成功
-        } else {
-            // リフレッシュが期待通り動作していない
-        }
+        // リフレッシュ成功によりログイン状態に復元されることを確認
+        #expect(authState.status == AuthStatus.loggedIn(userLogin: "テスト配信者"))
+        #expect(authState.accessToken == "新しいアクセストークン")
+
+        // Keychain に新しいトークンが保存されることを確認
+        #expect(await store.load(key: "access_token") == "新しいアクセストークン")
+        #expect(await store.load(key: "refresh_token") == "新しいリフレッシュトークン")
+
+        await store.deleteAll()
     }
 
     @Test("保存済みトークンがない場合はログアウト状態になる")
@@ -111,7 +110,6 @@ struct AuthStateTests {
     @Test("ログインが成功するとログイン状態に遷移しトークンが保存される")
     func ログインが成功するとログイン状態に遷移しトークンが保存される() async throws {
         let store = makeTestKeychainStore()
-        defer { Task { await store.deleteAll() } }
 
         // デバイスコード → トークン → 検証 の順に成功するモックを設定
         let mockClient = MockTwitchAuthClient(
@@ -150,6 +148,8 @@ struct AuthStateTests {
         #expect(await store.load(key: "refresh_token") == "テスト用リフレッシュトークン")
         // deviceFlowInfo はログイン完了後にクリアされることを確認
         #expect(authState.deviceFlowInfo == nil)
+
+        await store.deleteAll()
     }
 
     @Test("デバイスコード取得でエラーが発生した場合はログアウト状態になる")
@@ -197,7 +197,6 @@ struct AuthStateTests {
     @Test("ログアウトするとトークンが削除されてログアウト状態になる")
     func ログアウトするとトークンが削除されてログアウト状態になる() async throws {
         let store = makeTestKeychainStore()
-        defer { Task { await store.deleteAll() } }
 
         try await store.save(key: "access_token", value: "ログアウト対象アクセストークン")
         try await store.save(key: "refresh_token", value: "ログアウト対象リフレッシュトークン")
@@ -223,12 +222,14 @@ struct AuthStateTests {
         #expect(authState.accessToken == nil)
         #expect(await store.load(key: "access_token") == nil)
         #expect(await store.load(key: "refresh_token") == nil)
+
+        await store.deleteAll()
     }
 
     // MARK: - ヘルパー
 
     private func makeAuthState(
-        authClient: MockTwitchAuthClient? = nil,
+        authClient: (any TwitchAuthClientProtocol)? = nil,
         keychainStore: KeychainStore? = nil
     ) -> AuthState {
         AuthState(

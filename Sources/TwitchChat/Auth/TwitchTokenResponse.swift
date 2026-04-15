@@ -86,7 +86,12 @@ struct TwitchDeviceCodeResponse: Codable, Sendable {
 // MARK: - OAuth エラーレスポンス
 
 /// Twitch OAuth エラーレスポンス
+///
+/// Twitch OAuth エンドポイントが返す標準エラー形式
+/// 例: `{"error": "Bad Request", "status": 400, "message": "authorization_pending"}`
+/// `error` フィールドはエンドポイントによって省略される場合があるため optional
 struct TwitchOAuthError: Codable, Sendable, Error, Equatable {
+    let error: String?
     let status: Int
     let message: String
 }

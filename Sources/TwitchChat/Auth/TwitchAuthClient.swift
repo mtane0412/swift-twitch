@@ -3,7 +3,6 @@
 // デバイスコードを取得し、ユーザーが twitch.tv/activate で認証するまでポーリングする
 
 import Foundation
-import AppKit
 
 // MARK: - プロトコル
 
@@ -20,7 +19,8 @@ protocol TwitchAuthClientProtocol: AnyObject {
     /// - Parameters:
     ///   - deviceCode: `requestDeviceCode()` で取得したデバイスコード
     ///   - interval: ポーリング間隔（秒）
-    func pollForToken(deviceCode: String, interval: Int) async throws -> TwitchTokenResponse
+    ///   - expiresIn: デバイスコードの有効期限（秒）。省略時はサーバー側エラーを待つ
+    func pollForToken(deviceCode: String, interval: Int, expiresIn: Int?) async throws -> TwitchTokenResponse
 
     /// リフレッシュトークンで新しいアクセストークンを取得する
     func refreshToken(refreshToken: String) async throws -> TwitchTokenResponse
@@ -28,8 +28,8 @@ protocol TwitchAuthClientProtocol: AnyObject {
     /// アクセストークンの有効性を検証する
     func validateToken(accessToken: String) async throws -> TwitchValidateResponse
 
-    /// アクセストークンを失効させる
-    func revokeToken(accessToken: String) async throws
+    /// アクセストークンを失効させる（失敗してもログアウト処理を継続するためエラーはスローしない）
+    func revokeToken(accessToken: String) async
 }
 
 // MARK: - 実装
@@ -105,17 +105,34 @@ final class TwitchAuthClient: TwitchAuthClientProtocol {
     ///
     /// Twitch の `authorization_pending` レスポンスを受け取る間はポーリングを継続する
     /// `slow_down` レスポンス時はポーリング間隔を 5 秒延長する
+    /// デバイスコードの有効期限（`expiresIn`）を超えた場合は `.tokenExpired` をスローする
     ///
     /// - Parameters:
     ///   - deviceCode: `requestDeviceCode()` で取得したデバイスコード
     ///   - interval: 初期ポーリング間隔（秒）
-    func pollForToken(deviceCode: String, interval: Int) async throws -> TwitchTokenResponse {
+    ///   - expiresIn: デバイスコードの有効期限（秒）。省略時はサーバー側エラーを待つ
+    func pollForToken(deviceCode: String, interval: Int, expiresIn: Int? = nil) async throws -> TwitchTokenResponse {
         let clientID = try AuthConfig.clientID()
         var currentInterval = interval
+        let deadline = expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
 
         while true {
+            // クライアント側で有効期限を確認する
+            if let deadline, Date() > deadline {
+                throw TwitchAuthError.tokenExpired
+            }
+
+            // 残り時間を超えないよう sleep 時間を調整する
+            let sleepSeconds: Int
+            if let deadline {
+                let remaining = Int(deadline.timeIntervalSinceNow)
+                sleepSeconds = min(currentInterval, max(remaining, 1))
+            } else {
+                sleepSeconds = currentInterval
+            }
+
             // ポーリング間隔を待機（キャンセル時は CancellationError をスロー）
-            try await Task.sleep(for: .seconds(currentInterval))
+            try await Task.sleep(for: .seconds(sleepSeconds))
             try Task.checkCancellation()
 
             var request = URLRequest(url: AuthConfig.tokenURL)
@@ -198,9 +215,9 @@ final class TwitchAuthClient: TwitchAuthClientProtocol {
         return try JSONDecoder().decode(TwitchValidateResponse.self, from: data)
     }
 
-    /// アクセストークンを失効させる
-    func revokeToken(accessToken: String) async throws {
-        let clientID = try AuthConfig.clientID()
+    /// アクセストークンを失効させる（失敗してもログアウト処理を継続するためエラーはスローしない）
+    func revokeToken(accessToken: String) async {
+        guard let clientID = try? AuthConfig.clientID() else { return }
         var request = URLRequest(url: AuthConfig.revokeURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -216,12 +233,6 @@ final class TwitchAuthClient: TwitchAuthClientProtocol {
 
     /// トークンエンドポイントへのリクエストを実行し、レスポンスをデコードする
     private func performTokenRequest(_ request: URLRequest) async throws -> TwitchTokenResponse {
-        #if DEBUG
-        if let body = request.httpBody, let bodyString = String(data: body, encoding: .utf8) {
-            print("[TwitchAuth] Token request body: \(bodyString)")
-        }
-        #endif
-
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw TwitchAuthError.networkError
@@ -229,9 +240,6 @@ final class TwitchAuthClient: TwitchAuthClientProtocol {
 
         #if DEBUG
         print("[TwitchAuth] Token response status: \(httpResponse.statusCode)")
-        if let responseString = String(data: data, encoding: .utf8) {
-            print("[TwitchAuth] Token response body: \(responseString)")
-        }
         #endif
 
         guard httpResponse.statusCode == 200 else {
@@ -248,7 +256,6 @@ final class TwitchAuthClient: TwitchAuthClientProtocol {
 
 /// Twitch OAuth 認証エラー
 enum TwitchAuthError: Error, LocalizedError, Equatable {
-    case missingAuthorizationCode
     case userCancelled
     case networkError
     case httpError(statusCode: Int)
@@ -257,7 +264,6 @@ enum TwitchAuthError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .missingAuthorizationCode: return "認可コードが取得できませんでした"
         case .userCancelled: return "ログインがキャンセルされました"
         case .networkError: return "ネットワークエラーが発生しました"
         case .httpError(let code): return "HTTP エラー: \(code)"
