@@ -191,13 +191,12 @@ actor BadgeStore {
         url: URL,
         queryItems: [URLQueryItem]?
     ) async throws -> HelixBadgesResponse {
-        // トークンまたは Client ID が取得できない場合はリクエストしない
+        // トークンが取得できない場合（未ログイン）はリクエストしない
         guard let token = await tokenProvider.fetchAccessToken() else {
             throw URLError(.userAuthenticationRequired)
         }
-        guard let clientId = try? await tokenProvider.clientID() else {
-            throw URLError(.userAuthenticationRequired)
-        }
+        // Client ID 未設定の場合は AuthConfigError.missingClientID をそのまま伝播する
+        let clientId = try await tokenProvider.clientID()
 
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw URLError(.badURL)
