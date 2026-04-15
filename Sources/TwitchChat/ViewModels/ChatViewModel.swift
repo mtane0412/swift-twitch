@@ -91,6 +91,9 @@ final class ChatViewModel {
         messages = []
         channelBadgesFetched = false
 
+        // チャンネル切替時に前チャンネルのバッジが誤解決されないようクリア
+        await badgeStore.resetChannelBadges()
+
         // グローバルバッジ定義を並行フェッチ（切断時にキャンセルできるよう保持）
         globalBadgeFetchTask = Task { await badgeStore.fetchGlobalBadges() }
 
@@ -119,6 +122,8 @@ final class ChatViewModel {
         receiveTask?.cancel()
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
+        // BadgeStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
+        await badgeStore.cancelGlobalFetch()
         await ircClient.disconnect()
         connectionState = .disconnected
     }

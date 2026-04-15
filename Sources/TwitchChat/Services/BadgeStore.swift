@@ -95,6 +95,22 @@ actor BadgeStore {
         return URL(string: urlString)
     }
 
+    /// チャンネルバッジのマッピングをクリアする
+    ///
+    /// チャンネル切替時（connect 呼び出し前）に呼び出すことで、
+    /// 前チャンネルのチャンネルバッジが新チャンネルのメッセージに誤解決されるのを防ぐ
+    func resetChannelBadges() {
+        channelBadges = [:]
+    }
+
+    /// 進行中のグローバルバッジフェッチタスクをキャンセルする
+    ///
+    /// disconnect 時に呼び出すことで、不要なネットワークリクエストを中断できる
+    func cancelGlobalFetch() {
+        globalBadgesTask?.cancel()
+        globalBadgesTask = nil
+    }
+
     // MARK: - テスト用メソッド
 
 #if DEBUG

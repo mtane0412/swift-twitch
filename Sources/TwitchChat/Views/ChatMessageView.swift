@@ -8,7 +8,7 @@ import SwiftUI
 /// チャットメッセージ 1 件の表示ビュー
 ///
 /// - ユーザー名を Twitch 設定の色で表示
-/// - バッジを絵文字で表現（broadcaster: 📡、moderator: ⚔️、subscriber: ★）
+/// - バッジを画像で表示（BadgeImageCache でキャッシュ、未取得時は絵文字フォールバック）
 /// - メッセージ本文を FlowLayout でレンダリングし、エモートを AnimatedEmoteView でインライン表示
 /// - アニメーション GIF エモートは `NSImageView.animates = true` で自動再生
 /// - エモート未読み込み時はエモート名をグレーテキストのプレースホルダとして表示
