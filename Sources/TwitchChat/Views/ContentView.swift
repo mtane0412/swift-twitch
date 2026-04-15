@@ -1,84 +1,38 @@
 // ContentView.swift
 // メインレイアウトビュー
-// チャンネル入力エリアとチャットメッセージリストを縦に配置する
+// NavigationSplitView でサイドバー（チャンネルリスト）とチャット詳細ペインを構成する
 
 import SwiftUI
 
 /// アプリのメインコンテンツビュー
 ///
 /// レイアウト:
-/// - 上部ヘッダー: ログイン/ログアウト UI（LoginView）
-/// - チャンネル入力エリア: チャンネル名入力 + 接続/切断ボタン（ChannelInputView）
-/// - 中央: チャットメッセージリスト（ScrollView + LazyVStack）
-/// - エラー時: エラーメッセージを表示
+/// - サイドバー: フォロー中ライブ一覧 + 接続中チャンネル一覧（SidebarView）
+/// - 詳細ペイン: 選択中チャンネルのチャットメッセージ（ChatDetailView）
+/// - 未選択時: プレースホルダーを表示
 struct ContentView: View {
     var authState: AuthState
-    @State private var viewModel: ChatViewModel
-    @State private var inputChannel: String = ""
-
-    init(authState: AuthState) {
-        self.authState = authState
-        self._viewModel = State(initialValue: ChatViewModel(authState: authState))
-    }
+    var channelManager: ChannelManager
+    var followedStreamStore: FollowedStreamStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            // ログイン状態表示エリア
-            LoginView(authState: authState)
-
-            Divider()
-
-            // チャンネル入力エリア
-            ChannelInputView(
-                channelName: $inputChannel,
-                connectionState: viewModel.connectionState,
-                onConnect: {
-                    Task {
-                        await viewModel.connect(to: inputChannel)
-                    }
-                },
-                onDisconnect: {
-                    Task {
-                        await viewModel.disconnect()
-                    }
-                }
+        NavigationSplitView {
+            SidebarView(
+                authState: authState,
+                channelManager: channelManager,
+                followedStreamStore: followedStreamStore
             )
-
-            Divider()
-
-            // エラー表示
-            if case .error(let message) = viewModel.connectionState {
-                Text("エラー: \(message)")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-                    .padding(8)
-            }
-
-            // チャットメッセージリスト
-            chatListView
-        }
-        .background(.background)
-    }
-
-    /// チャットメッセージのスクロールビュー
-    private var chatListView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(viewModel.messages) { message in
-                        ChatMessageView(message: message, badgeStore: viewModel.badgeStore)
-                            .id(message.id)
-                    }
-                }
-            }
-            .onChange(of: viewModel.messages.count) { _, _ in
-                // 新しいメッセージが届いたら最下部にスクロール
-                if let lastId = viewModel.messages.last?.id {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(lastId, anchor: .bottom)
-                    }
-                }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
+        } detail: {
+            if let viewModel = channelManager.selectedViewModel {
+                ChatDetailView(viewModel: viewModel)
+            } else {
+                Text("チャンネルを選択するか、ライブ中のストリーマーをクリックしてチャットを開始してください")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .padding()
             }
         }
+        .frame(minWidth: 600, minHeight: 400)
     }
 }

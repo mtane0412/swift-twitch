@@ -48,6 +48,9 @@ public final class AuthState {
     /// 現在のアクセストークン（ログアウト中は `nil`）
     private(set) var accessToken: String?
 
+    /// 現在のユーザーID（ログアウト中は `nil`）
+    private(set) var userId: String?
+
     /// Device Code Flow 中の認証情報（認証中のみ非 nil）
     private(set) var deviceFlowInfo: DeviceFlowInfo?
 
@@ -93,6 +96,12 @@ public final class AuthState {
         do {
             let validateResponse = try await authClient.validateToken(accessToken: savedToken)
             accessToken = savedToken
+            // validateResponse.userId を優先して設定し、未保存なら Keychain にも保存する
+            userId = validateResponse.userId
+            let savedUserId = await keychainStore.load(key: "user_id")
+            if savedUserId == nil {
+                try? await keychainStore.save(key: "user_id", value: validateResponse.userId)
+            }
             status = .loggedIn(userLogin: validateResponse.login)
         } catch TwitchAuthError.tokenExpired {
             await tryRefreshToken()
@@ -148,6 +157,7 @@ public final class AuthState {
 
             deviceFlowInfo = nil
             accessToken = tokenResponse.accessToken
+            userId = validateResponse.userId
             status = .loggedIn(userLogin: validateResponse.login)
         } catch is CancellationError {
             // cancelDeviceFlow() が status と deviceFlowInfo を管理するため何もしない
@@ -186,6 +196,7 @@ public final class AuthState {
         }
         await keychainStore.deleteAll()
         accessToken = nil
+        userId = nil
         status = .loggedOut
     }
 
@@ -229,18 +240,20 @@ public final class AuthState {
             try await keychainStore.save(key: "refresh_token", value: tokenResponse.refreshToken)
 
             accessToken = tokenResponse.accessToken
+            userId = await keychainStore.load(key: "user_id")
             status = .loggedIn(userLogin: validateResponse.login)
         } catch {
             await keychainStore.deleteAll()
             accessToken = nil
+            userId = nil
             status = .loggedOut
         }
     }
 }
 
-// MARK: - BadgeAPITokenProvider 準拠
+// MARK: - HelixAPITokenProvider 準拠
 
-extension AuthState: BadgeAPITokenProvider {
+extension AuthState: HelixAPITokenProvider {
     /// 現在の有効なアクセストークンを取得する
     ///
     /// プロパティ `accessToken` との名前衝突を避けるため `fetchAccessToken` として定義。

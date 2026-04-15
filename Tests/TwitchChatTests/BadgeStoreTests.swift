@@ -7,15 +7,18 @@ import Foundation
 
 // MARK: - テスト用モック
 
-/// BadgeAPITokenProvider のテスト用モック
-struct MockBadgeAPITokenProvider: BadgeAPITokenProvider {
-    /// 返すアクセストークン（nil の場合は未ログイン状態をシミュレート）
-    var token: String?
-    /// 返すクライアントID
-    var clientId: String
+/// HelixAPIClientProtocol のテスト用モック
+struct MockHelixAPIClient: HelixAPIClientProtocol {
+    /// true の場合、URLError.userAuthenticationRequired を throw する（未ログイン状態のシミュレート）
+    var shouldThrowAuthError: Bool = false
 
-    func fetchAccessToken() async -> String? { token }
-    func clientID() async throws -> String { clientId }
+    func get<T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?) async throws -> T {
+        if shouldThrowAuthError {
+            throw URLError(.userAuthenticationRequired)
+        }
+        // テストでネットワークを呼ばないよう、デフォルトはサーバーエラーを throw する
+        throw URLError(.badServerResponse)
+    }
 }
 
 @Suite("BadgeStoreTests")
@@ -25,7 +28,7 @@ struct BadgeStoreTests {
 
     @Test("グローバルバッジのURLを正しく解決できる")
     func testResolveGlobalBadgeURL() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
 
         // グローバルバッジ定義を直接設定（テスト用）
         let broadcasterURL = "https://static-cdn.jtvnw.net/badges/v1/abc/2"
@@ -40,7 +43,7 @@ struct BadgeStoreTests {
 
     @Test("チャンネルバッジがグローバルバッジより優先される")
     func testChannelBadgeOverridesGlobal() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
 
         let globalURL = "https://static-cdn.jtvnw.net/badges/v1/global-sub/2"
         let channelURL = "https://static-cdn.jtvnw.net/badges/v1/channel-sub/2"
@@ -59,7 +62,7 @@ struct BadgeStoreTests {
 
     @Test("チャンネルバッジにないバッジはグローバルにフォールバックする")
     func testFallbackToGlobalWhenNotInChannel() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
 
         let globalURL = "https://static-cdn.jtvnw.net/badges/v1/broadcaster/2"
         await store.setGlobalBadges([
@@ -76,7 +79,7 @@ struct BadgeStoreTests {
 
     @Test("存在しないバッジ名の場合はnilを返す")
     func testUnknownBadgeReturnsNil() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
         await store.setGlobalBadges([
             "broadcaster": ["1": "https://example.com/badge.png"]
         ])
@@ -88,7 +91,7 @@ struct BadgeStoreTests {
 
     @Test("存在しないバッジバージョンの場合はnilを返す")
     func testUnknownVersionReturnsNil() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
         await store.setGlobalBadges([
             "subscriber": ["0": "https://example.com/sub.png"]
         ])
@@ -155,7 +158,7 @@ struct BadgeStoreTests {
 
     @Test("バッジ定義が未設定の場合はnilを返す")
     func testImageURLReturnsNilWhenNoBadgesSet() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
         // setGlobalBadges/setChannelBadges を呼ばない状態
         let badge = Badge(name: "broadcaster", version: "1")
         let url = await store.imageURL(for: badge)
@@ -164,7 +167,7 @@ struct BadgeStoreTests {
 
     @Test("空のバッジ名でも安全にnilを返す")
     func testEmptyBadgeNameReturnsNil() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
         await store.setGlobalBadges(["broadcaster": ["1": "https://example.com/badge.png"]])
         let emptyNameBadge = Badge(name: "", version: "1")
         let url = await store.imageURL(for: emptyNameBadge)
@@ -173,7 +176,7 @@ struct BadgeStoreTests {
 
     @Test("空のバージョンでも安全にnilを返す")
     func testEmptyVersionReturnsNil() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
         await store.setGlobalBadges(["broadcaster": ["1": "https://example.com/badge.png"]])
         let emptyVersionBadge = Badge(name: "broadcaster", version: "")
         let url = await store.imageURL(for: emptyVersionBadge)
@@ -182,7 +185,7 @@ struct BadgeStoreTests {
 
     @Test("並行アクセスしても安全に動作する")
     func testConcurrentAccessIsSafe() async {
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: "テストトークン", clientId: "テストクライアントID"))
+        let store = BadgeStore(apiClient: MockHelixAPIClient())
         // 複数タスクが並行して読み書きしてもクラッシュしないことを確認
         await withTaskGroup(of: Void.self) { group in
             for i in 0..<10 {
@@ -203,8 +206,8 @@ struct BadgeStoreTests {
 
     @Test("トークンが未設定の場合はグローバルバッジフェッチをスキップする")
     func testFetchGlobalBadgesSkippedWhenNoToken() async {
-        // トークン nil = 未ログイン状態をシミュレート
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: nil, clientId: "テストクライアントID"))
+        // shouldThrowAuthError: true = 未ログイン状態をシミュレート
+        let store = BadgeStore(apiClient: MockHelixAPIClient(shouldThrowAuthError: true))
 
         await store.fetchGlobalBadges()
 
@@ -216,8 +219,8 @@ struct BadgeStoreTests {
 
     @Test("トークンが未設定の場合はチャンネルバッジフェッチをスキップする")
     func testFetchChannelBadgesSkippedWhenNoToken() async {
-        // トークン nil = 未ログイン状態をシミュレート
-        let store = BadgeStore(tokenProvider: MockBadgeAPITokenProvider(token: nil, clientId: "テストクライアントID"))
+        // shouldThrowAuthError: true = 未ログイン状態をシミュレート
+        let store = BadgeStore(apiClient: MockHelixAPIClient(shouldThrowAuthError: true))
 
         await store.fetchChannelBadges(channelId: "12345678")
 
