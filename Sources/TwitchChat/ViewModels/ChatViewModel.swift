@@ -61,7 +61,7 @@ final class ChatViewModel {
     private let authState: AuthState
 
     /// バッジ定義ストア（View からバッジ画像URLの解決に使用）
-    let badgeStore = BadgeStore()
+    let badgeStore: BadgeStore
 
     /// グローバルバッジフェッチタスク（切断時にキャンセル）
     private var globalBadgeFetchTask: Task<Void, Never>?
@@ -82,6 +82,7 @@ final class ChatViewModel {
     init(ircClient: any TwitchIRCClientProtocol = TwitchIRCClient(), authState: AuthState = AuthState()) {
         self.ircClient = ircClient
         self.authState = authState
+        self.badgeStore = BadgeStore(tokenProvider: authState)
     }
 
     // MARK: - 接続・切断

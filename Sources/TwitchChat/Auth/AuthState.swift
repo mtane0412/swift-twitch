@@ -211,6 +211,7 @@ public final class AuthState {
     // MARK: - プライベートメソッド
 
     /// リフレッシュトークンで新しいアクセストークンを取得する
+
     private func tryRefreshToken() async {
         guard let refreshTokenValue = await keychainStore.load(key: "refresh_token") else {
             // リフレッシュトークンがない場合は認証情報を破棄してログアウト
@@ -234,5 +235,21 @@ public final class AuthState {
             accessToken = nil
             status = .loggedOut
         }
+    }
+}
+
+// MARK: - BadgeAPITokenProvider 準拠
+
+extension AuthState: BadgeAPITokenProvider {
+    /// 現在の有効なアクセストークンを返す
+    ///
+    /// 期限切れの場合は自動リフレッシュを試みる。未ログインまたは復元不能な場合は `nil`
+    func accessToken() async -> String? {
+        await validAccessToken()
+    }
+
+    /// Twitch アプリの Client ID を返す
+    func clientID() async throws -> String {
+        try AuthConfig.clientID()
     }
 }
