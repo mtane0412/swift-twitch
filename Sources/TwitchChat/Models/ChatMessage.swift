@@ -58,6 +58,11 @@ struct ChatMessage: Sendable, Identifiable {
     /// メッセージのセグメント分割結果（テキストとエモートの交互配列）
     let segments: [MessageSegment]
 
+    /// チャンネルの Twitch ユーザーID（IRCの room-id タグ）
+    ///
+    /// チャンネル固有バッジ（subscriber 等）のフェッチに使用する
+    let roomId: String?
+
     /// メッセージの受信時刻
     let receivedAt: Date
 
@@ -81,8 +86,9 @@ struct ChatMessage: Sendable, Identifiable {
             ? ircMessage.tags["display-name"]!
             : username
         self.text = text
-        self.colorHex = ircMessage.tags["color"]?.isEmpty == false ? ircMessage.tags["color"] : nil
+        self.colorHex = ircMessage.tags["color"].flatMap { $0.isEmpty ? nil : $0 }
         self.badges = Badge.parse(ircMessage.tags["badges"] ?? "")
+        self.roomId = ircMessage.tags["room-id"].flatMap { $0.isEmpty ? nil : $0 }
         let parsedEmotes = EmoteParser.parse(ircMessage.tags["emotes"] ?? "")
         self.emotes = parsedEmotes
         self.segments = MessageSegment.segments(from: text, emotePositions: parsedEmotes)
