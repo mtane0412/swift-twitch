@@ -1,6 +1,6 @@
 // StreamRow.swift
 // サイドバーのフォロー中ストリーマー1行表示
-// ストリーマー名・ゲーム名・視聴者数をコンパクトに表示する
+// プロフィール画像・ストリーマー名・ゲーム名・視聴者数をコンパクトに表示する
 
 import SwiftUI
 
@@ -9,22 +9,31 @@ import SwiftUI
 /// サイドバーの「ライブ」セクションで使用する
 struct StreamRow: View {
     let stream: FollowedStream
+    let profileImageStore: ProfileImageStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(stream.userName)
-                .font(.body)
-                .lineLimit(1)
-            HStack(spacing: 4) {
-                Text(stream.gameName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            // プロフィール画像（円形アイコン）
+            ProfileImageView(
+                userId: stream.userId,
+                imageUrl: profileImageStore.profileImageUrl(for: stream.userId)
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(stream.userName)
+                    .font(.body)
                     .lineLimit(1)
-                Spacer()
-                // 視聴者数（1000以上はK表示）
-                Text(formatViewerCount(stream.viewerCount))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(stream.gameName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    // 視聴者数（1000以上はK表示）
+                    Text(formatViewerCount(stream.viewerCount))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 2)

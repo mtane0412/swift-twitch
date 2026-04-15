@@ -14,13 +14,15 @@ struct ContentView: View {
     var authState: AuthState
     var channelManager: ChannelManager
     var followedStreamStore: FollowedStreamStore
+    var profileImageStore: ProfileImageStore
 
     var body: some View {
         NavigationSplitView {
             SidebarView(
                 authState: authState,
                 channelManager: channelManager,
-                followedStreamStore: followedStreamStore
+                followedStreamStore: followedStreamStore,
+                profileImageStore: profileImageStore
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {

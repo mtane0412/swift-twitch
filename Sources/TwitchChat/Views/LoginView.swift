@@ -8,11 +8,13 @@ import SwiftUI
 ///
 /// - ログアウト状態: 「Twitch でログイン」ボタンを表示
 /// - Device Code Flow 認証中: ユーザーコードとキャンセルボタンを表示
-/// - ログイン状態: ユーザー名と「ログアウト」ボタンを表示
+/// - ログイン状態: プロフィール画像・ユーザー名と「ログアウト」ボタンを表示
 /// - `.unknown` 状態（起動直後）: ローディングインジケータを表示
 struct LoginView: View {
     /// 認証状態
     var authState: AuthState
+    /// プロフィール画像URLストア
+    var profileImageStore: ProfileImageStore
 
     var body: some View {
         VStack(spacing: 2) {
@@ -40,10 +42,16 @@ struct LoginView: View {
                         .controlSize(.small)
 
                     case .loggedIn(let userLogin):
-                        // ログイン状態: ユーザー名 + ログアウトボタン
-                        Label(userLogin, systemImage: "person.crop.circle.fill")
+                        // ログイン状態: プロフィール画像 + ユーザー名 + ログアウトボタン
+                        ProfileImageView(
+                            userId: authState.userId ?? "",
+                            imageUrl: authState.userId.flatMap { profileImageStore.profileImageUrl(for: $0) },
+                            size: 20
+                        )
+                        Text(userLogin)
                             .font(.caption)
                             .foregroundStyle(.primary)
+                        Spacer()
                         Button(action: handleLogout) {
                             Text("ログアウト")
                                 .font(.caption)
