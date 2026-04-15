@@ -96,7 +96,12 @@ public final class AuthState {
         do {
             let validateResponse = try await authClient.validateToken(accessToken: savedToken)
             accessToken = savedToken
-            userId = await keychainStore.load(key: "user_id")
+            // validateResponse.userId を優先して設定し、未保存なら Keychain にも保存する
+            userId = validateResponse.userId
+            let savedUserId = await keychainStore.load(key: "user_id")
+            if savedUserId == nil {
+                try? await keychainStore.save(key: "user_id", value: validateResponse.userId)
+            }
             status = .loggedIn(userLogin: validateResponse.login)
         } catch TwitchAuthError.tokenExpired {
             await tryRefreshToken()

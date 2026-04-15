@@ -39,7 +39,7 @@ struct TwitchChatApp: App {
                         followedStreamStore.startAutoRefresh()
                     case .loggedOut:
                         followedStreamStore.stopAutoRefresh()
-                        followedStreamStore.streams = []
+                        followedStreamStore.clear()
                         Task { await channelManager.disconnectAll() }
                     case .unknown:
                         break

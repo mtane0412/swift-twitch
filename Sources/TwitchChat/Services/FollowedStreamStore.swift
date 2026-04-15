@@ -25,8 +25,8 @@ final class FollowedStreamStore {
 
     // MARK: - 公開プロパティ
 
-    /// フォロー中の配信中ストリーム一覧（視聴者数降順）
-    var streams: [FollowedStream] = []
+    /// フォロー中の配信中ストリーム一覧（API レスポンス順）
+    private(set) var streams: [FollowedStream] = []
 
     /// データ取得中フラグ
     private(set) var isLoading = false
@@ -84,6 +84,14 @@ final class FollowedStreamStore {
         }
     }
 
+    /// ストリーム一覧をクリアする
+    ///
+    /// ログアウト時など、データを消去したい場合に使用する
+    func clear() {
+        streams = []
+        lastError = nil
+    }
+
     /// 自動更新ループを停止する
     func stopAutoRefresh() {
         autoRefreshTask?.cancel()
@@ -110,6 +118,7 @@ final class FollowedStreamStore {
             lastError = nil
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はサイレントスキップ（エラー表示しない）
+            lastError = nil
         } catch {
             lastError = error.localizedDescription
         }

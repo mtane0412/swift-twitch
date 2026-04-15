@@ -73,11 +73,16 @@ struct HelixFollowedStreamData: Decodable, Sendable {
 // MARK: - 変換
 
 extension HelixFollowedStreamData {
+    /// `started_at` 用の ISO8601 パース戦略
+    ///
+    /// 値型の `Date.ISO8601FormatStyle` を static に保持することで、
+    /// `toFollowedStream()` を複数回呼んでも毎回生成コストが発生しない
+    private static let startedAtParsingStrategy = Date.ISO8601FormatStyle()
+
     /// `HelixFollowedStreamData` を `FollowedStream` ドメインモデルに変換する
     func toFollowedStream() -> FollowedStream? {
         // ISO8601 日付パース（Twitch API は末尾 Z の UTC 形式）
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: startedAt) else { return nil }
+        guard let date = try? Date(startedAt, strategy: Self.startedAtParsingStrategy) else { return nil }
         return FollowedStream(
             id: id,
             userId: userId,

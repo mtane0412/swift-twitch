@@ -65,9 +65,6 @@ struct SidebarView: View {
                     ForEach(followedStreamStore.streams) { stream in
                         StreamRow(stream: stream)
                             .tag(stream.userLogin)
-                            .onTapGesture {
-                                Task { await channelManager.joinChannel(stream.userLogin) }
-                            }
                     }
                 }
             } header: {
