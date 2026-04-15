@@ -21,7 +21,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         self.messageContinuation = continuation
     }
 
-    func connect(to channel: String) async throws {
+    func connect(to channel: String, accessToken: String?, userLogin: String?) async throws {
         connectedChannel = channel
     }
 

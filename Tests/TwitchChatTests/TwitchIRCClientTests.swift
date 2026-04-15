@@ -71,14 +71,14 @@ struct TwitchIRCClientTests {
 
     // MARK: - 接続シーケンス
 
-    @Test("接続時に正しい IRC コマンドが送信される")
+    @Test("接続時に正しい IRC コマンドが送信される（匿名）")
     func 接続時に正しいIRCコマンドが送信される() async throws {
         let mockWS = MockWebSocketClient()
         let client = TwitchIRCClient(webSocketClient: mockWS)
 
         // チャンネル接続（接続後すぐ切断して送信メッセージだけ確認）
         let task = Task {
-            try await client.connect(to: "testchannel")
+            try await client.connect(to: "testchannel", accessToken: nil, userLogin: nil)
         }
         // 少し待ってから切断
         try await Task.sleep(nanoseconds: 50_000_000) // 50ms
@@ -99,7 +99,7 @@ struct TwitchIRCClientTests {
         let client = TwitchIRCClient(webSocketClient: mockWS)
 
         let task = Task {
-            try await client.connect(to: "TestChannel")
+            try await client.connect(to: "TestChannel", accessToken: nil, userLogin: nil)
         }
         try await Task.sleep(nanoseconds: 50_000_000)
         await client.disconnect()
@@ -107,6 +107,28 @@ struct TwitchIRCClientTests {
 
         let sent = await mockWS.sentMessages
         #expect(sent.contains("JOIN #testchannel"))
+    }
+
+    @Test("アクセストークン指定時は認証接続コマンドが送信される")
+    func アクセストークン指定時は認証接続コマンドが送信される() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 認証接続
+        let task = Task {
+            try await client.connect(to: "testchannel", accessToken: "テスト用トークン123", userLogin: "テスト配信者")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        await client.disconnect()
+        task.cancel()
+
+        let sent = await mockWS.sentMessages
+        // OAuth 認証コマンドが送信されることを確認
+        #expect(sent.contains("PASS oauth:テスト用トークン123"))
+        #expect(sent.contains("NICK テスト配信者"))
+        // 匿名コマンドは送信されないことを確認
+        #expect(!sent.contains("PASS SCHMOOPIIE"))
+        #expect(!sent.contains("NICK justinfan12345"))
     }
 
     // MARK: - PING/PONG

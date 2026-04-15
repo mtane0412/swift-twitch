@@ -57,6 +57,9 @@ final class ChatViewModel {
     private let ircClient: any TwitchIRCClientProtocol
     private var receiveTask: Task<Void, Never>?
 
+    /// 認証状態（ログイン済みなら認証接続、ログアウト中なら匿名接続）
+    private let authState: AuthState
+
     /// バッジ定義ストア（View からバッジ画像URLの解決に使用）
     let badgeStore = BadgeStore()
 
@@ -73,9 +76,12 @@ final class ChatViewModel {
 
     /// ChatViewModel を初期化する
     ///
-    /// - Parameter ircClient: IRC クライアント（テスト時はモックを注入）
-    init(ircClient: any TwitchIRCClientProtocol = TwitchIRCClient()) {
+    /// - Parameters:
+    ///   - ircClient: IRC クライアント（テスト時はモックを注入）
+    ///   - authState: 認証状態（ログイン済みなら認証接続に使用）
+    init(ircClient: any TwitchIRCClientProtocol = TwitchIRCClient(), authState: AuthState = AuthState()) {
         self.ircClient = ircClient
+        self.authState = authState
     }
 
     // MARK: - 接続・切断
@@ -109,7 +115,15 @@ final class ChatViewModel {
         }
 
         do {
-            try await ircClient.connect(to: channel)
+            // ログイン済みなら認証接続、ログアウト中なら匿名接続にフォールバック
+            let token = await authState.validAccessToken()
+            let userLogin: String?
+            if case .loggedIn(let login) = authState.status {
+                userLogin = login
+            } else {
+                userLogin = nil
+            }
+            try await ircClient.connect(to: channel, accessToken: token, userLogin: userLogin)
             connectionState = .connected
         } catch {
             connectionState = .error(error.localizedDescription)

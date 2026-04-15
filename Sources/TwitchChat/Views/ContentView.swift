@@ -7,15 +7,27 @@ import SwiftUI
 /// アプリのメインコンテンツビュー
 ///
 /// レイアウト:
-/// - 上部: チャンネル名入力 + 接続/切断ボタン（ChannelInputView）
+/// - 上部ヘッダー: ログイン/ログアウト UI（LoginView）
+/// - チャンネル入力エリア: チャンネル名入力 + 接続/切断ボタン（ChannelInputView）
 /// - 中央: チャットメッセージリスト（ScrollView + LazyVStack）
 /// - エラー時: エラーメッセージを表示
 struct ContentView: View {
-    @State private var viewModel = ChatViewModel()
+    var authState: AuthState
+    @State private var viewModel: ChatViewModel
     @State private var inputChannel: String = ""
+
+    init(authState: AuthState) {
+        self.authState = authState
+        self._viewModel = State(initialValue: ChatViewModel(authState: authState))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            // ログイン状態表示エリア
+            LoginView(authState: authState)
+
+            Divider()
+
             // チャンネル入力エリア
             ChannelInputView(
                 channelName: $inputChannel,
