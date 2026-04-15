@@ -14,7 +14,7 @@ struct MockBadgeAPITokenProvider: BadgeAPITokenProvider {
     /// 返すクライアントID
     var clientId: String
 
-    func accessToken() async -> String? { token }
+    func fetchAccessToken() async -> String? { token }
     func clientID() async throws -> String { clientId }
 }
 

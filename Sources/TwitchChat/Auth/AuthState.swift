@@ -241,10 +241,11 @@ public final class AuthState {
 // MARK: - BadgeAPITokenProvider 準拠
 
 extension AuthState: BadgeAPITokenProvider {
-    /// 現在の有効なアクセストークンを返す
+    /// 現在の有効なアクセストークンを取得する
     ///
+    /// プロパティ `accessToken` との名前衝突を避けるため `fetchAccessToken` として定義。
     /// 期限切れの場合は自動リフレッシュを試みる。未ログインまたは復元不能な場合は `nil`
-    func accessToken() async -> String? {
+    func fetchAccessToken() async -> String? {
         await validAccessToken()
     }
 

@@ -15,8 +15,8 @@ typealias BadgeURLMapping = [String: [String: String]]
 /// `BadgeStore`（actor）と `AuthState`（@MainActor クラス）の分離境界を吸収するため、
 /// 最小限のインターフェースとして切り出している。テスト時のモック差し替えも容易。
 protocol BadgeAPITokenProvider: Sendable {
-    /// 現在の有効なアクセストークンを返す。未ログインまたは取得失敗の場合は `nil`
-    func accessToken() async -> String?
+    /// 現在の有効なアクセストークンを取得する。未ログインまたは取得失敗の場合は `nil`
+    func fetchAccessToken() async -> String?
 
     /// Twitch アプリの Client ID を返す
     ///
@@ -192,17 +192,23 @@ actor BadgeStore {
         queryItems: [URLQueryItem]?
     ) async throws -> HelixBadgesResponse {
         // トークンまたは Client ID が取得できない場合はリクエストしない
-        guard let token = await tokenProvider.accessToken() else {
+        guard let token = await tokenProvider.fetchAccessToken() else {
             throw URLError(.userAuthenticationRequired)
         }
         guard let clientId = try? await tokenProvider.clientID() else {
             throw URLError(.userAuthenticationRequired)
         }
 
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
         components.queryItems = queryItems
 
-        var request = URLRequest(url: components.url!)
+        guard let safeURL = components.url else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: safeURL)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(clientId, forHTTPHeaderField: "Client-Id")
         request.timeoutInterval = Self.requestTimeout
