@@ -85,12 +85,18 @@ actor BadgeStore {
             return
         }
         let task = Task {
-            if let response = try? await self.fetchHelix(
-                url: Self.helixGlobalBadgesURL,
-                queryItems: nil
-            ) {
+            do {
+                let response = try await self.fetchHelix(
+                    url: Self.helixGlobalBadgesURL,
+                    queryItems: nil
+                )
                 self.globalBadges = Self.buildMapping(from: response.data)
                 self.isGlobalLoaded = true
+            } catch let error as URLError where error.code == .userAuthenticationRequired {
+                // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
+            } catch {
+                // 設定不備・サーバーエラー等の恒久エラーは診断できるよう記録する
+                assertionFailure("グローバルバッジフェッチ失敗: \(error)")
             }
         }
         globalBadgesTask = task
@@ -105,11 +111,18 @@ actor BadgeStore {
     func fetchChannelBadges(channelId: String) async {
         // Twitch の room-id は数字のみで構成される（URLパラメータインジェクション対策）
         guard !channelId.isEmpty, channelId.allSatisfy(\.isNumber) else { return }
-        guard let response = try? await fetchHelix(
-            url: Self.helixChannelBadgesURL,
-            queryItems: [URLQueryItem(name: "broadcaster_id", value: channelId)]
-        ) else { return }
-        channelBadges = Self.buildMapping(from: response.data)
+        do {
+            let response = try await fetchHelix(
+                url: Self.helixChannelBadgesURL,
+                queryItems: [URLQueryItem(name: "broadcaster_id", value: channelId)]
+            )
+            channelBadges = Self.buildMapping(from: response.data)
+        } catch let error as URLError where error.code == .userAuthenticationRequired {
+            // 未ログイン時はスキップ
+        } catch {
+            // 設定不備・サーバーエラー等の恒久エラーは診断できるよう記録する
+            assertionFailure("チャンネルバッジフェッチ失敗（channelId: \(channelId)）: \(error)")
+        }
     }
 
     /// バッジの画像 URL を解決する
