@@ -1,6 +1,6 @@
 // TwitchIRCClient.swift
 // Twitch IRC 接続を管理するクライアント
-// 匿名接続（justinfan 方式）で Twitch チャットを読み取り専用で受信する
+// 匿名接続（justinfan 方式）と認証接続（OAuth トークン）の両方をサポートする
 
 import Foundation
 
@@ -12,7 +12,12 @@ protocol TwitchIRCClientProtocol: Actor {
     var messageStream: AsyncStream<ChatMessage> { get }
 
     /// 指定チャンネルに接続する
-    func connect(to channel: String) async throws
+    ///
+    /// - Parameters:
+    ///   - channel: チャンネル名（`#` なし）
+    ///   - accessToken: OAuth アクセストークン（省略時は匿名接続）
+    ///   - userLogin: ログインユーザー名（`accessToken` 指定時に必要）
+    func connect(to channel: String, accessToken: String?, userLogin: String?) async throws
 
     /// IRC 接続を切断する
     func disconnect() async
@@ -34,7 +39,11 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     // MARK: - 定数
 
     private static let websocketURL = URL(string: "wss://irc-ws.chat.twitch.tv:443")!
+
+    /// 匿名接続で使用するパスワード（Twitch IRC 仕様による固定値）
     private static let anonymousPassword = "SCHMOOPIIE"
+
+    /// 匿名接続で使用するニックネーム
     private static let anonymousNick = "justinfan12345"
 
     // MARK: - プロパティ
@@ -63,12 +72,15 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
     /// 指定チャンネルに接続する
     ///
-    /// - Parameter channel: チャンネル名（`#` なし、大文字小文字は自動変換）
+    /// - Parameters:
+    ///   - channel: チャンネル名（`#` なし、大文字小文字は自動変換）
+    ///   - accessToken: OAuth アクセストークン（省略時は匿名接続）
+    ///   - userLogin: ログインユーザー名（`accessToken` 指定時に必要）
     /// - Throws: WebSocket 接続エラー
-    func connect(to channel: String) async throws {
+    func connect(to channel: String, accessToken: String? = nil, userLogin: String? = nil) async throws {
         let normalizedChannel = channel.lowercased()
         try await webSocketClient.connect(to: Self.websocketURL)
-        try await sendAuthSequence(channel: normalizedChannel)
+        try await sendAuthSequence(channel: normalizedChannel, accessToken: accessToken, userLogin: userLogin)
         // receiveLoop を別タスクで起動し、connect() がブロックされないようにする
         receiveLoopTask = Task { await receiveLoop() }
     }
@@ -83,12 +95,28 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
     // MARK: - プライベートメソッド
 
-    /// 匿名認証シーケンスを送信する
+    /// 認証シーケンスを送信する
     ///
     /// Twitch IRC に接続するために必要な初期コマンドを順番に送信する
-    private func sendAuthSequence(channel: String) async throws {
-        try await webSocketClient.send("PASS \(Self.anonymousPassword)")
-        try await webSocketClient.send("NICK \(Self.anonymousNick)")
+    ///
+    /// - Parameters:
+    ///   - channel: 接続するチャンネル名（小文字）
+    ///   - accessToken: OAuth アクセストークン（`nil` の場合は匿名接続）
+    ///   - userLogin: ログインユーザー名（`accessToken` 指定時に使用）
+    private func sendAuthSequence(channel: String, accessToken: String?, userLogin: String?) async throws {
+        switch (accessToken, userLogin) {
+        case let (.some(token), .some(login)):
+            // 認証接続: PASS oauth:<token> + NICK <userLogin>
+            try await webSocketClient.send("PASS oauth:\(token)")
+            try await webSocketClient.send("NICK \(login)")
+        case (.none, .none):
+            // 匿名接続: justinfan 方式（読み取り専用）
+            try await webSocketClient.send("PASS \(Self.anonymousPassword)")
+            try await webSocketClient.send("NICK \(Self.anonymousNick)")
+        default:
+            // 片方だけ指定された不整合状態は早期失敗させる
+            throw TwitchIRCClientError.invalidAuthParameters
+        }
         try await webSocketClient.send("CAP REQ :twitch.tv/tags twitch.tv/commands")
         try await webSocketClient.send("JOIN #\(channel)")
     }
@@ -131,6 +159,21 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
         default:
             break
+        }
+    }
+}
+
+// MARK: - エラー定義
+
+/// TwitchIRCClient のエラー
+enum TwitchIRCClientError: Error, LocalizedError {
+    /// accessToken と userLogin の指定が不整合（片方のみ指定された場合）
+    case invalidAuthParameters
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidAuthParameters:
+            return "accessToken と userLogin はどちらも指定するか、どちらも省略してください"
         }
     }
 }
