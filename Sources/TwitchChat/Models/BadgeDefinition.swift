@@ -1,67 +1,57 @@
 // BadgeDefinition.swift
-// Twitch GQL バッジ定義APIのレスポンスモデル
-// gql.twitch.tv からバッジ画像URLを取得するためのDecodable構造体
+// Twitch Helix API バッジ定義レスポンスモデル
+// api.twitch.tv/helix/chat/badges からバッジ画像URLを取得するためのDecodable構造体
 
 import Foundation
 
-// MARK: - グローバルバッジレスポンス
+// MARK: - Helix バッジレスポンス
 
-/// GQL `{ badges }` クエリのレスポンス全体
-struct GQLBadgesResponse: Decodable, Sendable {
-    let data: GQLBadgesData
+/// Helix `GET /helix/chat/badges/global` および
+/// `GET /helix/chat/badges?broadcaster_id={id}` 共通レスポンス
+struct HelixBadgesResponse: Decodable, Sendable {
+    let data: [HelixBadgeSet]
 }
 
-/// GQL バッジデータ
-struct GQLBadgesData: Decodable, Sendable {
-    let badges: [GQLBadgeItem]
+/// Helix バッジセット（例: "subscriber", "broadcaster"）
+struct HelixBadgeSet: Decodable, Sendable {
+    /// バッジセット識別子（例: "subscriber", "broadcaster", "moderator"）
+    let setId: String
+
+    /// バッジの各バージョン（月数やレベルごとに異なる画像を持つ）
+    let versions: [HelixBadgeVersion]
+
+    enum CodingKeys: String, CodingKey {
+        case setId = "set_id"
+        case versions
+    }
 }
 
-// MARK: - チャンネルバッジレスポンス
-
-/// GQL `{ user(id:) { broadcastBadges } }` クエリのレスポンス全体
-struct GQLChannelBadgesResponse: Decodable, Sendable {
-    let data: GQLChannelBadgesData
-}
-
-/// GQL チャンネルバッジデータ
-///
-/// GQL の `user(id:)` フィールドは存在しないユーザーIDの場合に null を返すため Optional
-struct GQLChannelBadgesData: Decodable, Sendable {
-    let user: GQLUserBadges?
-}
-
-/// GQL ユーザーのバッジ情報
-struct GQLUserBadges: Decodable, Sendable {
-    let broadcastBadges: [GQLBadgeItem]
-}
-
-// MARK: - バッジアイテム
-
-/// GQL バッジアイテム
-///
-/// GQL のバッジIDは base64 エンコードされた `"{name};{version};"` または
-/// `"{name};{version};{channelId}"` の形式。
-struct GQLBadgeItem: Decodable, Sendable {
-    /// base64エンコードされたバッジ識別子
+/// Helix バッジバージョン（バッジの各レベル・月数に対応）
+struct HelixBadgeVersion: Decodable, Sendable {
+    /// バージョン識別子（例: "0", "1", "3", "6"）
     let id: String
+
+    /// バッジ画像 URL（1x スケール）
+    let imageUrl1x: String
+
+    /// バッジ画像 URL（2x スケール）
+    let imageUrl2x: String
+
+    /// バッジ画像 URL（4x スケール）
+    let imageUrl4x: String
 
     /// バッジのタイトル（例: "Broadcaster", "Moderator"）
     let title: String
 
-    /// バッジ画像の URL（2xスケール）
-    let imageURL: String
+    /// バッジの説明
+    let description: String
 
-    /// base64エンコードされた id からバッジ名とバージョンを取得する
-    ///
-    /// - Returns: (name, version) のタプル、デコード失敗時は nil
-    var parsedNameAndVersion: (name: String, version: String)? {
-        guard let decoded = Data(base64Encoded: id),
-              let str = String(data: decoded, encoding: .utf8) else { return nil }
-        // フォーマット: "name;version;" または "name;version;channelId"
-        let parts = str.split(separator: ";", omittingEmptySubsequences: false)
-        guard parts.count >= 2,
-              !parts[0].isEmpty,
-              !parts[1].isEmpty else { return nil }
-        return (name: String(parts[0]), version: String(parts[1]))
+    enum CodingKeys: String, CodingKey {
+        case id
+        case imageUrl1x = "image_url_1x"
+        case imageUrl2x = "image_url_2x"
+        case imageUrl4x = "image_url_4x"
+        case title
+        case description
     }
 }

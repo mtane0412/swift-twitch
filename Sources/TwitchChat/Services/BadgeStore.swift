@@ -1,6 +1,6 @@
 // BadgeStore.swift
 // Twitch バッジ定義の取得・管理サービス
-// Twitch GQL から グローバル・チャンネルバッジ定義をフェッチし、画像URLを解決する
+// Twitch Helix API からグローバル・チャンネルバッジ定義をフェッチし、画像URLを解決する
 
 import Foundation
 
@@ -8,23 +8,40 @@ import Foundation
 /// [バッジ名: [バージョン: 画像URLString]]
 typealias BadgeURLMapping = [String: [String: String]]
 
-/// Twitch バッジ定義の取得・管理を行うサービス
+// MARK: - トークンプロバイダープロトコル
+
+/// バッジ Helix API 呼び出しに必要な認証情報を提供するプロトコル
+///
+/// `BadgeStore`（actor）と `AuthState`（@MainActor クラス）の分離境界を吸収するため、
+/// 最小限のインターフェースとして切り出している。テスト時のモック差し替えも容易。
+protocol BadgeAPITokenProvider: Sendable {
+    /// 現在の有効なアクセストークンを取得する。未ログインまたは取得失敗の場合は `nil`
+    func fetchAccessToken() async -> String?
+
+    /// Twitch アプリの Client ID を返す
+    ///
+    /// - Throws: `AuthConfigError.missingClientID` が未設定の場合
+    func clientID() async throws -> String
+}
+
+/// バッジ定義の取得・管理を行うサービス
 ///
 /// - グローバルバッジ（broadcaster, moderator, vip 等）は接続時に1回フェッチ
 /// - チャンネルバッジ（subscriber 等の独自アート）は room-id 取得後にフェッチ
 /// - imageURL(for:) はチャンネルバッジを優先し、なければグローバルにフォールバック
 /// - 並行フェッチの重複実行を Task-based deduplication で防止
+/// - トークン未設定（未ログイン）の場合はフェッチをスキップする
 actor BadgeStore {
 
     // MARK: - 定数
 
-    /// Twitch GQL エンドポイント
-    private static let gqlEndpoint = URL(string: "https://gql.twitch.tv/gql")!
+    /// Helix グローバルバッジエンドポイント
+    private static let helixGlobalBadgesURL = URL(string: "https://api.twitch.tv/helix/chat/badges/global")!
 
-    /// Twitch GQL Client-ID（公開クライアントID）
-    private static let gqlClientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+    /// Helix チャンネルバッジエンドポイント
+    private static let helixChannelBadgesURL = URL(string: "https://api.twitch.tv/helix/chat/badges")!
 
-    /// GQL リクエストのタイムアウト秒数
+    /// リクエストのタイムアウト秒数
     private static let requestTimeout: TimeInterval = 10
 
     // MARK: - 状態
@@ -41,11 +58,25 @@ actor BadgeStore {
     /// 進行中のグローバルバッジフェッチタスク（並行重複排除用）
     private var globalBadgesTask: Task<Void, Never>?
 
+    /// 認証情報プロバイダー
+    private let tokenProvider: any BadgeAPITokenProvider
+
+    // MARK: - 初期化
+
+    /// BadgeStore を初期化する
+    ///
+    /// - Parameter tokenProvider: Helix API 認証情報プロバイダー
+    init(tokenProvider: any BadgeAPITokenProvider) {
+        self.tokenProvider = tokenProvider
+    }
+
     // MARK: - 公開メソッド
 
     /// グローバルバッジ定義をフェッチする
     ///
-    /// 並行して複数回呼ばれた場合でも、ネットワークリクエストは1回のみ実行される
+    /// 並行して複数回呼ばれた場合でも、ネットワークリクエストは1回のみ実行される。
+    /// トークン未設定（未ログイン）の場合はスキップし、次回接続時に再取得できるよう
+    /// `isGlobalLoaded` フラグを `true` にしない。
     func fetchGlobalBadges() async {
         guard !isGlobalLoaded else { return }
         // 進行中タスクがあれば完了を待って返す（TOCTOU 防止）
@@ -54,12 +85,18 @@ actor BadgeStore {
             return
         }
         let task = Task {
-            if let response = try? await self.fetchGQL(
-                query: "{ badges { id title imageURL(size: DOUBLE) } }",
-                responseType: GQLBadgesResponse.self
-            ) {
-                self.globalBadges = Self.buildMapping(from: response.data.badges)
+            do {
+                let response = try await self.fetchHelix(
+                    url: Self.helixGlobalBadgesURL,
+                    queryItems: nil
+                )
+                self.globalBadges = Self.buildMapping(from: response.data)
                 self.isGlobalLoaded = true
+            } catch let error as URLError where error.code == .userAuthenticationRequired {
+                // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
+            } catch {
+                // 設定不備・サーバーエラー等の恒久エラーは診断できるよう記録する
+                assertionFailure("グローバルバッジフェッチ失敗: \(error)")
             }
         }
         globalBadgesTask = task
@@ -70,16 +107,22 @@ actor BadgeStore {
     /// チャンネルバッジ定義をフェッチする
     ///
     /// - Parameter channelId: Twitch チャンネルID（IRCの room-id タグの値、数字のみ）
+    /// トークン未設定（未ログイン）の場合はスキップする。
     func fetchChannelBadges(channelId: String) async {
-        // Twitch の room-id は数字のみで構成される（GQL injection 対策）
+        // Twitch の room-id は数字のみで構成される（URLパラメータインジェクション対策）
         guard !channelId.isEmpty, channelId.allSatisfy(\.isNumber) else { return }
-        let query = "{ user(id: \"\(channelId)\") { broadcastBadges { id title imageURL(size: DOUBLE) } } }"
-        guard let response = try? await fetchGQL(
-            query: query,
-            responseType: GQLChannelBadgesResponse.self
-        ),
-        let userBadges = response.data.user else { return }
-        channelBadges = Self.buildMapping(from: userBadges.broadcastBadges)
+        do {
+            let response = try await fetchHelix(
+                url: Self.helixChannelBadgesURL,
+                queryItems: [URLQueryItem(name: "broadcaster_id", value: channelId)]
+            )
+            channelBadges = Self.buildMapping(from: response.data)
+        } catch let error as URLError where error.code == .userAuthenticationRequired {
+            // 未ログイン時はスキップ
+        } catch {
+            // 設定不備・サーバーエラー等の恒久エラーは診断できるよう記録する
+            assertionFailure("チャンネルバッジフェッチ失敗（channelId: \(channelId)）: \(error)")
+        }
     }
 
     /// バッジの画像 URL を解決する
@@ -128,58 +171,65 @@ actor BadgeStore {
 
     // MARK: - 静的ユーティリティ
 
-    /// GQLBadgeItem の配列から URLマッピングを構築する
+    /// HelixBadgeSet の配列から URLマッピングを構築する
     ///
-    /// - Parameter items: GQL バッジアイテムの配列
+    /// 画像サイズは 2x（`imageUrl2x`）を使用する。
+    /// 現在の表示サイズ 18pt では Retina 対応として 2x 画像が適切。
+    ///
+    /// - Parameter badgeSets: Helix バッジセットの配列
     /// - Returns: [バッジ名: [バージョン: URLString]] のマッピング
-    static func buildMapping(from items: [GQLBadgeItem]) -> BadgeURLMapping {
+    static func buildMapping(from badgeSets: [HelixBadgeSet]) -> BadgeURLMapping {
         var mapping: BadgeURLMapping = [:]
-        for item in items {
-            guard let parsed = item.parsedNameAndVersion else { continue }
-            if mapping[parsed.name] == nil {
-                mapping[parsed.name] = [:]
+        for set in badgeSets {
+            var versions: [String: String] = [:]
+            for version in set.versions {
+                versions[version.id] = version.imageUrl2x
             }
-            mapping[parsed.name]?[parsed.version] = item.imageURL
+            mapping[set.setId] = versions
         }
         return mapping
     }
 
     // MARK: - プライベートメソッド
 
-    /// GQL レスポンスのエラー情報を保持する内部型
-    private struct GQLErrorContainer: Decodable {
-        struct GQLError: Decodable {
-            let message: String
-        }
-        let errors: [GQLError]?
-    }
-
-    /// GQL リクエストを送信して結果をデコードする
+    /// Helix API にリクエストを送信して結果をデコードする
     ///
-    /// - タイムアウト: `requestTimeout` 秒
-    /// - GQL レベルのエラーが含まれている場合は `URLError(.badServerResponse)` をスロー
-    private func fetchGQL<T: Decodable>(query: String, responseType: T.Type) async throws -> T {
-        var request = URLRequest(url: Self.gqlEndpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(Self.gqlClientID, forHTTPHeaderField: "Client-Id")
-        request.timeoutInterval = Self.requestTimeout
+    /// - Parameters:
+    ///   - url: リクエスト先エンドポイント URL
+    ///   - queryItems: クエリパラメータ（nil の場合はなし）
+    /// - Returns: デコードされた `HelixBadgesResponse`
+    /// - Throws: トークン未設定時は `URLError(.userAuthenticationRequired)`、
+    ///           HTTP エラー時は `URLError(.badServerResponse)`
+    private func fetchHelix(
+        url: URL,
+        queryItems: [URLQueryItem]?
+    ) async throws -> HelixBadgesResponse {
+        // トークンが取得できない場合（未ログイン）はリクエストしない
+        guard let token = await tokenProvider.fetchAccessToken() else {
+            throw URLError(.userAuthenticationRequired)
+        }
+        // Client ID 未設定の場合は AuthConfigError.missingClientID をそのまま伝播する
+        let clientId = try await tokenProvider.clientID()
 
-        let body = ["query": query]
-        request.httpBody = try JSONEncoder().encode(body)
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw URLError(.badURL)
+        }
+        components.queryItems = queryItems
+
+        guard let safeURL = components.url else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: safeURL)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(clientId, forHTTPHeaderField: "Client-Id")
+        request.timeoutInterval = Self.requestTimeout
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
-
-        // GQL レベルのエラーチェック（data フィールドが正常でも errors が含まれる場合がある）
-        if let errorContainer = try? JSONDecoder().decode(GQLErrorContainer.self, from: data),
-           let errors = errorContainer.errors, !errors.isEmpty {
-            throw URLError(.badServerResponse)
-        }
-
-        return try JSONDecoder().decode(T.self, from: data)
+        return try JSONDecoder().decode(HelixBadgesResponse.self, from: data)
     }
 }
