@@ -14,6 +14,7 @@ struct SidebarView: View {
     var authState: AuthState
     var channelManager: ChannelManager
     var followedStreamStore: FollowedStreamStore
+    var profileImageStore: ProfileImageStore
 
     var body: some View {
         List(selection: Binding(
@@ -25,7 +26,7 @@ struct SidebarView: View {
             }
         )) {
             // ログイン状態ヘッダー
-            LoginView(authState: authState)
+            LoginView(authState: authState, profileImageStore: profileImageStore)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
 
@@ -63,7 +64,7 @@ struct SidebarView: View {
                         .padding(.vertical, 4)
                 } else {
                     ForEach(followedStreamStore.streams) { stream in
-                        StreamRow(stream: stream)
+                        StreamRow(stream: stream, profileImageStore: profileImageStore)
                             .tag(stream.userLogin)
                     }
                 }
@@ -82,6 +83,23 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        // ストリーム一覧が更新されたら新しい配信者のプロフィール画像を取得する
+        // （fetchUsers は取得済みユーザーを内部でフィルタリングするため重複APIコールは発生しない）
+        .onChange(of: followedStreamStore.streams) { _, streams in
+            let userIds = streams.map(\.userId)
+            Task { await profileImageStore.fetchUsers(userIds: userIds) }
+        }
+        // ログイン時に自分自身のプロフィール画像を取得する
+        .onChange(of: authState.userId) { _, userId in
+            guard let userId else { return }
+            Task { await profileImageStore.fetchUsers(userIds: [userId]) }
+        }
+        // 起動時にすでにログイン済みの場合のプロフィール画像取得
+        .task {
+            if let userId = authState.userId {
+                await profileImageStore.fetchUsers(userIds: [userId])
+            }
+        }
     }
 
     /// 接続中チャンネルの行（コンテキストメニューで切断可能）

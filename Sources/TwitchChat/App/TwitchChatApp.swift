@@ -15,16 +15,19 @@ struct TwitchChatApp: App {
     @State private var channelManager: ChannelManager?
     /// フォロー中ストリーム一覧ストア
     @State private var followedStreamStore: FollowedStreamStore?
+    /// ユーザープロフィール画像URLストア
+    @State private var profileImageStore: ProfileImageStore?
 
     var body: some Scene {
         WindowGroup {
-            // channelManager と followedStreamStore は authState に依存するため
+            // channelManager、followedStreamStore、profileImageStore は authState に依存するため
             // ContentView 内で遅延初期化する
-            if let channelManager, let followedStreamStore {
+            if let channelManager, let followedStreamStore, let profileImageStore {
                 ContentView(
                     authState: authState,
                     channelManager: channelManager,
-                    followedStreamStore: followedStreamStore
+                    followedStreamStore: followedStreamStore,
+                    profileImageStore: profileImageStore
                 )
                 .task {
                     await authState.restoreSession()
@@ -40,6 +43,7 @@ struct TwitchChatApp: App {
                     case .loggedOut:
                         followedStreamStore.stopAutoRefresh()
                         followedStreamStore.clear()
+                        profileImageStore.clear()
                         Task { await channelManager.disconnectAll() }
                     case .unknown:
                         break
@@ -54,6 +58,7 @@ struct TwitchChatApp: App {
                             apiClient: helixClient,
                             authState: authState
                         )
+                        profileImageStore = ProfileImageStore(apiClient: helixClient)
                     }
             }
         }
