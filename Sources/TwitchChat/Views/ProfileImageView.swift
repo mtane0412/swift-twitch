@@ -2,6 +2,7 @@
 // Twitch ユーザープロフィール画像の円形アイコン表示ビュー
 // ProfileImageCache 経由で非同期に画像を取得し、円形クリッピングで表示する
 
+import AppKit
 import SwiftUI
 
 /// Twitch ユーザーのプロフィール画像を円形で表示するビュー
@@ -40,7 +41,8 @@ struct ProfileImageView: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         // userId または imageUrl のどちらが変わっても再取得する
-        .task(id: userId + (imageUrl ?? "")) {
+        // セパレータ（":"）を使用して userId + imageUrl の文字列衝突を防ぐ
+        .task(id: userId + ":" + (imageUrl ?? "")) {
             await loadImage()
         }
     }
@@ -49,12 +51,12 @@ struct ProfileImageView: View {
 
     /// プロフィール画像を非同期で読み込む
     ///
-    /// タスクがキャンセルされた場合や imageUrl が変わった場合は代入しない。
+    /// - userId/imageUrl 変化時はまず nil でプレースホルダーを表示し、ロード完了後に更新する
+    /// - タスクがキャンセルされた場合やプロパティが変わった場合は代入しない
     private func loadImage() async {
-        guard let imageUrl else {
-            image = nil
-            return
-        }
+        // 新しい画像を取得し始める前にプレースホルダーを表示する
+        image = nil
+        guard let imageUrl else { return }
         // ローカル変数にキャプチャして、await後に変化していないか確認する
         let capturedUserId = userId
         let capturedImageUrl = imageUrl

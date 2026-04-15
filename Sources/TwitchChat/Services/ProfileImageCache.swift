@@ -111,40 +111,36 @@ final class ProfileImageCache: @unchecked Sendable {
         }
     }
 
-    /// 画像をピクセルレベルでリサイズしてキャッシュに保存する
+    /// 画像を CoreGraphics でピクセルレベルにリサイズしてキャッシュに保存する
     ///
-    /// NSImage.size の変更は描画サイズのみ変わりピクセルデータは保持されるため、
-    /// ビットマップコンテキストに描画し直すことでメモリ使用量を削減する。
+    /// NSGraphicsContext はメインスレッド以外での使用が未定義動作のため、
+    /// CoreGraphics ベースの CGContext でリサイズする（バックグラウンドスレッドセーフ）。
     private func store(_ image: NSImage, for userId: String) {
         let targetSize = NSSize(width: Self.displaySize, height: Self.displaySize)
         let resized: NSImage
-        if let bitmapRep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(targetSize.width),
-            pixelsHigh: Int(targetSize.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) {
-            bitmapRep.size = targetSize
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmapRep)
-            image.draw(
-                in: NSRect(origin: .zero, size: targetSize),
-                from: .zero,
-                operation: .copy,
-                fraction: 1.0
-            )
-            NSGraphicsContext.restoreGraphicsState()
-            let small = NSImage(size: targetSize)
-            small.addRepresentation(bitmapRep)
-            resized = small
+        // CGImage を取得して CoreGraphics コンテキストでリサイズ描画する
+        if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+            let pixelSize = Int(targetSize.width)
+            if let cgContext = CGContext(
+                data: nil,
+                width: pixelSize,
+                height: pixelSize,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo.rawValue
+            ),
+            let scaledCGImage = { cgContext.draw(cgImage, in: CGRect(origin: .zero, size: targetSize)); return cgContext.makeImage() }() {
+                resized = NSImage(cgImage: scaledCGImage, size: targetSize)
+            } else {
+                // CGContext 作成失敗時はサイズ設定のみのフォールバック
+                image.size = targetSize
+                resized = image
+            }
         } else {
-            // ビットマップ作成失敗時はサイズ設定のみのフォールバック
+            // CGImage 変換失敗時はサイズ設定のみのフォールバック
             image.size = targetSize
             resized = image
         }

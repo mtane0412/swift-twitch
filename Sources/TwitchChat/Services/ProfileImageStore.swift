@@ -33,6 +33,11 @@ final class ProfileImageStore {
     /// userId → profileImageUrl のキャッシュ
     private var profileImageUrls: [String: String] = [:]
 
+    /// 現在フェッチ中の userId セット
+    ///
+    /// `@MainActor` の await サスペンション中に別タスクが同じ userId を重複リクエストするのを防ぐ
+    private var inFlightUserIds: Set<String> = []
+
     private let apiClient: any HelixAPIClientProtocol
 
     private let logger = Logger(subsystem: "dev.mtane.TwitchChat", category: "ProfileImageStore")
@@ -62,9 +67,14 @@ final class ProfileImageStore {
     /// - Note: 取得済みユーザーは API を呼ばない。100件超の場合は自動チャンク分割。
     ///         認証エラーはサイレントスキップ（プロフィール画像は必須ではないため）。
     func fetchUsers(userIds: [String]) async {
-        // 未取得のユーザーのみ対象にする
-        let newUserIds = userIds.filter { profileImageUrls[$0] == nil }
+        // 未取得かつフェッチ中でないユーザーのみ対象にする
+        // （@MainActor の await サスペンション中に別タスクが同じ ID を重複リクエストする問題を防ぐ）
+        let newUserIds = userIds.filter { profileImageUrls[$0] == nil && !inFlightUserIds.contains($0) }
         guard !newUserIds.isEmpty else { return }
+
+        // フェッチ中フラグを設定し、完了後に必ず解除する
+        inFlightUserIds.formUnion(newUserIds)
+        defer { inFlightUserIds.subtract(newUserIds) }
 
         // Helix API の100件制限に合わせてチャンク分割してリクエスト
         let chunks = newUserIds.chunked(into: Self.maxIdsPerRequest)
@@ -78,6 +88,7 @@ final class ProfileImageStore {
     /// ログアウト時など、データを消去したい場合に使用する
     func clear() {
         profileImageUrls = [:]
+        inFlightUserIds = []
     }
 
     // MARK: - プライベートメソッド
