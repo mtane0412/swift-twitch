@@ -79,10 +79,16 @@ final class ChatViewModel {
     /// - Parameters:
     ///   - ircClient: IRC クライアント（テスト時はモックを注入）
     ///   - authState: 認証状態（ログイン済みなら認証接続に使用）
-    init(ircClient: any TwitchIRCClientProtocol = TwitchIRCClient(), authState: AuthState = AuthState()) {
+    ///   - apiClient: Helix API クライアント（テスト時はモックを注入）
+    init(
+        ircClient: any TwitchIRCClientProtocol = TwitchIRCClient(),
+        authState: AuthState = AuthState(),
+        apiClient: (any HelixAPIClientProtocol)? = nil
+    ) {
         self.ircClient = ircClient
         self.authState = authState
-        self.badgeStore = BadgeStore(tokenProvider: authState)
+        let helixClient = apiClient ?? HelixAPIClient(tokenProvider: authState)
+        self.badgeStore = BadgeStore(apiClient: helixClient)
     }
 
     // MARK: - 接続・切断

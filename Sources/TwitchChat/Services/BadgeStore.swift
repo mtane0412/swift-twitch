@@ -8,22 +8,6 @@ import Foundation
 /// [バッジ名: [バージョン: 画像URLString]]
 typealias BadgeURLMapping = [String: [String: String]]
 
-// MARK: - トークンプロバイダープロトコル
-
-/// バッジ Helix API 呼び出しに必要な認証情報を提供するプロトコル
-///
-/// `BadgeStore`（actor）と `AuthState`（@MainActor クラス）の分離境界を吸収するため、
-/// 最小限のインターフェースとして切り出している。テスト時のモック差し替えも容易。
-protocol BadgeAPITokenProvider: Sendable {
-    /// 現在の有効なアクセストークンを取得する。未ログインまたは取得失敗の場合は `nil`
-    func fetchAccessToken() async -> String?
-
-    /// Twitch アプリの Client ID を返す
-    ///
-    /// - Throws: `AuthConfigError.missingClientID` が未設定の場合
-    func clientID() async throws -> String
-}
-
 /// バッジ定義の取得・管理を行うサービス
 ///
 /// - グローバルバッジ（broadcaster, moderator, vip 等）は接続時に1回フェッチ
@@ -41,9 +25,6 @@ actor BadgeStore {
     /// Helix チャンネルバッジエンドポイント
     private static let helixChannelBadgesURL = URL(string: "https://api.twitch.tv/helix/chat/badges")!
 
-    /// リクエストのタイムアウト秒数
-    private static let requestTimeout: TimeInterval = 10
-
     // MARK: - 状態
 
     /// グローバルバッジのURLマッピング
@@ -58,16 +39,16 @@ actor BadgeStore {
     /// 進行中のグローバルバッジフェッチタスク（並行重複排除用）
     private var globalBadgesTask: Task<Void, Never>?
 
-    /// 認証情報プロバイダー
-    private let tokenProvider: any BadgeAPITokenProvider
+    /// Helix API クライアント
+    private let apiClient: any HelixAPIClientProtocol
 
     // MARK: - 初期化
 
     /// BadgeStore を初期化する
     ///
-    /// - Parameter tokenProvider: Helix API 認証情報プロバイダー
-    init(tokenProvider: any BadgeAPITokenProvider) {
-        self.tokenProvider = tokenProvider
+    /// - Parameter apiClient: Helix API クライアント（テスト時はモックを注入）
+    init(apiClient: any HelixAPIClientProtocol) {
+        self.apiClient = apiClient
     }
 
     // MARK: - 公開メソッド
@@ -86,7 +67,7 @@ actor BadgeStore {
         }
         let task = Task {
             do {
-                let response = try await self.fetchHelix(
+                let response: HelixBadgesResponse = try await self.apiClient.get(
                     url: Self.helixGlobalBadgesURL,
                     queryItems: nil
                 )
@@ -112,7 +93,7 @@ actor BadgeStore {
         // Twitch の room-id は数字のみで構成される（URLパラメータインジェクション対策）
         guard !channelId.isEmpty, channelId.allSatisfy(\.isNumber) else { return }
         do {
-            let response = try await fetchHelix(
+            let response: HelixBadgesResponse = try await apiClient.get(
                 url: Self.helixChannelBadgesURL,
                 queryItems: [URLQueryItem(name: "broadcaster_id", value: channelId)]
             )
@@ -188,48 +169,5 @@ actor BadgeStore {
             mapping[set.setId] = versions
         }
         return mapping
-    }
-
-    // MARK: - プライベートメソッド
-
-    /// Helix API にリクエストを送信して結果をデコードする
-    ///
-    /// - Parameters:
-    ///   - url: リクエスト先エンドポイント URL
-    ///   - queryItems: クエリパラメータ（nil の場合はなし）
-    /// - Returns: デコードされた `HelixBadgesResponse`
-    /// - Throws: トークン未設定時は `URLError(.userAuthenticationRequired)`、
-    ///           HTTP エラー時は `URLError(.badServerResponse)`
-    private func fetchHelix(
-        url: URL,
-        queryItems: [URLQueryItem]?
-    ) async throws -> HelixBadgesResponse {
-        // トークンが取得できない場合（未ログイン）はリクエストしない
-        guard let token = await tokenProvider.fetchAccessToken() else {
-            throw URLError(.userAuthenticationRequired)
-        }
-        // Client ID 未設定の場合は AuthConfigError.missingClientID をそのまま伝播する
-        let clientId = try await tokenProvider.clientID()
-
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            throw URLError(.badURL)
-        }
-        components.queryItems = queryItems
-
-        guard let safeURL = components.url else {
-            throw URLError(.badURL)
-        }
-
-        var request = URLRequest(url: safeURL)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(clientId, forHTTPHeaderField: "Client-Id")
-        request.timeoutInterval = Self.requestTimeout
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
-        return try JSONDecoder().decode(HelixBadgesResponse.self, from: data)
     }
 }
