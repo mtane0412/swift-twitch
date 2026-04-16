@@ -134,6 +134,25 @@ final class ChannelManager {
         selectedChannel = normalized
     }
 
+    /// 指定チャンネルを目的のインデックス位置に移動する
+    ///
+    /// - 未知のチャンネル名は no-op（クラッシュしない）
+    /// - `destinationIndex` は `0...(channelOrder.count - 1)` の範囲に clamp する
+    /// - 元の位置と同じ index への移動は no-op（不要な再描画を防ぐ）
+    /// - `selectedChannel` は名前ベース管理のため並び替え後も変更不要
+    ///
+    /// - Parameters:
+    ///   - channelLogin: 移動するチャンネル名（大文字小文字は自動正規化）
+    ///   - destinationIndex: 移動先のインデックス
+    func moveChannel(_ channelLogin: String, toIndex destinationIndex: Int) {
+        let normalized = channelLogin.lowercased()
+        guard let currentIndex = channelOrder.firstIndex(of: normalized) else { return }
+        let clamped = min(max(destinationIndex, 0), channelOrder.count - 1)
+        guard currentIndex != clamped else { return }
+        let removed = channelOrder.remove(at: currentIndex)
+        channelOrder.insert(removed, at: clamped)
+    }
+
     /// 全チャンネルから切断して管理状態をリセットする
     func disconnectAll() async {
         let allChannels = channelOrder
