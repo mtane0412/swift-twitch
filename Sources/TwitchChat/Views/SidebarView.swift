@@ -1,6 +1,6 @@
 // SidebarView.swift
 // サイドバービュー
-// フォロー中の配信中ストリーマー一覧と接続中チャンネル一覧を表示する
+// フォロー中の配信中ストリーマー一覧を表示する（接続中チャンネルは先頭に並ぶ）
 
 import SwiftUI
 
@@ -8,8 +8,8 @@ import SwiftUI
 ///
 /// セクション構成:
 /// - ヘッダー: ログイン状態表示（LoginView）
-/// - 「接続中」: 現在接続しているチャンネルの一覧（コンテキストメニューで切断可能）
-/// - 「ライブ」: フォロー中の配信中ストリーマー一覧（選択でチャット接続）
+/// - 「ライブ」: フォロー中の配信中ストリーマー一覧
+///   - 接続中チャンネルはリスト先頭に表示し、選択中タブと選択状態が連動する
 struct SidebarView: View {
     var authState: AuthState
     var channelManager: ChannelManager
@@ -20,7 +20,12 @@ struct SidebarView: View {
         List(selection: Binding(
             get: { channelManager.selectedChannel },
             set: { newValue in
-                if let channel = newValue {
+                guard let channel = newValue else { return }
+                if channelManager.isJoined(channel) {
+                    // 既接続: 選択のみ切り替え（再接続させない）
+                    channelManager.selectChannel(channel)
+                } else {
+                    // 未接続: 新規接続
                     Task { await channelManager.joinChannel(channel) }
                 }
             }
@@ -29,16 +34,6 @@ struct SidebarView: View {
             LoginView(authState: authState, profileImageStore: profileImageStore)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
-
-            // 接続中チャンネルセクション
-            if !channelManager.channelOrder.isEmpty {
-                Section("接続中") {
-                    ForEach(channelManager.channelOrder, id: \.self) { channel in
-                        connectedChannelRow(channel: channel)
-                            .tag(channel)
-                    }
-                }
-            }
 
             // フォロー中ライブセクション
             Section {
@@ -63,10 +58,16 @@ struct SidebarView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
                 } else {
-                    // 接続中チャンネルはライブリストから除外（接続中セクションに移動済みのため）
-                    // Set を事前構築して O(n*m) → O(n) に最適化
-                    let connectedChannels = Set(channelManager.channelOrder)
-                    ForEach(followedStreamStore.streams.filter { !connectedChannels.contains($0.userLogin.lowercased()) }) { stream in
+                    // 接続中チャンネルを先頭に並べる（各グループ内は元の順序を維持）
+                    let connectedSet = Set(channelManager.channelOrder)
+                    let connectedStreams = followedStreamStore.streams.filter {
+                        connectedSet.contains($0.userLogin.lowercased())
+                    }
+                    let otherStreams = followedStreamStore.streams.filter {
+                        !connectedSet.contains($0.userLogin.lowercased())
+                    }
+                    let sortedStreams = connectedStreams + otherStreams
+                    ForEach(sortedStreams) { stream in
                         StreamRow(stream: stream, profileImageStore: profileImageStore)
                             .tag(stream.userLogin)
                     }
@@ -87,7 +88,6 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         // ストリーム一覧が更新されたら新しい配信者のプロフィール画像を取得する
-        // （fetchUsers は取得済みユーザーを内部でフィルタリングするため重複APIコールは発生しない）
         .onChange(of: followedStreamStore.streams) { _, streams in
             let userIds = streams.map(\.userId)
             Task { await profileImageStore.fetchUsers(userIds: userIds) }
@@ -102,64 +102,6 @@ struct SidebarView: View {
             if let userId = authState.userId {
                 await profileImageStore.fetchUsers(userIds: [userId])
             }
-        }
-    }
-
-    /// 接続中チャンネルの行（コンテキストメニューで切断可能）
-    ///
-    /// FollowedStreamStore からプロフィール情報を引き、プロフィールアイコン＋接続状態ボーダーで表示する。
-    /// フォロー外のチャンネルの場合はプレースホルダーアイコンを表示する。
-    @ViewBuilder
-    private func connectedChannelRow(channel: String) -> some View {
-        let vm = channelManager.channels[channel]
-        let stream = followedStreamStore.stream(forUserLogin: channel)
-        let connectionColor = connectionColor(for: vm?.connectionState ?? .disconnected)
-        HStack(spacing: 8) {
-            // プロフィールアイコン + 接続状態ボーダー
-            // userId が nil（フォロー外チャンネル）の場合は ProfileImageCache を汚染しないようプレースホルダーを直接描画する
-            if let userId = stream?.userId {
-                ProfileImageView(
-                    userId: userId,
-                    imageUrl: profileImageStore.profileImageUrl(for: userId)
-                )
-                .overlay(
-                    Circle()
-                        .strokeBorder(connectionColor, lineWidth: 2)
-                )
-            } else {
-                Circle()
-                    .fill(Color.secondary.opacity(0.3))
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: ProfileImageCache.displaySize * 0.5))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(width: ProfileImageCache.displaySize, height: ProfileImageCache.displaySize)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(connectionColor, lineWidth: 2)
-                    )
-            }
-            Text(stream?.userName ?? channel)
-                .font(.body)
-                .lineLimit(1)
-            Spacer()
-        }
-        .padding(.vertical, 2)
-        .contextMenu {
-            Button("切断", role: .destructive) {
-                Task { await channelManager.leaveChannel(channel) }
-            }
-        }
-    }
-
-    /// 接続状態に対応する色を返す
-    private func connectionColor(for state: ConnectionState) -> Color {
-        switch state {
-        case .connected: return .green
-        case .connecting: return .yellow
-        case .error: return .red
-        case .disconnected: return .gray
         }
     }
 }
