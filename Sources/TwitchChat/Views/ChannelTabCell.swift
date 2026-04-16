@@ -106,11 +106,9 @@ struct ChannelTabCell: View {
         return ZStack {
             if isSelected {
                 // アクティブタブ: チャット欄（controlBackgroundColor）と同色
+                // ボーダーなし（下端の線をなくしてコンテンツと繋げる）
                 shape
                     .fill(Color(.controlBackgroundColor))
-                // 上部・左右の細いボーダー
-                shape
-                    .strokeBorder(Color(.separatorColor), lineWidth: 0.5)
             } else {
                 // 非アクティブタブ: 透明（タブバー背景に同化）
                 // ホバー時のみ薄い塗りで存在をほのめかす

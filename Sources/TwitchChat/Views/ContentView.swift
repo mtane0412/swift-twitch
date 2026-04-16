@@ -30,20 +30,11 @@ struct ContentView: View {
         } detail: {
             VStack(spacing: 0) {
                 if !channelManager.channelOrder.isEmpty {
-                    // ZStack でタブバーと Divider を重ねる
-                    // アクティブタブが activeHeight (inactiveHeight + 2) になるため
-                    // Divider の 1pt を覆い、コンテンツエリアと繋がって見える
-                    ZStack(alignment: .bottom) {
-                        ChannelTabBar(
-                            channelManager: channelManager,
-                            followedStreamStore: followedStreamStore,
-                            profileImageStore: profileImageStore
-                        )
-                        Rectangle()
-                            .fill(Color(.separatorColor))
-                            .frame(height: 1)
-                    }
-                    .frame(height: ChannelTabBar.height)
+                    ChannelTabBar(
+                        channelManager: channelManager,
+                        followedStreamStore: followedStreamStore,
+                        profileImageStore: profileImageStore
+                    )
                 }
 
                 // チャット本体: 選択中チャンネルのチャット、未選択時はプレースホルダー
