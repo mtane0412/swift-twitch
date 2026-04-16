@@ -91,6 +91,10 @@ struct ChannelTabCell: View {
     // MARK: - タブ背景
 
     /// Chrome 風の上部角丸タブ形状の背景
+    ///
+    /// - アクティブタブ: `controlBackgroundColor`（チャット欄の背景色と一致）
+    /// - 非アクティブタブ: `windowBackgroundColor`（タブバー背景色と同じ＝目立たない）
+    ///   ホバー時は `controlBackgroundColor` に近づける
     private var tabBackground: some View {
         let shape = UnevenRoundedRectangle(
             topLeadingRadius: Self.cornerRadius,
@@ -100,16 +104,19 @@ struct ChannelTabCell: View {
         )
         return ZStack {
             if isSelected {
-                // アクティブタブ: コンテンツエリアと同じ背景色
+                // アクティブタブ: チャット欄（controlBackgroundColor）と同色
                 shape
-                    .fill(Color(.windowBackgroundColor))
+                    .fill(Color(.controlBackgroundColor))
                 // 上部・左右の細いボーダー
                 shape
                     .strokeBorder(Color(.separatorColor), lineWidth: 0.5)
             } else {
-                // 非アクティブタブ: ホバー時に少し明るくする
+                // 非アクティブタブ: タブバー背景と同系色（windowBackgroundColor）
+                // ホバー時のみ少し明るくして存在を示す
                 shape
-                    .fill(Color(.windowBackgroundColor).opacity(isHovered ? 0.6 : 0.3))
+                    .fill(isHovered
+                          ? Color(.controlBackgroundColor).opacity(0.5)
+                          : Color(.windowBackgroundColor))
             }
         }
         .frame(height: isSelected ? Self.activeHeight : Self.inactiveHeight)

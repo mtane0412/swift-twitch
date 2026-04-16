@@ -26,6 +26,8 @@ struct ChatDetailView: View {
             // チャットメッセージリスト
             chatListView
         }
+        // タブバーのアクティブタブ色（controlBackgroundColor）と一致させる
+        .background(Color(.controlBackgroundColor))
     }
 
     /// チャットメッセージのスクロールビュー
