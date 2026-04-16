@@ -84,11 +84,11 @@ final class ChatViewModel {
     /// 最初に受信したメッセージから抽出した room-id（楽観的 UI の ChatMessage 生成に使用）
     private var currentRoomId: String?
 
-    /// 直近の楽観的 UI メッセージの ID（サーバー拒否時に rollback するために保持）
-    private var lastOptimisticMessageId: String?
-
-    /// 楽観的 UI メッセージの送信時刻（rollback 有効期間の判定に使用）
-    private var lastOptimisticSentAt: Date?
+    /// 楽観的 UI メッセージの送信時刻マップ（messageId → 送信時刻）
+    ///
+    /// 複数のメッセージを連続送信した場合でも各メッセージを個別に rollback できるよう
+    /// 辞書で管理する。NOTICE 受信時は rollback ウィンドウ内で最も古いものを除去する。
+    private var optimisticPendingMessages: [String: Date] = [:]
 
     /// 楽観的 UI メッセージを rollback する有効期間（秒）
     ///
@@ -182,8 +182,7 @@ final class ChatViewModel {
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil
-        lastOptimisticMessageId = nil
-        lastOptimisticSentAt = nil
+        optimisticPendingMessages.removeAll()
     }
 
     // MARK: - プライベートメソッド
@@ -247,8 +246,7 @@ final class ChatViewModel {
                 )
                 appendMessage(localMessage)
                 // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
-                lastOptimisticMessageId = localMessage.id
-                lastOptimisticSentAt = Date()
+                optimisticPendingMessages[localMessage.id] = Date()
             }
         } catch {
             sendError = error.localizedDescription
@@ -264,7 +262,8 @@ final class ChatViewModel {
     /// サーバーから受信した NOTICE を処理する
     ///
     /// エラー系 msg-id に対応する ChatSendError を `sendError` に反映し、
-    /// rollback ウィンドウ内であれば楽観的 UI メッセージを `messages` から除去する。
+    /// rollback ウィンドウ内で最も古い楽観的 UI メッセージを `messages` から除去する。
+    /// 複数メッセージを連続送信した場合は各メッセージを個別に rollback する。
     private func handleIncomingNotice(_ notice: TwitchNotice) {
         guard let error = ChatSendError.from(notice: notice) else {
             // 情報系通知（host_on, host_off 等）は何もしない
@@ -272,13 +271,15 @@ final class ChatViewModel {
         }
         sendError = error.errorDescription
 
-        // rollback: 直近の楽観的 UI メッセージが rollback ウィンドウ内なら除去する
-        if let messageId = lastOptimisticMessageId,
-           let sentAt = lastOptimisticSentAt,
-           Date().timeIntervalSince(sentAt) <= Self.optimisticRollbackWindow {
-            messages.removeAll { $0.id == messageId }
-            lastOptimisticMessageId = nil
-            lastOptimisticSentAt = nil
+        // rollback: ウィンドウ内の pending メッセージのうち最も古いものを除去する
+        // Twitch はメッセージを受け付けた順に NOTICE を返すため、最も古い pending を除去する
+        let now = Date()
+        let windowStart = now.addingTimeInterval(-Self.optimisticRollbackWindow)
+        if let (oldestId, _) = optimisticPendingMessages
+            .filter({ $0.value >= windowStart })
+            .min(by: { $0.value < $1.value }) {
+            messages.removeAll { $0.id == oldestId }
+            optimisticPendingMessages.removeValue(forKey: oldestId)
         }
     }
 

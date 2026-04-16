@@ -271,10 +271,9 @@ struct ChatViewModelTests {
             channel: "テストチャンネル",
             message: "You are sending messages too quickly."
         ))
-        try await Task.sleep(nanoseconds: 100_000_000)
 
         // 検証: sendError が日本語のレートリミット文言になっている
-        #expect(viewModel.sendError != nil)
+        await waitFor { viewModel.sendError != nil }
         #expect(viewModel.sendError == ChatSendError.rateLimited.errorDescription)
     }
 
@@ -292,9 +291,9 @@ struct ChatViewModelTests {
             channel: "テストチャンネル",
             message: "Your message was not sent because it is identical to the previous one."
         ))
-        try await Task.sleep(nanoseconds: 100_000_000)
 
         // 検証: 楽観 UI メッセージが取り消されて messages が空になる
+        await waitFor { viewModel.messages.isEmpty }
         #expect(viewModel.messages.isEmpty)
         #expect(viewModel.sendError == ChatSendError.duplicate.errorDescription)
     }
@@ -309,8 +308,8 @@ struct ChatViewModelTests {
             channel: "テストチャンネル",
             message: "You are permanently banned from talking in this channel."
         ))
-        try await Task.sleep(nanoseconds: 100_000_000)
 
+        await waitFor { viewModel.sendError != nil }
         #expect(viewModel.sendError == ChatSendError.banned.errorDescription)
         // 楽観 UI メッセージも取り消される
         #expect(viewModel.messages.isEmpty)
@@ -330,6 +329,7 @@ struct ChatViewModelTests {
             channel: "テストチャンネル",
             message: "Now hosting another channel."
         ))
+        // 十分に待ってから確認（状態変化がないことを確認するため最低限の待機）
         try await Task.sleep(nanoseconds: 100_000_000)
 
         // 検証: sendError は変化しない
@@ -345,6 +345,7 @@ struct ChatViewModelTests {
             channel: nil,
             message: "Login unsuccessful"
         ))
+        // 状態変化がないことを確認するため最低限の待機
         try await Task.sleep(nanoseconds: 100_000_000)
 
         #expect(viewModel.sendError == nil)
@@ -362,6 +363,22 @@ struct ChatViewModelTests {
     }
 
     // MARK: - ヘルパー
+
+    /// ViewModel の状態変化を条件が満たされるまで待機する
+    ///
+    /// `Task.sleep` による固定待機より確実に状態更新を待てる。
+    /// `timeout` 秒以内に条件が満たされなければタイムアウトとして抜ける。
+    ///
+    /// - Parameters:
+    ///   - timeout: 最大待機秒数（デフォルト 1.0 秒）
+    ///   - condition: 満たされるべき条件
+    private func waitFor(timeout: TimeInterval = 1.0, condition: () -> Bool) async {
+        let start = Date()
+        while !condition() {
+            if Date().timeIntervalSince(start) >= timeout { break }
+            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms ポーリング
+        }
+    }
 
     /// テスト用の ChatMessage を生成する
     private func makeTestChatMessage(displayName: String, text: String) -> ChatMessage {

@@ -305,7 +305,7 @@ struct TwitchIRCClientTests {
         await client.disconnect()
         connectTask.cancel()
 
-        // 検証: TwitchNotice が正しいプロパティで届く
+        // 検証: TwitchNotice が正しいプロパティで届く（"#haishinsha" → "haishinsha" に正規化）
         #expect(receivedNotices.count == 1)
         #expect(receivedNotices[0].msgId == "msg_ratelimit")
         #expect(receivedNotices[0].channel == "haishinsha")
@@ -336,9 +336,10 @@ struct TwitchIRCClientTests {
         await client.disconnect()
         connectTask.cancel()
 
-        // 検証: msgId が nil で message は trailing の通り
+        // 検証: msgId が nil、channel も nil（"*" はチャンネルではないため）、message は trailing の通り
         #expect(receivedNotices.count == 1)
         #expect(receivedNotices[0].msgId == nil)
+        #expect(receivedNotices[0].channel == nil)
         #expect(receivedNotices[0].message == "Login unsuccessful")
     }
 }

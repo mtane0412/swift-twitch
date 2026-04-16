@@ -209,9 +209,11 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
         case "NOTICE":
             // サーバーからの通知（レートリミット・BAN・スローモードなど）を配信
-            // params[0] は "#channel" 形式。"#" を除いてチャンネル名として保持する
-            let rawChannel = ircMessage.params.first
-            let channel = rawChannel.map { String($0.dropFirst()) }
+            // params[0] は "#channel" 形式または "*"（サーバー全体通知）。
+            // "#" プレフィックスを持つ場合のみ除去する。"*" などは nil にする。
+            let channel = ircMessage.params.first.flatMap { raw in
+                raw.hasPrefix("#") ? String(raw.dropFirst()) : nil
+            }
             let notice = TwitchNotice(
                 msgId: ircMessage.tags["msg-id"],
                 channel: channel,

@@ -2,8 +2,6 @@
 // Twitch IRC NOTICE コマンドを表すモデル
 // サーバーからの通知（レートリミット超過・BAN・スローモードなど）を保持する
 
-import Foundation
-
 /// Twitch IRC の NOTICE コマンド（サーバーからの通知）
 ///
 /// 認証接続後に `CAP REQ :twitch.tv/commands` を要求している場合、

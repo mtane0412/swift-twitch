@@ -148,6 +148,7 @@ struct IRCMessageParserTests {
         #expect(result?.command == "NOTICE")
         #expect(result?.tags["msg-id"] == "msg_duplicate")
         #expect(result?.params == ["#haishinsha"])
+        #expect(result?.trailing == "Your message was not sent because it is identical to the previous one you sent, less than 30 seconds ago.")
     }
 
     @Test("msg-id タグなしの NOTICE もパースできる")
@@ -159,6 +160,7 @@ struct IRCMessageParserTests {
         #expect(result != nil)
         #expect(result?.command == "NOTICE")
         #expect(result?.tags["msg-id"] == nil)
+        #expect(result?.params == ["*"])
         #expect(result?.trailing == "Login unsuccessful")
     }
 
@@ -171,6 +173,7 @@ struct IRCMessageParserTests {
         #expect(result?.command == "NOTICE")
         #expect(result?.tags["msg-id"] == "msg_banned")
         #expect(result?.params == ["#haishinsha"])
+        #expect(result?.trailing == "You are permanently banned from talking in haishinsha.")
     }
 
     // MARK: - 数値コマンド（RPL）
