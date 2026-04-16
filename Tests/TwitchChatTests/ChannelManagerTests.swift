@@ -236,4 +236,116 @@ struct ChannelManagerTests {
         manager.selectChannel("NintendoJP")
         #expect(manager.selectedChannel == "nintendojp")
     }
+
+    // MARK: - チャンネル並び替え
+
+    @Test("moveChannel で末尾のチャンネルを先頭に移動できる")
+    func testMoveChannelToFront() async {
+        // 前提: haishinsha1, haishinsha2, haishinsha3 の順で接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        await manager.joinChannel("haishinsha3")
+
+        // 末尾の haishinsha3 を先頭（index 0）に移動する
+        manager.moveChannel("haishinsha3", toIndex: 0)
+
+        #expect(manager.channelOrder == ["haishinsha3", "haishinsha1", "haishinsha2"])
+    }
+
+    @Test("moveChannel で先頭のチャンネルを末尾に移動できる")
+    func testMoveChannelToEnd() async {
+        // 前提: haishinsha1, haishinsha2, haishinsha3 の順で接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        await manager.joinChannel("haishinsha3")
+
+        // 先頭の haishinsha1 を末尾（index 2）に移動する
+        manager.moveChannel("haishinsha1", toIndex: 2)
+
+        #expect(manager.channelOrder == ["haishinsha2", "haishinsha3", "haishinsha1"])
+    }
+
+    @Test("moveChannel は同じ位置への移動で no-op になる")
+    func testMoveChannelSamePositionIsNoop() async {
+        // 前提: haishinsha1, haishinsha2 の順で接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+
+        // haishinsha1（index 0）を index 0 に移動しても順序が変わらない
+        manager.moveChannel("haishinsha1", toIndex: 0)
+
+        #expect(manager.channelOrder == ["haishinsha1", "haishinsha2"])
+    }
+
+    @Test("moveChannel は未知のチャンネル名では何もしない")
+    func testMoveChannelUnknownChannelIsNoop() async {
+        // 前提: haishinsha1 のみ接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+
+        // 接続していない "みんなの配信者" を移動しようとしてもクラッシュしない
+        manager.moveChannel("みんなの配信者", toIndex: 0)
+
+        #expect(manager.channelOrder == ["haishinsha1"])
+    }
+
+    @Test("moveChannel は上限を超える index を末尾にクランプする")
+    func testMoveChannelClampsLargeIndex() async {
+        // 前提: haishinsha1, haishinsha2, haishinsha3 の順で接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        await manager.joinChannel("haishinsha3")
+
+        // toIndex: 999 は末尾（index 2）にクランプされること
+        manager.moveChannel("haishinsha1", toIndex: 999)
+        #expect(manager.channelOrder == ["haishinsha2", "haishinsha3", "haishinsha1"])
+    }
+
+    @Test("moveChannel は負の index を先頭にクランプする")
+    func testMoveChannelClampsNegativeIndex() async {
+        // 前提: haishinsha1, haishinsha2, haishinsha3 の順で接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        await manager.joinChannel("haishinsha3")
+
+        // toIndex: -1 は先頭（index 0）にクランプされること
+        manager.moveChannel("haishinsha3", toIndex: -1)
+        #expect(manager.channelOrder == ["haishinsha3", "haishinsha1", "haishinsha2"])
+    }
+
+    @Test("moveChannel しても selectedChannel は変化しない")
+    func testMoveChannelPreservesSelection() async {
+        // 前提: haishinsha1, haishinsha2, haishinsha3 に接続し haishinsha2 を選択中
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        await manager.joinChannel("haishinsha3")
+        manager.selectChannel("haishinsha2")
+
+        // haishinsha2 が選択中のまま haishinsha3 を先頭に移動する
+        manager.moveChannel("haishinsha3", toIndex: 0)
+
+        // 並び替えても選択中チャンネルが変わらないこと
+        #expect(manager.selectedChannel == "haishinsha2")
+        #expect(manager.channelOrder == ["haishinsha3", "haishinsha1", "haishinsha2"])
+    }
+
+    @Test("moveChannel は大文字混在のチャンネル名を正規化して扱う")
+    func testMoveChannelNormalizesChannelName() async {
+        // 前提: haishinsha1, haishinsha2, haishinsha3 の順で接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        await manager.joinChannel("haishinsha3")
+
+        // 大文字混在の "Haishinsha3" を渡しても正規化して正しく動作する
+        manager.moveChannel("Haishinsha3", toIndex: 0)
+
+        #expect(manager.channelOrder == ["haishinsha3", "haishinsha1", "haishinsha2"])
+    }
 }
