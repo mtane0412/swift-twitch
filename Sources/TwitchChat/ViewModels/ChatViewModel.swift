@@ -112,6 +112,7 @@ final class ChatViewModel {
         connectionState = .connecting
         messages = []
         channelBadgesFetched = false
+        currentRoomId = nil
 
         // チャンネル切替時に前チャンネルのバッジが誤解決されないようクリア
         await badgeStore.resetChannelBadges()
@@ -156,6 +157,7 @@ final class ChatViewModel {
         await badgeStore.cancelGlobalFetch()
         await ircClient.disconnect()
         connectionState = .disconnected
+        currentRoomId = nil
     }
 
     // MARK: - プライベートメソッド

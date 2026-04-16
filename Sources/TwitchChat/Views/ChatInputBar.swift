@@ -21,8 +21,8 @@ struct ChatInputBar: View {
             // 認証エラーバナー（chat:edit スコープ不足またはログアウト）
             authBanner
 
-            // 入力フォーム（有効な場合のみ表示）
-            if viewModel.canSendMessage || isConnected {
+            // 入力フォーム（接続中のみ表示、送信不可の場合は disabled）
+            if isConnected {
                 inputForm
             }
         }
@@ -155,7 +155,7 @@ struct ChatInputBar: View {
     private var canSubmit: Bool {
         viewModel.canSendMessage
             && !viewModel.isSending
-            && !draft.trimmingCharacters(in: .whitespaces).isEmpty
+            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && draft.count <= 500
     }
 
@@ -169,7 +169,7 @@ struct ChatInputBar: View {
     /// メッセージを送信する
     private func submit() {
         let text = draft
-        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draft = ""
         Task {
             try? await viewModel.sendMessage(text)
