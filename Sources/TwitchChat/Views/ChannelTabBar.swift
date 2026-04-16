@@ -81,11 +81,12 @@ struct ChannelTabBar: View {
                                         return
                                     }
                                     // ドロップ位置から最終インデックスを決定して channelOrder を更新する
+                                    // withAnimation(nil) で全変化を即座に適用し、ドロップ時のアニメーションを防ぐ
                                     let targetIdx = finalIndex(startIdx: startIdx)
-                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                    withAnimation(nil) {
                                         channelManager.moveChannel(dragging, toIndex: targetIdx)
+                                        resetDragState()
                                     }
-                                    resetDragState()
                                 }
                         )
                     }
