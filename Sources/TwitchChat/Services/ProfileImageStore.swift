@@ -31,7 +31,7 @@ final class ProfileImageStore {
     // MARK: - プライベートプロパティ
 
     /// userId → profileImageUrl のキャッシュ
-    private var profileImageUrls: [String: String] = [:]
+    private var profileImageUrls: [String: URL] = [:]
 
     /// 現在フェッチ中の userId セット
     ///
@@ -57,7 +57,7 @@ final class ProfileImageStore {
     ///
     /// - Parameter userId: Twitch ユーザーID
     /// - Returns: プロフィール画像URL（未取得またはユーザーが存在しない場合は `nil`）
-    func profileImageUrl(for userId: String) -> String? {
+    func profileImageUrl(for userId: String) -> URL? {
         profileImageUrls[userId]
     }
 
@@ -107,7 +107,10 @@ final class ProfileImageStore {
                 profileImageUrls.removeAll()
             }
             for userData in response.data {
-                profileImageUrls[userData.id] = userData.profileImageUrl
+                // profileImageUrl が nil（空文字列・不正URL）のユーザーはキャッシュに追加しない
+                if let url = userData.profileImageUrl {
+                    profileImageUrls[userData.id] = url
+                }
             }
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はサイレントスキップ

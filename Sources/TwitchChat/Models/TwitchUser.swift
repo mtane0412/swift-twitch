@@ -22,13 +22,33 @@ struct HelixUserData: Decodable, Sendable, Identifiable, Equatable {
     let login: String
     /// 表示名（日本語名なども含む）
     let displayName: String
-    /// プロフィール画像 URL
-    let profileImageUrl: String
+    /// プロフィール画像 URL（空文字列・不正URLの場合は nil）
+    let profileImageUrl: URL?
 
     enum CodingKeys: String, CodingKey {
         case id
         case login
         case displayName = "display_name"
         case profileImageUrl = "profile_image_url"
+    }
+
+    /// カスタムデコードイニシャライザ
+    ///
+    /// - `profile_image_url` が空文字列または不正URLの場合、`profileImageUrl` を `nil` にする
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        login = try container.decode(String.self, forKey: .login)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        let urlString = try container.decode(String.self, forKey: .profileImageUrl)
+        profileImageUrl = URL(string: urlString)
+    }
+
+    /// テスト用メンバーワイズイニシャライザ
+    init(id: String, login: String, displayName: String, profileImageUrl: URL?) {
+        self.id = id
+        self.login = login
+        self.displayName = displayName
+        self.profileImageUrl = profileImageUrl
     }
 }
