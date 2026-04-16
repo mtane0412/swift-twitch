@@ -125,4 +125,125 @@ struct ChannelManagerTests {
         #expect(manager.channelOrder.isEmpty)
         #expect(manager.selectedChannel == nil)
     }
+
+    @Test("選択中チャンネルを退出すると直前のチャンネルが選択される")
+    func testLeaveSelectedChannelFallsBackToPreviousChannel() async throws {
+        // 2チャンネル接続中にhaishinsha2（選択中）を退出すると、haishinsha1が選択される
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(manager.selectedChannel == "haishinsha2")
+
+        await manager.leaveChannel("haishinsha2")
+
+        #expect(manager.selectedChannel == "haishinsha1")
+        #expect(manager.channels.count == 1)
+    }
+
+    // MARK: - selectChannel / isJoined
+
+    @Test("selectChannel で未接続チャンネルを指定しても selectedChannel は変化しない")
+    func testSelectChannelIgnoresNonJoined() {
+        // 前提: どのチャンネルにも接続していない
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+
+        // 未接続チャンネルを selectChannel しても selectedChannel は nil のまま
+        manager.selectChannel("みんなの配信者")
+        #expect(manager.selectedChannel == nil)
+    }
+
+    @Test("selectChannel で既接続チャンネルに切り替えられる")
+    func testSelectChannelSwitchesSelection() async throws {
+        // 前提: haishinsha1 と haishinsha2 の 2 チャンネルに接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // haishinsha2 が選択中のときに haishinsha1 を selectChannel する
+        #expect(manager.selectedChannel == "haishinsha2")
+        manager.selectChannel("haishinsha1")
+
+        // channels の数は変化せず、selectedChannel だけ切り替わること
+        #expect(manager.selectedChannel == "haishinsha1")
+        #expect(manager.channels.count == 2)
+    }
+
+    @Test("selectChannel を呼んでも IRC クライアントの connect は再発火しない")
+    func testSelectChannelDoesNotReconnect() async throws {
+        // 前提: haishinsha1 と haishinsha2 に接続済み
+        var mockClients: [MockTwitchIRCClient] = []
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: {
+            let client = MockTwitchIRCClient()
+            mockClients.append(client)
+            return client
+        })
+
+        await manager.joinChannel("haishinsha1")
+        await manager.joinChannel("haishinsha2")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // この時点での各クライアントの接続呼び出し回数を取得
+        let countsBefore = await withTaskGroup(of: Int.self) { group in
+            for client in mockClients {
+                group.addTask { await client.connectCallCount }
+            }
+            var results: [Int] = []
+            for await count in group { results.append(count) }
+            return results
+        }
+
+        // selectChannel を呼ぶ（再接続が走らないことを検証）
+        manager.selectChannel("haishinsha1")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // connect の呼び出し回数が増えていないこと
+        let countsAfter = await withTaskGroup(of: Int.self) { group in
+            for client in mockClients {
+                group.addTask { await client.connectCallCount }
+            }
+            var results: [Int] = []
+            for await count in group { results.append(count) }
+            return results
+        }
+
+        #expect(countsBefore.reduce(0, +) == countsAfter.reduce(0, +))
+    }
+
+    @Test("isJoined は接続中のチャンネルに true を返す")
+    func testIsJoinedReturnsTrueForJoinedChannel() async throws {
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+
+        await manager.joinChannel("haishinsha_yamada")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(manager.isJoined("haishinsha_yamada") == true)
+    }
+
+    @Test("isJoined は未接続のチャンネルに false を返す")
+    func testIsJoinedReturnsFalseForNonJoinedChannel() {
+        let manager = ChannelManager(authState: AuthState())
+
+        #expect(manager.isJoined("未接続チャンネル") == false)
+    }
+
+    @Test("selectChannel と isJoined は大文字混在のチャンネル名を正規化して扱う")
+    func testSelectChannelAndIsJoinedNormalizesChannelName() async throws {
+        // 前提: 小文字 "nintendojp" で接続済み
+        let manager = ChannelManager(authState: AuthState(), makeIRCClient: { MockTwitchIRCClient() })
+
+        await manager.joinChannel("nintendojp")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 大文字混在で isJoined を呼んでも true が返ること
+        #expect(manager.isJoined("NintendoJP") == true)
+
+        // 大文字混在で selectChannel を呼んでも selectedChannel が正規化された名前に切り替わること
+        manager.selectChannel("NintendoJP")
+        #expect(manager.selectedChannel == "nintendojp")
+    }
 }

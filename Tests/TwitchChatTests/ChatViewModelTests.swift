@@ -12,6 +12,8 @@ import Testing
 actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     private(set) var connectedChannel: String?
     private(set) var disconnectCalled = false
+    /// connect() が呼ばれた回数（selectChannel での再接続がないことを検証するために使用）
+    private(set) var connectCallCount = 0
     private var messageContinuation: AsyncStream<ChatMessage>.Continuation?
     let messageStream: AsyncStream<ChatMessage>
 
@@ -22,6 +24,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     }
 
     func connect(to channel: String, accessToken: String?, userLogin: String?) async throws {
+        connectCallCount += 1
         connectedChannel = channel
     }
 

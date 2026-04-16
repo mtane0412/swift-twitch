@@ -113,6 +113,27 @@ final class ChannelManager {
         }
     }
 
+    /// 指定チャンネルが既に接続中かどうかを返す
+    ///
+    /// - Parameter channelLogin: チャンネルのログイン名（大文字小文字は自動正規化）
+    /// - Returns: 接続中なら `true`、未接続なら `false`
+    func isJoined(_ channelLogin: String) -> Bool {
+        channels[channelLogin.lowercased()] != nil
+    }
+
+    /// 既接続チャンネルを選択状態にする（同期）
+    ///
+    /// 未接続チャンネルを指定した場合は何もしない。
+    /// `joinChannel(_:)` は未接続時に新規接続を開始するが、このメソッドは選択切替のみ行う。
+    /// サイドバーのアイコンクリックやタブバーのタブクリックから呼ぶことを想定している。
+    ///
+    /// - Parameter channelLogin: チャンネルのログイン名（大文字小文字は自動正規化）
+    func selectChannel(_ channelLogin: String) {
+        let normalized = channelLogin.lowercased()
+        guard channels[normalized] != nil else { return }
+        selectedChannel = normalized
+    }
+
     /// 全チャンネルから切断して管理状態をリセットする
     func disconnectAll() async {
         let allChannels = channelOrder
