@@ -57,6 +57,17 @@ public final class AuthState {
     /// 直近のログインエラーメッセージ（UI 表示用、成功時は `nil` にリセット）
     private(set) var loginError: String?
 
+    /// 現在のアクセストークンに付与されているスコープ一覧
+    ///
+    /// `validateToken` レスポンスの `scopes` フィールドを保存する。
+    /// ログアウト時は空配列にリセットされる
+    private(set) var grantedScopes: [String] = []
+
+    /// コメント投稿（PRIVMSG 送信）に必要な `chat:edit` スコープを保有しているか
+    ///
+    /// `false` の場合、送信 UI は無効化され再ログインを促す
+    var canSendChat: Bool { grantedScopes.contains("chat:edit") }
+
     // MARK: - プライベートプロパティ
 
     private let authClient: any TwitchAuthClientProtocol
@@ -112,6 +123,19 @@ public final class AuthState {
             #if DEBUG
             print("[AuthState] restoreSession: validateToken 成功 — login=\(validateResponse.login)")
             #endif
+
+            // chat:edit スコープ不足の場合、既存セッションを自動ログアウトして再ログインを促す
+            // （コメント投稿機能追加に伴い、古いスコープのトークンを無効扱いにする）
+            let scopes = validateResponse.scopes
+            if !scopes.contains("chat:edit") {
+                #if DEBUG
+                print("[AuthState] restoreSession: chat:edit スコープなし — 自動ログアウトして再ログインを要求")
+                #endif
+                await logout()
+                return
+            }
+
+            grantedScopes = scopes
             accessToken = savedToken
             // validateResponse.userId を優先して設定し、未保存なら Keychain にも保存する
             userId = validateResponse.userId
@@ -179,6 +203,7 @@ public final class AuthState {
             try await keychainStore.save(key: "user_login", value: validateResponse.login)
 
             deviceFlowInfo = nil
+            grantedScopes = validateResponse.scopes
             accessToken = tokenResponse.accessToken
             userId = validateResponse.userId
             status = .loggedIn(userLogin: validateResponse.login)
@@ -220,6 +245,7 @@ public final class AuthState {
         await keychainStore.deleteAll()
         accessToken = nil
         userId = nil
+        grantedScopes = []
         status = .loggedOut
     }
 
@@ -262,6 +288,7 @@ public final class AuthState {
             try await keychainStore.save(key: "access_token", value: tokenResponse.accessToken)
             try await keychainStore.save(key: "refresh_token", value: tokenResponse.refreshToken)
 
+            grantedScopes = validateResponse.scopes
             accessToken = tokenResponse.accessToken
             userId = await keychainStore.load(key: "user_id")
             status = .loggedIn(userLogin: validateResponse.login)
@@ -269,6 +296,7 @@ public final class AuthState {
             await keychainStore.deleteAll()
             accessToken = nil
             userId = nil
+            grantedScopes = []
             status = .loggedOut
         }
     }

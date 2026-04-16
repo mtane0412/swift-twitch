@@ -31,8 +31,9 @@ enum AuthConfig {
     /// 必要な OAuth スコープ
     ///
     /// - `chat:read`: IRC チャット読み取り（認証接続に使用）
+    /// - `chat:edit`: IRC チャット書き込み（コメント投稿に使用）
     /// - `user:read:follows`: フォロー中の配信中ストリーム一覧取得に使用
-    static let scopes: [String] = ["chat:read", "user:read:follows"]
+    static let scopes: [String] = ["chat:read", "chat:edit", "user:read:follows"]
 
     // MARK: - Client ID
 

@@ -184,4 +184,97 @@ struct TwitchIRCClientTests {
         #expect(receivedMessages[0].text == "こんにちはテストです")
         #expect(receivedMessages[0].colorHex == "#FF0000")
     }
+
+    // MARK: - PRIVMSG 送信
+
+    @Test("認証接続後に sendPrivmsg を呼ぶと正しいフォーマットで送信される")
+    func 認証接続後にsendPrivmsgを呼ぶと正しいフォーマットで送信される() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 認証接続でチャンネルに参加
+        let connectTask = Task {
+            try await client.connect(to: "haishinshaA", accessToken: "テスト用トークン", userLogin: "視聴者001")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: sendPrivmsg を呼ぶと PRIVMSG コマンドが送信される（チャンネル名は小文字正規化済み）
+        try await client.sendPrivmsg("こんにちは！")
+
+        let sent = await mockWS.sentMessages
+        #expect(sent.contains("PRIVMSG #haishinshaa :こんにちは！"))
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("未接続状態での sendPrivmsg は notConnected を throw する")
+    func 未接続状態でのsendPrivmsgはnotConnectedをthrowする() async {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 接続していない状態
+        await #expect(throws: TwitchIRCClientError.notConnected) {
+            try await client.sendPrivmsg("メッセージ送信テスト")
+        }
+    }
+
+    @Test("匿名接続状態での sendPrivmsg は notAuthenticated を throw する")
+    func 匿名接続状態でのsendPrivmsgはnotAuthenticatedをthrowする() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 匿名接続（accessToken/userLogin なし）
+        let connectTask = Task {
+            try await client.connect(to: "testchannel", accessToken: nil, userLogin: nil)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: 匿名接続では notAuthenticated を throw する
+        await #expect(throws: TwitchIRCClientError.notAuthenticated) {
+            try await client.sendPrivmsg("匿名送信テスト")
+        }
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("disconnect 後の sendPrivmsg は notConnected を throw する")
+    func disconnect後のsendPrivmsgはnotConnectedをthrowする() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 認証接続後に切断
+        let connectTask = Task {
+            try await client.connect(to: "testchannel", accessToken: "テスト用トークン", userLogin: "視聴者002")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        await client.disconnect()
+        connectTask.cancel()
+
+        // 検証: 切断後は notConnected を throw する
+        await #expect(throws: TwitchIRCClientError.notConnected) {
+            try await client.sendPrivmsg("切断後送信テスト")
+        }
+    }
+
+    @Test("チャンネル名は接続時に正規化された小文字が PRIVMSG ターゲットに使われる")
+    func チャンネル名は正規化された小文字がPRIVMSGターゲットに使われる() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 大文字を含むチャンネル名で認証接続
+        let connectTask = Task {
+            try await client.connect(to: "TestChannel", accessToken: "テスト用トークン", userLogin: "視聴者003")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: PRIVMSG は小文字チャンネル名を使う
+        try await client.sendPrivmsg("大文字チャンネルテスト")
+        let sent = await mockWS.sentMessages
+        #expect(sent.contains("PRIVMSG #testchannel :大文字チャンネルテスト"))
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
 }

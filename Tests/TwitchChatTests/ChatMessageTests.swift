@@ -186,4 +186,64 @@ struct ChatMessageTests {
         let chatMessage = ChatMessage(from: ircMessage)
         #expect(chatMessage?.roomId == nil)
     }
+
+    // MARK: - 楽観的 UI 用イニシャライザ
+
+    @Test("楽観的 UI 用イニシャライザで ChatMessage を生成できる")
+    func 楽観的UI用イニシャライザでChatMessageを生成できる() {
+        // 前提: ローカルユーザー名とテキストを指定
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            displayName: "山田太郎",
+            text: "こんにちは！",
+            roomId: "12345678"
+        )
+
+        // 検証: 各フィールドが期待通りに設定される
+        #expect(chatMessage.username == "yamadataro")
+        #expect(chatMessage.displayName == "山田太郎")
+        #expect(chatMessage.text == "こんにちは！")
+        #expect(chatMessage.roomId == "12345678")
+        #expect(chatMessage.colorHex == nil)
+        #expect(chatMessage.badges.isEmpty)
+        #expect(chatMessage.emotes.isEmpty)
+        #expect(!chatMessage.id.isEmpty)
+    }
+
+    @Test("楽観的 UI 用イニシャライザで displayName を省略すると username にフォールバックされる")
+    func 楽観的UI用イニシャライザでdisplayNameを省略するとusernameにフォールバックされる() {
+        // 前提: displayName を省略して生成
+        let chatMessage = ChatMessage(
+            localUsername: "testviewer",
+            text: "テストメッセージ"
+        )
+
+        // 検証: displayName が username と同じになる
+        #expect(chatMessage.username == "testviewer")
+        #expect(chatMessage.displayName == "testviewer")
+    }
+
+    @Test("楽観的 UI 用イニシャライザで segments はテキスト全体の1セグメントになる")
+    func 楽観的UI用イニシャライザでsegmentsはテキスト全体の1セグメントになる() {
+        // 前提: テキストを指定して生成（エモートなし）
+        let chatMessage = ChatMessage(
+            localUsername: "haishinshaA",
+            text: "配信開始！"
+        )
+
+        // 検証: segments がテキスト全体の1セグメントになる
+        #expect(chatMessage.segments == [.text("配信開始！")])
+        #expect(chatMessage.emotes.isEmpty)
+    }
+
+    @Test("楽観的 UI 用イニシャライザで生成した id は一意な UUID 形式になる")
+    func 楽観的UI用イニシャライザで生成したidは一意なUUID形式になる() {
+        // 前提: 同じパラメータで2つのメッセージを生成
+        let message1 = ChatMessage(localUsername: "視聴者001", text: "同じメッセージ")
+        let message2 = ChatMessage(localUsername: "視聴者001", text: "同じメッセージ")
+
+        // 検証: id が異なる（UUID によるユニーク保証）
+        #expect(message1.id != message2.id)
+        #expect(!message1.id.isEmpty)
+    }
 }

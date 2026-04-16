@@ -35,7 +35,7 @@ struct AuthStateTests {
                 clientId: "testclientid",
                 login: "テスト配信者",
                 userId: "12345678",
-                scopes: ["chat:read"],
+                scopes: ["chat:read", "chat:edit", "user:read:follows"],
                 expiresIn: 10000
             )
         )
@@ -222,6 +222,123 @@ struct AuthStateTests {
         #expect(authState.accessToken == nil)
         #expect(await store.load(key: "access_token") == nil)
         #expect(await store.load(key: "refresh_token") == nil)
+
+        await store.deleteAll()
+    }
+
+    // MARK: - スコープ管理・canSendChat
+
+    @Test("restoreSession 成功時に grantedScopes が保存される")
+    func restoreSession成功時にgrantedScopesが保存される() async throws {
+        let store = makeTestKeychainStore()
+        try await store.save(key: "access_token", value: "テスト用トークン")
+
+        // 前提: chat:read と chat:edit を含む validateResponse を返すモック
+        let mockClient = MockTwitchAuthClient(
+            validateResponse: TwitchValidateResponse(
+                clientId: "testclientid",
+                login: "配信者ユーザー",
+                userId: "99999",
+                scopes: ["chat:read", "chat:edit"],
+                expiresIn: 14400
+            )
+        )
+        let authState = makeAuthState(authClient: mockClient, keychainStore: store)
+        await authState.restoreSession()
+
+        // 検証: grantedScopes にスコープが保存される
+        #expect(authState.grantedScopes.contains("chat:read"))
+        #expect(authState.grantedScopes.contains("chat:edit"))
+        // 検証: canSendChat が true になる
+        #expect(authState.canSendChat == true)
+
+        await store.deleteAll()
+    }
+
+    @Test("login 成功時に grantedScopes が保存される")
+    func login成功時にgrantedScopesが保存される() async throws {
+        let store = makeTestKeychainStore()
+
+        let mockClient = MockTwitchAuthClient(
+            deviceCodeResponse: TwitchDeviceCodeResponse(
+                deviceCode: "テスト用デバイスコード",
+                userCode: "XYZ-67890",
+                verificationUri: "https://www.twitch.tv/activate",
+                expiresIn: 1800,
+                interval: 0
+            ),
+            tokenResponse: TwitchTokenResponse(
+                accessToken: "テスト用ログイントークン",
+                refreshToken: "テスト用リフレッシュトークン",
+                expiresIn: 14400,
+                tokenType: "bearer",
+                scope: ["chat:read", "chat:edit"]
+            ),
+            validateResponse: TwitchValidateResponse(
+                clientId: "testclientid",
+                login: "新規ログイン者",
+                userId: "11111",
+                scopes: ["chat:read", "chat:edit"],
+                expiresIn: 14400
+            )
+        )
+        let authState = makeAuthState(authClient: mockClient, keychainStore: store)
+        await authState.login()
+
+        // 検証: grantedScopes にスコープが保存される
+        #expect(authState.grantedScopes.contains("chat:edit"))
+        #expect(authState.canSendChat == true)
+
+        await store.deleteAll()
+    }
+
+    @Test("chat:edit を含まないスコープの場合 canSendChat は false になる")
+    func chatEditを含まないスコープの場合canSendChatはfalseになる() async throws {
+        let store = makeTestKeychainStore()
+        try await store.save(key: "access_token", value: "スコープ不足トークン")
+
+        // 前提: chat:edit を含まない validateResponse
+        let mockClient = MockTwitchAuthClient(
+            validateResponse: TwitchValidateResponse(
+                clientId: "testclientid",
+                login: "旧バージョンユーザー",
+                userId: "22222",
+                scopes: ["chat:read"],
+                expiresIn: 14400
+            )
+        )
+        let authState = makeAuthState(authClient: mockClient, keychainStore: store)
+        // restoreSession では chat:edit がない場合に自動ログアウト
+        await authState.restoreSession()
+
+        // 検証: 自動ログアウトされて canSendChat は false
+        #expect(authState.canSendChat == false)
+        #expect(authState.status == .loggedOut)
+
+        await store.deleteAll()
+    }
+
+    @Test("restoreSession で chat:edit がない場合は自動ログアウトされる")
+    func restoreSessionでchatEditがない場合は自動ログアウトされる() async throws {
+        let store = makeTestKeychainStore()
+        try await store.save(key: "access_token", value: "スコープ不足のトークン")
+
+        // 前提: chat:edit を含まない validateResponse（旧スコープのトークン）
+        let mockClient = MockTwitchAuthClient(
+            validateResponse: TwitchValidateResponse(
+                clientId: "testclientid",
+                login: "既存ユーザー",
+                userId: "33333",
+                scopes: ["chat:read", "user:read:follows"],
+                expiresIn: 14400
+            )
+        )
+        let authState = makeAuthState(authClient: mockClient, keychainStore: store)
+        await authState.restoreSession()
+
+        // 検証: chat:edit がないため自動ログアウト
+        #expect(authState.status == .loggedOut)
+        #expect(authState.accessToken == nil)
 
         await store.deleteAll()
     }

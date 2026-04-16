@@ -1,6 +1,6 @@
 // ChatDetailView.swift
 // チャット詳細ペイン
-// 選択中チャンネルのメッセージリストとエラー表示を担当する
+// 選択中チャンネルのメッセージリスト・エラー表示・コメント入力バーを担当する
 
 import SwiftUI
 
@@ -9,8 +9,10 @@ import SwiftUI
 /// - エラー時はエラーメッセージを表示
 /// - チャットメッセージを ScrollView + LazyVStack で表示
 /// - 新メッセージ到着時に自動スクロール
+/// - 下部にコメント投稿用入力バーを表示
 struct ChatDetailView: View {
     var viewModel: ChatViewModel
+    var authState: AuthState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +27,10 @@ struct ChatDetailView: View {
 
             // チャットメッセージリスト
             chatListView
+
+            // コメント投稿用入力バー
+            Divider()
+            ChatInputBar(viewModel: viewModel, authState: authState)
         }
         // タブバーのアクティブタブ色（controlBackgroundColor）と一致させる
         .background(Color(.controlBackgroundColor))

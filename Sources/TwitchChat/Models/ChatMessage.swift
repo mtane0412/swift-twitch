@@ -66,6 +66,35 @@ struct ChatMessage: Sendable, Identifiable {
     /// メッセージの受信時刻
     let receivedAt: Date
 
+    /// 楽観的 UI 表示のためのローカル ChatMessage を生成する
+    ///
+    /// Twitch IRC は自分が送信した PRIVMSG をエコーバックしないため、
+    /// 送信直後にローカルで ChatMessage を組み立てて表示リストに追加する際に使用する。
+    /// エモートは未解決のためセグメントはテキスト全体の1要素になる。
+    ///
+    /// - Parameters:
+    ///   - username: 送信者のログイン名（IRC の NICK に使用した小文字の識別子）
+    ///   - displayName: 表示名（省略時は username と同じ値を使用）
+    ///   - text: 送信したメッセージ本文
+    ///   - roomId: 接続中チャンネルの room-id（既知の場合は渡す、省略可）
+    init(
+        localUsername username: String,
+        displayName: String? = nil,
+        text: String,
+        roomId: String? = nil
+    ) {
+        self.id = UUID().uuidString
+        self.username = username
+        self.displayName = displayName ?? username
+        self.text = text
+        self.colorHex = nil
+        self.badges = []
+        self.emotes = []
+        self.segments = MessageSegment.segments(from: text, emotePositions: [])
+        self.roomId = roomId
+        self.receivedAt = Date()
+    }
+
     /// IRCMessage から ChatMessage を生成する
     ///
     /// PRIVMSG コマンド以外、または trailing がない場合は nil を返す
