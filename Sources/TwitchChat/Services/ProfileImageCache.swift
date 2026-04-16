@@ -51,19 +51,14 @@ final class ProfileImageCache: @unchecked Sendable {
     ///
     /// - Parameters:
     ///   - userId: Twitch ユーザーID（キャッシュキーとして使用）
-    ///   - imageUrl: プロフィール画像 URL 文字列
+    ///   - imageUrl: プロフィール画像 URL
     /// - Returns: ダウンロード済みの NSImage（`displaySize` にリサイズ済み）。取得失敗時は nil
-    func image(for userId: String, imageUrl: String) async -> NSImage? {
+    func image(for userId: String, imageUrl: URL) async -> NSImage? {
         let cacheKey = userId as NSString
 
         // キャッシュヒット: 即時返却
         if let cached = imageCache.object(forKey: cacheKey) {
             return cached
-        }
-
-        guard let url = URL(string: imageUrl) else {
-            logger.warning("プロフィール画像の URL が不正: \(imageUrl)")
-            return nil
         }
 
         // 進行中タスクへの相乗り、または新規タスクの作成（排他制御）
@@ -75,7 +70,7 @@ final class ProfileImageCache: @unchecked Sendable {
                 guard let self else { return nil as NSImage? }
                 defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: userId) } }
 
-                guard let image = await self.download(from: url) else { return nil }
+                guard let image = await self.download(from: imageUrl) else { return nil }
                 self.store(image, for: userId)
                 return image
             }

@@ -51,7 +51,7 @@ private func makeHelixUser(
     id: String = "111111",
     login: String = "テスト配信者",
     displayName: String = "テスト配信者の表示名",
-    profileImageUrl: String = "https://example.com/profile.png"
+    profileImageUrl: URL? = URL(string: "https://example.com/profile.png")
 ) -> HelixUserData {
     HelixUserData(
         id: id,
@@ -83,15 +83,15 @@ struct ProfileImageStoreTests {
     func testFetchProfileImageUrls() async {
         let mockClient = MockProfileImageAPIClient()
         await mockClient.setUsers([
-            makeHelixUser(id: "111111", profileImageUrl: "https://example.com/user1.png"),
-            makeHelixUser(id: "222222", profileImageUrl: "https://example.com/user2.png")
+            makeHelixUser(id: "111111", profileImageUrl: URL(string: "https://example.com/user1.png")),
+            makeHelixUser(id: "222222", profileImageUrl: URL(string: "https://example.com/user2.png"))
         ])
         let store = ProfileImageStore(apiClient: mockClient)
 
         await store.fetchUsers(userIds: ["111111", "222222"])
 
-        #expect(store.profileImageUrl(for: "111111") == "https://example.com/user1.png")
-        #expect(store.profileImageUrl(for: "222222") == "https://example.com/user2.png")
+        #expect(store.profileImageUrl(for: "111111") == URL(string: "https://example.com/user1.png"))
+        #expect(store.profileImageUrl(for: "222222") == URL(string: "https://example.com/user2.png"))
     }
 
     @Test("ユーザーIDが空の場合は API を呼ばない")
@@ -121,7 +121,7 @@ struct ProfileImageStoreTests {
     func testDoesNotRefetchExistingUsers() async {
         let mockClient = MockProfileImageAPIClient()
         await mockClient.setUsers([
-            makeHelixUser(id: "111111", profileImageUrl: "https://example.com/user1.png")
+            makeHelixUser(id: "111111", profileImageUrl: URL(string: "https://example.com/user1.png"))
         ])
         let store = ProfileImageStore(apiClient: mockClient)
 
@@ -135,12 +135,33 @@ struct ProfileImageStoreTests {
         #expect(callCount == 1)
     }
 
+    @Test("プロフィール画像URLが nil のユーザーは再取得しない")
+    func testDoesNotRefetchUsersWithNilProfileImageUrl() async {
+        let mockClient = MockProfileImageAPIClient()
+        // profileImageUrl が nil（空URL）のユーザーを返す
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", profileImageUrl: nil)
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        // 1回目: APIレスポンスを受信（URL は nil）
+        await store.fetchUsers(userIds: ["111111"])
+        // 2回目: 同じユーザーID（フェッチ済みのため再取得しない）
+        await store.fetchUsers(userIds: ["111111"])
+
+        // API は1回しか呼ばれていないこと
+        let callCount = await mockClient.callCount
+        #expect(callCount == 1)
+        // profileImageUrl は nil のまま
+        #expect(store.profileImageUrl(for: "111111") == nil)
+    }
+
     @Test("未取得のユーザーのみ API を呼ぶ")
     func testFetchesOnlyNewUsers() async {
         let mockClient = MockProfileImageAPIClient()
         await mockClient.setUsers([
-            makeHelixUser(id: "111111", profileImageUrl: "https://example.com/user1.png"),
-            makeHelixUser(id: "333333", profileImageUrl: "https://example.com/user3.png")
+            makeHelixUser(id: "111111", profileImageUrl: URL(string: "https://example.com/user1.png")),
+            makeHelixUser(id: "333333", profileImageUrl: URL(string: "https://example.com/user3.png"))
         ])
         let store = ProfileImageStore(apiClient: mockClient)
 
@@ -163,7 +184,7 @@ struct ProfileImageStoreTests {
     func testClearResetsUsers() async {
         let mockClient = MockProfileImageAPIClient()
         await mockClient.setUsers([
-            makeHelixUser(id: "111111", profileImageUrl: "https://example.com/user1.png")
+            makeHelixUser(id: "111111", profileImageUrl: URL(string: "https://example.com/user1.png"))
         ])
         let store = ProfileImageStore(apiClient: mockClient)
 

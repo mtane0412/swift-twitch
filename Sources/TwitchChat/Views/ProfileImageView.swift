@@ -13,8 +13,8 @@ struct ProfileImageView: View {
 
     /// Twitch ユーザーID（キャッシュキーとして使用）
     let userId: String
-    /// プロフィール画像 URL 文字列
-    let imageUrl: String?
+    /// プロフィール画像 URL
+    let imageUrl: URL?
     /// 表示サイズ（ポイント）
     var size: CGFloat = ProfileImageCache.displaySize
 
@@ -42,7 +42,7 @@ struct ProfileImageView: View {
         .clipShape(Circle())
         // userId または imageUrl のどちらが変わっても再取得する
         // セパレータ（":"）を使用して userId + imageUrl の文字列衝突を防ぐ
-        .task(id: userId + ":" + (imageUrl ?? "")) {
+        .task(id: userId + ":" + (imageUrl?.absoluteString ?? "")) {
             await loadImage()
         }
     }

@@ -31,7 +31,12 @@ final class ProfileImageStore {
     // MARK: - プライベートプロパティ
 
     /// userId → profileImageUrl のキャッシュ
-    private var profileImageUrls: [String: String] = [:]
+    private var profileImageUrls: [String: URL] = [:]
+
+    /// API レスポンスを受信済みの userId セット
+    ///
+    /// `profileImageUrl` が nil（空URL）のユーザーも含めて追跡し、繰り返しの API 呼び出しを防ぐ
+    private var fetchedUserIds: Set<String> = []
 
     /// 現在フェッチ中の userId セット
     ///
@@ -57,7 +62,7 @@ final class ProfileImageStore {
     ///
     /// - Parameter userId: Twitch ユーザーID
     /// - Returns: プロフィール画像URL（未取得またはユーザーが存在しない場合は `nil`）
-    func profileImageUrl(for userId: String) -> String? {
+    func profileImageUrl(for userId: String) -> URL? {
         profileImageUrls[userId]
     }
 
@@ -68,8 +73,9 @@ final class ProfileImageStore {
     ///         認証エラーはサイレントスキップ（プロフィール画像は必須ではないため）。
     func fetchUsers(userIds: [String]) async {
         // 未取得かつフェッチ中でないユーザーのみ対象にする
-        // （@MainActor の await サスペンション中に別タスクが同じ ID を重複リクエストする問題を防ぐ）
-        let newUserIds = userIds.filter { profileImageUrls[$0] == nil && !inFlightUserIds.contains($0) }
+        // fetchedUserIds でフェッチ済み（URL が nil のユーザーを含む）を除外し、
+        // @MainActor の await サスペンション中に別タスクが同じ ID を重複リクエストする問題を防ぐ
+        let newUserIds = userIds.filter { !fetchedUserIds.contains($0) && !inFlightUserIds.contains($0) }
         guard !newUserIds.isEmpty else { return }
 
         // フェッチ中フラグを設定し、完了後に必ず解除する
@@ -88,6 +94,7 @@ final class ProfileImageStore {
     /// ログアウト時など、データを消去したい場合に使用する
     func clear() {
         profileImageUrls = [:]
+        fetchedUserIds = []
         inFlightUserIds = []
     }
 
@@ -103,11 +110,18 @@ final class ProfileImageStore {
                 queryItems: queryItems
             )
             // キャッシュ上限超過時は全消去してメモリ増大を防ぐ
+            // fetchedUserIds も同時にクリアしないと上限超過後に再取得されなくなるため一緒にリセットする
             if profileImageUrls.count + response.data.count > Self.maxCacheEntries {
                 profileImageUrls.removeAll()
+                fetchedUserIds.removeAll()
             }
             for userData in response.data {
-                profileImageUrls[userData.id] = userData.profileImageUrl
+                // レスポンスを受信したユーザーはフェッチ済みとしてマーク（URL が nil でも再取得しない）
+                fetchedUserIds.insert(userData.id)
+                // profileImageUrl が nil（空文字列・不正URL）のユーザーはURLキャッシュに追加しない
+                if let url = userData.profileImageUrl {
+                    profileImageUrls[userData.id] = url
+                }
             }
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はサイレントスキップ

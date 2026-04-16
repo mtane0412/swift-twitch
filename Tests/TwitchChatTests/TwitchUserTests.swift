@@ -41,7 +41,7 @@ struct TwitchUserTests {
         #expect(userData.id == "141981764")
         #expect(userData.login == "twitchdev")
         #expect(userData.displayName == "TwitchDev")
-        #expect(userData.profileImageUrl == "https://static-cdn.jtvnw.net/jtv_user_pictures/twitchdev-profile.png")
+        #expect(userData.profileImageUrl == URL(string: "https://static-cdn.jtvnw.net/jtv_user_pictures/twitchdev-profile.png"))
     }
 
     @Test("複数ユーザーの HelixUsersResponse が正しくデコードされる")
@@ -85,10 +85,10 @@ struct TwitchUserTests {
         #expect(response.data[0].id == "111111")
         #expect(response.data[0].login == "streamer_a")
         #expect(response.data[0].displayName == "配信者あ表示名")
-        #expect(response.data[0].profileImageUrl == "https://example.com/ah.png")
+        #expect(response.data[0].profileImageUrl == URL(string: "https://example.com/ah.png"))
         #expect(response.data[1].id == "222222")
         #expect(response.data[1].login == "streamer_b")
-        #expect(response.data[1].profileImageUrl == "https://example.com/i.png")
+        #expect(response.data[1].profileImageUrl == URL(string: "https://example.com/i.png"))
     }
 
     // MARK: - デコード失敗テスト
@@ -179,13 +179,39 @@ struct TwitchUserTests {
             id: "987654",
             login: "test_streamer",
             displayName: "テスト配信者の表示名",
-            profileImageUrl: "https://example.com/profile.png"
+            profileImageUrl: URL(string: "https://example.com/profile.png")
         )
 
         #expect(userData.id == "987654")
         #expect(userData.login == "test_streamer")
         #expect(userData.displayName == "テスト配信者の表示名")
-        #expect(userData.profileImageUrl == "https://example.com/profile.png")
+        #expect(userData.profileImageUrl == URL(string: "https://example.com/profile.png"))
+    }
+
+    @Test("profile_image_url が空文字列の場合は nil になる")
+    func testProfileImageUrlEmptyStringBecomesNil() throws {
+        // Twitch API が空文字列を返した場合、URL? は nil になることを検証する
+        let jsonData = """
+        {
+            "data": [
+                {
+                    "id": "111111",
+                    "login": "streamer_a",
+                    "display_name": "配信者あ表示名",
+                    "type": "",
+                    "broadcaster_type": "",
+                    "description": "",
+                    "profile_image_url": "",
+                    "offline_image_url": "",
+                    "view_count": 100,
+                    "created_at": "2020-01-01T00:00:00Z"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(HelixUsersResponse.self, from: jsonData)
+        #expect(response.data[0].profileImageUrl == nil)
     }
 
     @Test("空のデータ配列の HelixUsersResponse が正しくデコードされる")
