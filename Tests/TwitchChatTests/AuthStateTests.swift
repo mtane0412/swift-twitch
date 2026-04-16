@@ -232,9 +232,11 @@ struct AuthStateTests {
         authClient: (any TwitchAuthClientProtocol)? = nil,
         keychainStore: KeychainStore? = nil
     ) -> AuthState {
+        // openURL に no-op を渡し、テスト中に実際のブラウザが開かないようにする
         AuthState(
             authClient: authClient ?? MockTwitchAuthClient(),
-            keychainStore: keychainStore ?? makeTestKeychainStore()
+            keychainStore: keychainStore ?? makeTestKeychainStore(),
+            openURL: { _ in }
         )
     }
 

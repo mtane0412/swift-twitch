@@ -61,6 +61,8 @@ public final class AuthState {
 
     private let authClient: any TwitchAuthClientProtocol
     private let keychainStore: KeychainStore
+    /// ブラウザで URL を開く処理（テスト時は no-op を注入して実際のブラウザ起動を抑制する）
+    private let openURL: @Sendable (URL) -> Void
 
     /// 進行中のログインタスク（cancelDeviceFlow() でキャンセルするために保持）
     private var loginTask: Task<Void, Never>?
@@ -72,12 +74,15 @@ public final class AuthState {
     /// - Parameters:
     ///   - authClient: OAuth クライアント（テスト時はモックを注入）
     ///   - keychainStore: Keychain ストア（テスト時は別サービス名のものを注入）
+    ///   - openURL: ブラウザで URL を開く処理（テスト時は no-op を注入）
     init(
         authClient: any TwitchAuthClientProtocol = TwitchAuthClient(),
-        keychainStore: KeychainStore = KeychainStore()
+        keychainStore: KeychainStore = KeychainStore(),
+        openURL: @escaping @Sendable (URL) -> Void = { NSWorkspace.shared.open($0) }
     ) {
         self.authClient = authClient
         self.keychainStore = keychainStore
+        self.openURL = openURL
     }
 
     // MARK: - パブリックメソッド
@@ -156,7 +161,7 @@ public final class AuthState {
 
             // デフォルトブラウザで認証ページを開く
             if let url = URL(string: deviceResponse.verificationUri) {
-                NSWorkspace.shared.open(url)
+                openURL(url)
             }
 
             // ユーザーが認証するまでポーリング
