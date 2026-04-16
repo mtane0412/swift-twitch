@@ -28,6 +28,9 @@ final class FollowedStreamStore {
     /// フォロー中の配信中ストリーム一覧（API レスポンス順）
     private(set) var streams: [FollowedStream] = []
 
+    /// userLogin → FollowedStream の O(1) ルックアップ用ディクショナリ
+    private(set) var streamsByUserLogin: [String: FollowedStream] = [:]
+
     /// データ取得中フラグ
     private(set) var isLoading = false
 
@@ -84,11 +87,20 @@ final class FollowedStreamStore {
         }
     }
 
+    /// userLogin からストリームを O(1) で検索する
+    ///
+    /// - Parameter userLogin: チャンネルのログイン名（小文字英数字）
+    /// - Returns: 対応する `FollowedStream`（存在しない場合は `nil`）
+    func stream(forUserLogin userLogin: String) -> FollowedStream? {
+        streamsByUserLogin[userLogin]
+    }
+
     /// ストリーム一覧をクリアする
     ///
     /// ログアウト時など、データを消去したい場合に使用する
     func clear() {
         streams = []
+        streamsByUserLogin = [:]
         lastError = nil
     }
 
@@ -114,7 +126,9 @@ final class FollowedStreamStore {
                 queryItems: [URLQueryItem(name: "user_id", value: userId)]
             )
             // ドメインモデルに変換（パース失敗のストリームはスキップ）
-            streams = response.data.compactMap { $0.toFollowedStream() }
+            let fetched = response.data.compactMap { $0.toFollowedStream() }
+            streams = fetched
+            streamsByUserLogin = Dictionary(uniqueKeysWithValues: fetched.map { ($0.userLogin, $0) })
             lastError = nil
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はサイレントスキップ（エラー表示しない）

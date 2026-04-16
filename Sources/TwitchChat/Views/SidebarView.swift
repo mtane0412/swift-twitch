@@ -63,7 +63,8 @@ struct SidebarView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
                 } else {
-                    ForEach(followedStreamStore.streams) { stream in
+                    // 接続中チャンネルはライブリストから除外（接続中セクションに移動済みのため）
+                    ForEach(followedStreamStore.streams.filter { !channelManager.channelOrder.contains($0.userLogin) }) { stream in
                         StreamRow(stream: stream, profileImageStore: profileImageStore)
                             .tag(stream.userLogin)
                     }
@@ -103,18 +104,30 @@ struct SidebarView: View {
     }
 
     /// 接続中チャンネルの行（コンテキストメニューで切断可能）
+    ///
+    /// FollowedStreamStore からプロフィール情報を引き、プロフィールアイコン＋接続状態ボーダーで表示する。
+    /// フォロー外のチャンネルの場合はプレースホルダーアイコンを表示する。
     @ViewBuilder
     private func connectedChannelRow(channel: String) -> some View {
-        HStack {
-            // 接続状態インジケーター
-            let vm = channelManager.channels[channel]
-            Circle()
-                .fill(connectionColor(for: vm?.connectionState ?? .disconnected))
-                .frame(width: 8, height: 8)
-            Text(channel)
+        let vm = channelManager.channels[channel]
+        let stream = followedStreamStore.stream(forUserLogin: channel)
+        let userId = stream?.userId
+        HStack(spacing: 8) {
+            // プロフィールアイコン + 接続状態ボーダー
+            ProfileImageView(
+                userId: userId ?? channel,
+                imageUrl: userId.flatMap { profileImageStore.profileImageUrl(for: $0) }
+            )
+            .overlay(
+                Circle()
+                    .stroke(connectionColor(for: vm?.connectionState ?? .disconnected), lineWidth: 2)
+            )
+            Text(stream?.userName ?? channel)
                 .font(.body)
+                .lineLimit(1)
             Spacer()
         }
+        .padding(.vertical, 2)
         .contextMenu {
             Button("切断", role: .destructive) {
                 Task { await channelManager.leaveChannel(channel) }
