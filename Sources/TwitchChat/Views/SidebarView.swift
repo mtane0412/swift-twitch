@@ -1,6 +1,6 @@
 // SidebarView.swift
 // サイドバービュー
-// フォロー中の配信中ストリーマー一覧と、接続中チャンネルのアイコン横並びを表示する
+// フォロー中の配信中ストリーマー一覧を表示する（接続中チャンネルは先頭に並ぶ）
 
 import SwiftUI
 
@@ -8,8 +8,8 @@ import SwiftUI
 ///
 /// セクション構成:
 /// - ヘッダー: ログイン状態表示（LoginView）
-/// - 「ライブ」: 接続中チャンネルのアイコン横並び + フォロー中の配信中ストリーマー一覧
-///   - 接続中チャンネルはリストから除外し、アイコンストリップのみで表示する
+/// - 「ライブ」: フォロー中の配信中ストリーマー一覧
+///   - 接続中チャンネルはリスト先頭に表示し、選択中タブと選択状態が連動する
 struct SidebarView: View {
     var authState: AuthState
     var channelManager: ChannelManager
@@ -37,18 +37,6 @@ struct SidebarView: View {
 
             // フォロー中ライブセクション
             Section {
-                // 接続中チャンネルのアイコン横並び（セクション先頭に表示）
-                if !channelManager.channelOrder.isEmpty {
-                    ConnectedChannelIconStrip(
-                        channelManager: channelManager,
-                        followedStreamStore: followedStreamStore,
-                        profileImageStore: profileImageStore
-                    )
-                    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
-                    .listRowBackground(Color.clear)
-                    .selectionDisabled(true)
-                }
-
                 if authState.status == .unknown {
                     ProgressView()
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -70,9 +58,16 @@ struct SidebarView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
                 } else {
-                    // 接続中チャンネルはアイコンストリップで表示済みのため、ライブリストから除外する
-                    let connectedChannels = Set(channelManager.channelOrder)
-                    ForEach(followedStreamStore.streams.filter { !connectedChannels.contains($0.userLogin.lowercased()) }) { stream in
+                    // 接続中チャンネルを先頭に並べる（安定ソートで元の順序を維持）
+                    let connectedSet = Set(channelManager.channelOrder)
+                    let sortedStreams = followedStreamStore.streams.sorted { a, b in
+                        let aConnected = connectedSet.contains(a.userLogin.lowercased())
+                        let bConnected = connectedSet.contains(b.userLogin.lowercased())
+                        if aConnected && !bConnected { return true }
+                        if !aConnected && bConnected { return false }
+                        return false  // 同じグループ内は元の順序を維持（Swift の sort は安定）
+                    }
+                    ForEach(sortedStreams) { stream in
                         StreamRow(stream: stream, profileImageStore: profileImageStore)
                             .tag(stream.userLogin)
                     }
@@ -93,7 +88,6 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         // ストリーム一覧が更新されたら新しい配信者のプロフィール画像を取得する
-        // （fetchUsers は取得済みユーザーを内部でフィルタリングするため重複APIコールは発生しない）
         .onChange(of: followedStreamStore.streams) { _, streams in
             let userIds = streams.map(\.userId)
             Task { await profileImageStore.fetchUsers(userIds: userIds) }

@@ -1,15 +1,15 @@
 // ChannelTabCell.swift
 // チャンネルタブバーの個別タブセルビュー
-// ViewThatFits で「アイコン+名前+×」→「アイコン+×」→「アイコンのみ」の 3 段階で幅に応じて縮退する
+// Chrome スタイルのタブデザイン：上部角丸の形状、アクティブタブはコンテンツエリアと繋がる
 
 import SwiftUI
 
 /// チャンネルタブバーの 1 タブを表すセルビュー
 ///
-/// - `ViewThatFits` により、利用可能な幅が狭い場合は自動的にコンパクト表示へ縮退する
-/// - アイコンには接続状態（緑/黄/赤/灰）の色付きボーダーを表示する
-/// - 選択中タブはアクセントカラーの薄い背景で強調する
-/// - × ボタンは選択中またはホバー時に表示し、押下で `onClose` を呼ぶ
+/// - アクティブタブは `windowBackgroundColor` でコンテンツエリアと同色になり「繋がって見える」
+/// - 非アクティブタブは少し暗い背景色で区別する
+/// - `UnevenRoundedRectangle` で上部のみ角丸のタブ形状を実現する
+/// - × ボタンはホバー中または選択中のタブにのみ表示する
 struct ChannelTabCell: View {
 
     /// このタブに対応する ChatViewModel
@@ -31,78 +31,87 @@ struct ChannelTabCell: View {
 
     // MARK: - 定数
 
-    private static let iconSize: CGFloat = 20
+    /// アイコンサイズ（ポイント）
+    private static let iconSize: CGFloat = 16
+    /// × ボタンのアイコンサイズ（ポイント）
     private static let closeIconSize: CGFloat = 7
+    /// タブの上部角丸半径
+    private static let cornerRadius: CGFloat = 8
+    /// タブの通常高さ（非アクティブ）
+    static let inactiveHeight: CGFloat = 30
+    /// タブのアクティブ高さ（Divider を 1pt 隠すため +1）
+    static let activeHeight: CGFloat = 32
 
     var body: some View {
         Button(action: onSelect) {
-            ViewThatFits(in: .horizontal) {
-                // フル表示: アイコン + 名前 + × ボタン
-                fullLabel
-                // 中間表示: アイコン + × ボタン
-                compactLabel
-                // 最小表示: アイコンのみ（ホバー/選択中に × オーバーレイ）
-                iconOnly
+            HStack(spacing: 5) {
+                // プロフィールアイコン + 接続状態ボーダー
+                ProfileImageView(userId: userId, imageUrl: profileImageUrl, size: Self.iconSize)
+                    .overlay {
+                        Circle()
+                            .strokeBorder(viewModel.connectionState.connectionColor, lineWidth: 1.5)
+                    }
+
+                // チャンネル名（truncation あり）
+                Text(displayName)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 0)
+
+                // × ボタン（選択中またはホバー時のみ表示）
+                if isSelected || isHovered {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: Self.closeIconSize, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    // × ボタンの幅を確保して他のタブの幅計算が安定するよう hidden で埋め
+                } else {
+                    Image(systemName: "xmark")
+                        .font(.system(size: Self.closeIconSize, weight: .medium))
+                        .hidden()
+                }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)
-        .background(
-            isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 6)
-        )
+        // アクティブタブはコンテンツ領域と繋げるため 1pt 高くする
+        .frame(height: isSelected ? Self.activeHeight : Self.inactiveHeight)
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        .background(alignment: .top) {
+            tabBackground
+        }
         .onHover { isHovered = $0 }
     }
 
-    // MARK: - サブビュー
+    // MARK: - タブ背景
 
-    private var icon: some View {
-        ProfileImageView(userId: userId, imageUrl: profileImageUrl, size: Self.iconSize)
-            .overlay {
-                Circle()
-                    .strokeBorder(viewModel.connectionState.connectionColor, lineWidth: 2)
+    /// Chrome 風の上部角丸タブ形状の背景
+    private var tabBackground: some View {
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: Self.cornerRadius,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: Self.cornerRadius
+        )
+        return ZStack {
+            if isSelected {
+                // アクティブタブ: コンテンツエリアと同じ背景色
+                shape
+                    .fill(Color(.windowBackgroundColor))
+                // 上部・左右の細いボーダー
+                shape
+                    .strokeBorder(Color(.separatorColor), lineWidth: 0.5)
+            } else {
+                // 非アクティブタブ: ホバー時に少し明るくする
+                shape
+                    .fill(Color(.windowBackgroundColor).opacity(isHovered ? 0.6 : 0.3))
             }
-    }
-
-    private var closeButton: some View {
-        Button(action: onClose) {
-            Image(systemName: "xmark")
-                .font(.system(size: Self.closeIconSize, weight: .medium))
-                .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain)
-    }
-
-    private var fullLabel: some View {
-        HStack(spacing: 4) {
-            icon
-            Text(displayName)
-                .font(.system(size: 12))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(minWidth: 40)
-            closeButton
-        }
-    }
-
-    private var compactLabel: some View {
-        HStack(spacing: 4) {
-            icon
-            closeButton
-        }
-    }
-
-    private var iconOnly: some View {
-        icon
-            .overlay(alignment: .topTrailing) {
-                if isHovered || isSelected {
-                    closeButton
-                        .font(.system(size: Self.closeIconSize - 1))
-                        .padding(2)
-                        .background(Circle().fill(.bar))
-                        .offset(x: 4, y: -4)
-                }
-            }
+        .frame(height: isSelected ? Self.activeHeight : Self.inactiveHeight)
     }
 }

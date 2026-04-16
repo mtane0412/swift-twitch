@@ -7,9 +7,11 @@ import SwiftUI
 /// アプリのメインコンテンツビュー
 ///
 /// レイアウト:
-/// - サイドバー: フォロー中ライブ一覧 + 接続中アイコン横並び（SidebarView）
-/// - 詳細ペイン: タブバー（接続中チャンネルをタブで切り替え）+ 選択チャンネルのチャット
-/// - 未接続時: プレースホルダーを表示
+/// - サイドバー: フォロー中ライブ一覧（接続中は先頭）（SidebarView）
+/// - 詳細ペイン:
+///   - タブバー（接続中チャンネルをタブで切り替え、Chrome スタイル）
+///   - 下部の Divider（アクティブタブが 1pt 覆うことでコンテンツと繋がって見える）
+///   - 選択チャンネルのチャット本体
 struct ContentView: View {
     var authState: AuthState
     var channelManager: ChannelManager
@@ -27,15 +29,23 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {
             VStack(spacing: 0) {
-                // タブバー: 接続中チャンネルがある場合のみ表示
                 if !channelManager.channelOrder.isEmpty {
-                    ChannelTabBar(
-                        channelManager: channelManager,
-                        followedStreamStore: followedStreamStore,
-                        profileImageStore: profileImageStore
-                    )
-                    Divider()
+                    // ZStack でタブバーと Divider を重ねる
+                    // アクティブタブが activeHeight (inactiveHeight + 2) になるため
+                    // Divider の 1pt を覆い、コンテンツエリアと繋がって見える
+                    ZStack(alignment: .bottom) {
+                        ChannelTabBar(
+                            channelManager: channelManager,
+                            followedStreamStore: followedStreamStore,
+                            profileImageStore: profileImageStore
+                        )
+                        Rectangle()
+                            .fill(Color(.separatorColor))
+                            .frame(height: 1)
+                    }
+                    .frame(height: ChannelTabBar.height)
                 }
+
                 // チャット本体: 選択中チャンネルのチャット、未選択時はプレースホルダー
                 if let viewModel = channelManager.selectedViewModel {
                     ChatDetailView(viewModel: viewModel)
