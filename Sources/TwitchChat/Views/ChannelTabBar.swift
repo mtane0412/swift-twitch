@@ -46,6 +46,8 @@ struct ChannelTabBar: View {
             .frame(height: Self.height, alignment: .bottom)
         }
         .frame(height: Self.height)
-        .background(Color(.windowBackgroundColor))
+        // タブバー背景: チャット欄（controlBackgroundColor）より明示的に少し暗くする
+        // brightness(-0.05) は絶対値ではなく相対的な暗さのため、ライト/ダーク両対応
+        .background(Color(.controlBackgroundColor).brightness(-0.05))
     }
 }
