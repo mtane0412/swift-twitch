@@ -58,15 +58,15 @@ struct SidebarView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
                 } else {
-                    // 接続中チャンネルを先頭に並べる（安定ソートで元の順序を維持）
+                    // 接続中チャンネルを先頭に並べる（各グループ内は元の順序を維持）
                     let connectedSet = Set(channelManager.channelOrder)
-                    let sortedStreams = followedStreamStore.streams.sorted { a, b in
-                        let aConnected = connectedSet.contains(a.userLogin.lowercased())
-                        let bConnected = connectedSet.contains(b.userLogin.lowercased())
-                        if aConnected && !bConnected { return true }
-                        if !aConnected && bConnected { return false }
-                        return false  // 同じグループ内は元の順序を維持（Swift の sort は安定）
+                    let connectedStreams = followedStreamStore.streams.filter {
+                        connectedSet.contains($0.userLogin.lowercased())
                     }
+                    let otherStreams = followedStreamStore.streams.filter {
+                        !connectedSet.contains($0.userLogin.lowercased())
+                    }
+                    let sortedStreams = connectedStreams + otherStreams
                     ForEach(sortedStreams) { stream in
                         StreamRow(stream: stream, profileImageStore: profileImageStore)
                             .tag(stream.userLogin)

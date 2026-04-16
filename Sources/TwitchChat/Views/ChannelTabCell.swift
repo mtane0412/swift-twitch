@@ -18,8 +18,8 @@ struct ChannelTabCell: View {
     let displayName: String
     /// プロフィール画像 URL（nil の場合はプレースホルダーを表示）
     let profileImageUrl: URL?
-    /// Twitch ユーザーID（プロフィール画像キャッシュのキー）
-    let userId: String
+    /// Twitch ユーザーID（プロフィール画像キャッシュのキー、nil の場合はプレースホルダーアイコンを表示）
+    let userId: String?
     /// タブ選択時のコールバック
     let onSelect: () -> Void
     /// タブを閉じる（チャンネルから退出する）コールバック
@@ -37,46 +37,58 @@ struct ChannelTabCell: View {
     private static let cornerRadius: CGFloat = 8
     /// タブの通常高さ（非アクティブ）
     static let inactiveHeight: CGFloat = 30
-    /// タブのアクティブ高さ（Divider を 1pt 隠すため +1）
+    /// タブのアクティブ高さ（非アクティブより +2pt 高く、タブバー下端まで広がる）
     static let activeHeight: CGFloat = 32
 
     var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 5) {
-                // プロフィールアイコン
+        HStack(spacing: 5) {
+            // プロフィールアイコン（userId が nil の場合はプレースホルダーを表示）
+            if let userId {
                 ProfileImageView(userId: userId, imageUrl: profileImageUrl, size: Self.iconSize)
-
-                // チャンネル名（truncation あり）
-                Text(displayName)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Spacer(minLength: 0)
-
-                // × ボタン（選択中またはホバー時のみ表示）
-                if isSelected || isHovered {
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: Self.closeIconSize, weight: .medium))
+            } else {
+                Circle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .overlay {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: Self.iconSize * 0.5))
                             .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("タブを閉じる")
-                    // × ボタンの幅を確保して他のタブの幅計算が安定するよう hidden で埋め
-                } else {
+                    .frame(width: Self.iconSize, height: Self.iconSize)
+            }
+
+            // チャンネル名（truncation あり）
+            Text(displayName)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+
+            // × ボタン（選択中またはホバー時のみ表示）
+            if isSelected || isHovered {
+                Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: Self.closeIconSize, weight: .medium))
-                        .hidden()
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("タブを閉じる")
+                // × ボタンの幅を確保して他のタブの幅計算が安定するよう hidden で埋め
+            } else {
+                Image(systemName: "xmark")
+                    .font(.system(size: Self.closeIconSize, weight: .medium))
+                    .hidden()
             }
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // ラベル内に contentShape を置くことで空白部分も含めてクリック領域にする
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        // アクティブタブはコンテンツ領域と繋げるため 1pt 高くする
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 空白部分も含めてクリック領域にする
+        .contentShape(Rectangle())
+        // タブ全体のタップでチャンネル選択（× ボタンとイベントが競合しない構造）
+        .onTapGesture(perform: onSelect)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onSelect() }
+        // アクティブタブはタブバー下端まで広がる
         .frame(height: isSelected ? Self.activeHeight : Self.inactiveHeight)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .background(alignment: .top) {

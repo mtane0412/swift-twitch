@@ -8,8 +8,7 @@ import SwiftUI
 ///
 /// - タブは左から並び、最大幅 `maxTabWidth` の固定幅で表示する
 /// - タブが多い場合は `ScrollView(.horizontal)` で横スクロール可能にする
-/// - アクティブタブは `ChannelTabCell.activeHeight` の分だけ下の Divider を隠し、
-///   コンテンツエリアと繋がっているように見える
+/// - アクティブタブは非アクティブタブより高く描画され、コンテンツエリアと視覚的に繋がって見える
 struct ChannelTabBar: View {
 
     let channelManager: ChannelManager
@@ -27,13 +26,13 @@ struct ChannelTabBar: View {
                 ForEach(channelManager.channelOrder, id: \.self) { channel in
                     if channelManager.channels[channel] != nil {
                         let stream = followedStreamStore.stream(forUserLogin: channel)
-                        let uid = stream?.userId ?? channel
+                        let userId = stream?.userId
                         let name = stream?.userName ?? channel
                         ChannelTabCell(
                             isSelected: channel == channelManager.selectedChannel,
                             displayName: name,
-                            profileImageUrl: profileImageStore.profileImageUrl(for: uid),
-                            userId: uid,
+                            profileImageUrl: userId.flatMap { profileImageStore.profileImageUrl(for: $0) },
+                            userId: userId,
                             onSelect: { channelManager.selectChannel(channel) },
                             onClose: { Task { await channelManager.leaveChannel(channel) } }
                         )

@@ -10,8 +10,7 @@ import SwiftUI
 /// - サイドバー: フォロー中ライブ一覧（接続中は先頭）（SidebarView）
 /// - 詳細ペイン:
 ///   - タブバー（接続中チャンネルをタブで切り替え、Chrome スタイル）
-///   - 下部の Divider（アクティブタブが 1pt 覆うことでコンテンツと繋がって見える）
-///   - 選択チャンネルのチャット本体
+///   - 選択チャンネルのチャット本体（未選択時はプレースホルダーを表示）
 struct ContentView: View {
     var authState: AuthState
     var channelManager: ChannelManager
