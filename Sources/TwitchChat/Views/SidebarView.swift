@@ -64,7 +64,9 @@ struct SidebarView: View {
                         .padding(.vertical, 4)
                 } else {
                     // 接続中チャンネルはライブリストから除外（接続中セクションに移動済みのため）
-                    ForEach(followedStreamStore.streams.filter { !channelManager.channelOrder.contains($0.userLogin) }) { stream in
+                    // Set を事前構築して O(n*m) → O(n) に最適化
+                    let connectedChannels = Set(channelManager.channelOrder)
+                    ForEach(followedStreamStore.streams.filter { !connectedChannels.contains($0.userLogin.lowercased()) }) { stream in
                         StreamRow(stream: stream, profileImageStore: profileImageStore)
                             .tag(stream.userLogin)
                     }
@@ -111,17 +113,33 @@ struct SidebarView: View {
     private func connectedChannelRow(channel: String) -> some View {
         let vm = channelManager.channels[channel]
         let stream = followedStreamStore.stream(forUserLogin: channel)
-        let userId = stream?.userId
+        let connectionColor = connectionColor(for: vm?.connectionState ?? .disconnected)
         HStack(spacing: 8) {
             // プロフィールアイコン + 接続状態ボーダー
-            ProfileImageView(
-                userId: userId ?? channel,
-                imageUrl: userId.flatMap { profileImageStore.profileImageUrl(for: $0) }
-            )
-            .overlay(
+            // userId が nil（フォロー外チャンネル）の場合は ProfileImageCache を汚染しないようプレースホルダーを直接描画する
+            if let userId = stream?.userId {
+                ProfileImageView(
+                    userId: userId,
+                    imageUrl: profileImageStore.profileImageUrl(for: userId)
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(connectionColor, lineWidth: 2)
+                )
+            } else {
                 Circle()
-                    .stroke(connectionColor(for: vm?.connectionState ?? .disconnected), lineWidth: 2)
-            )
+                    .fill(Color.secondary.opacity(0.3))
+                    .overlay {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: ProfileImageCache.displaySize * 0.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(width: ProfileImageCache.displaySize, height: ProfileImageCache.displaySize)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(connectionColor, lineWidth: 2)
+                    )
+            }
             Text(stream?.userName ?? channel)
                 .font(.body)
                 .lineLimit(1)

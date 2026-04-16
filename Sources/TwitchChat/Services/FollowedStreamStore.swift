@@ -92,7 +92,8 @@ final class FollowedStreamStore {
     /// - Parameter userLogin: チャンネルのログイン名（小文字英数字）
     /// - Returns: 対応する `FollowedStream`（存在しない場合は `nil`）
     func stream(forUserLogin userLogin: String) -> FollowedStream? {
-        streamsByUserLogin[userLogin]
+        // ChannelManager がチャンネル名を小文字正規化するため、同様に正規化してルックアップする
+        streamsByUserLogin[userLogin.lowercased()]
     }
 
     /// ストリーム一覧をクリアする
@@ -128,7 +129,8 @@ final class FollowedStreamStore {
             // ドメインモデルに変換（パース失敗のストリームはスキップ）
             let fetched = response.data.compactMap { $0.toFollowedStream() }
             streams = fetched
-            streamsByUserLogin = Dictionary(uniqueKeysWithValues: fetched.map { ($0.userLogin, $0) })
+            // uniquingKeysWith: API レスポンスに重複 userLogin が含まれても最初の値を採用してクラッシュを防ぐ
+            streamsByUserLogin = Dictionary(fetched.map { ($0.userLogin, $0) }, uniquingKeysWith: { first, _ in first })
             lastError = nil
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はサイレントスキップ（エラー表示しない）

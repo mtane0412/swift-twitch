@@ -125,6 +125,61 @@ struct FollowedStreamStoreTests {
         #expect(store.lastError == nil)
     }
 
+    // MARK: - O(1) ルックアップ
+
+    @Test("refresh後にstream(forUserLogin:)でO(1)検索できる")
+    func testStreamForUserLoginAfterRefresh() async {
+        let mockClient = MockFollowedStreamAPIClient()
+        let store = FollowedStreamStore(apiClient: mockClient, userId: "123456")
+
+        await mockClient.updateStreams([
+            makeHelixStream(userId: "111111", userLogin: "たぬき配信者", userName: "タヌキ配信者"),
+            makeHelixStream(userId: "222222", userLogin: "きつね配信者", userName: "キツネ配信者")
+        ])
+        await store.refresh()
+
+        // userLogin で正しく引けること
+        let result = store.stream(forUserLogin: "たぬき配信者")
+        #expect(result?.userId == "111111")
+        #expect(result?.userName == "タヌキ配信者")
+
+        // 存在しない userLogin は nil を返すこと
+        let missing = store.stream(forUserLogin: "存在しない配信者")
+        #expect(missing == nil)
+    }
+
+    @Test("stream(forUserLogin:)は大文字小文字を区別しない")
+    func testStreamForUserLoginIsCaseInsensitive() async {
+        let mockClient = MockFollowedStreamAPIClient()
+        let store = FollowedStreamStore(apiClient: mockClient, userId: "123456")
+
+        // Twitch API は userLogin を小文字で返すが、念のため大文字入力でも一致すること
+        await mockClient.updateStreams([
+            makeHelixStream(userId: "333333", userLogin: "streamer1", userName: "Streamer1")
+        ])
+        await store.refresh()
+
+        let result = store.stream(forUserLogin: "STREAMER1")
+        #expect(result?.userId == "333333")
+    }
+
+    @Test("clear後はstream(forUserLogin:)がnilを返す")
+    func testStreamForUserLoginClearedAfterClear() async {
+        let mockClient = MockFollowedStreamAPIClient()
+        let store = FollowedStreamStore(apiClient: mockClient, userId: "123456")
+
+        await mockClient.updateStreams([
+            makeHelixStream(userId: "444444", userLogin: "ライオン配信者", userName: "ライオン配信者")
+        ])
+        await store.refresh()
+        #expect(store.stream(forUserLogin: "ライオン配信者") != nil)
+
+        // clear後はルックアップ辞書もリセットされること
+        store.clear()
+        #expect(store.stream(forUserLogin: "ライオン配信者") == nil)
+        #expect(store.streamsByUserLogin.isEmpty)
+    }
+
     @Test("取得したストリームが FollowedStream モデルに正しく変換される")
     func testStreamDataConvertedCorrectly() async {
         let mockClient = MockFollowedStreamAPIClient()
