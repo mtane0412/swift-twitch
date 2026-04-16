@@ -46,21 +46,22 @@ actor KeychainStore {
             kSecAttrAccount as String: key
         ]
 
-        // 既存アイテムがあれば更新、なければ追加
-        let existingItem = SecItemCopyMatching(query as CFDictionary, nil)
-        if existingItem == errSecSuccess {
-            let attributes: [String: Any] = [kSecValueData as String: data]
-            let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-            guard status == errSecSuccess else {
-                throw KeychainError.saveFailed(status: status)
-            }
-        } else {
-            var addQuery = query
-            addQuery[kSecValueData as String] = data
-            let status = SecItemAdd(addQuery as CFDictionary, nil)
-            guard status == errSecSuccess else {
-                throw KeychainError.saveFailed(status: status)
-            }
+        // 既存アイテムがあれば削除してから追加する。
+        // SecItemUpdate は既存の ACL を引き継ぐため、open ACL に更新できない。
+        // 削除 + 追加することで常に open ACL が適用される。
+        SecItemDelete(query as CFDictionary)
+
+        // trustedList を nil にすることで任意のアプリからアクセス可能な open ACL を設定する。
+        // SPM ビルドごとにバイナリのコード署名が変わっても Keychain 許可ダイアログが表示されなくなる。
+        let access = makeOpenAccess()
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        if let access {
+            addQuery[kSecAttrAccess as String] = access
+        }
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.saveFailed(status: status)
         }
     }
 
@@ -79,6 +80,11 @@ actor KeychainStore {
 
         var item: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
+        #if DEBUG
+        if status != errSecSuccess {
+            print("[KeychainStore] load(\(key)) failed: OSStatus=\(status)")
+        }
+        #endif
         guard status == errSecSuccess, let data = item as? Data else {
             return nil
         }
@@ -110,6 +116,26 @@ actor KeychainStore {
             kSecAttrService as String: service
         ]
         while SecItemDelete(query as CFDictionary) == errSecSuccess {}
+    }
+
+
+
+    // MARK: - プライベートメソッド
+
+    /// trustedList が nil の open ACL を持つ SecAccess を作成する
+    ///
+    /// nil の trustedList はすべてのアプリケーションからのアクセスを許可する。
+    /// これにより SPM ビルドごとにバイナリが変わっても Keychain 許可ダイアログが表示されない。
+    /// - Note: SecAccessCreate は macOS 10.10 で deprecated だが、
+    ///   App Store 外の SPM アプリで open ACL を設定する唯一の方法として使用する。
+    private func makeOpenAccess() -> SecAccess? {
+        var access: SecAccess?
+        let status = SecAccessCreate("TwitchChat Token" as CFString, nil, &access)
+        guard status == errSecSuccess else {
+            print("[KeychainStore] SecAccessCreate failed: OSStatus=\(status)")
+            return nil
+        }
+        return access
     }
 }
 

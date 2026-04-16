@@ -88,13 +88,19 @@ public final class AuthState {
     /// - トークンが有効であれば `.loggedIn` に遷移
     /// - トークンが期限切れであればリフレッシュを試み、成功すれば `.loggedIn`、失敗すれば `.loggedOut`
     func restoreSession() async {
+        print("[AuthState] restoreSession: Keychain からトークンを読み込み中...")
         guard let savedToken = await keychainStore.load(key: "access_token") else {
+            print("[AuthState] restoreSession: access_token が見つからないため .loggedOut に遷移")
             status = .loggedOut
             return
         }
+        print("[AuthState] restoreSession: access_token を取得。validateToken を実行中...")
 
         do {
             let validateResponse = try await authClient.validateToken(accessToken: savedToken)
+            #if DEBUG
+            print("[AuthState] restoreSession: validateToken 成功 — login=\(validateResponse.login)")
+            #endif
             accessToken = savedToken
             // validateResponse.userId を優先して設定し、未保存なら Keychain にも保存する
             userId = validateResponse.userId
@@ -104,8 +110,10 @@ public final class AuthState {
             }
             status = .loggedIn(userLogin: validateResponse.login)
         } catch TwitchAuthError.tokenExpired {
+            print("[AuthState] restoreSession: トークン期限切れ。リフレッシュを試みる...")
             await tryRefreshToken()
         } catch {
+            print("[AuthState] restoreSession: validateToken 失敗 — errorType=\(type(of: error))")
             status = .loggedOut
         }
     }
