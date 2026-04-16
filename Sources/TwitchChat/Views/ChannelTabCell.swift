@@ -73,9 +73,10 @@ struct ChannelTabCell: View {
             }
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // ラベル内に contentShape を置くことで空白部分も含めてクリック領域にする
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contentShape(Rectangle())
         // アクティブタブはコンテンツ領域と繋げるため 1pt 高くする
         .frame(height: isSelected ? Self.activeHeight : Self.inactiveHeight)
         .frame(maxHeight: .infinity, alignment: .bottom)
