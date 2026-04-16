@@ -71,7 +71,7 @@ final class EmoteImageCache: @unchecked Sendable {
             }
             let newTask = Task { [weak self] in
                 guard let self else { return nil as NSImage? }
-                defer { self.lock.withLock { self.inFlightTasks.removeValue(forKey: emoteId) } }
+                defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: emoteId) } }
 
                 // アニメーション版を先に試みる
                 if let image = await self.download(emoteId: emoteId, type: "animated") {
@@ -152,7 +152,7 @@ final class EmoteImageCache: @unchecked Sendable {
         image.size = NSSize(width: Self.emoteDisplaySize, height: Self.emoteDisplaySize)
         imageCache.setObject(image, forKey: emoteId as NSString)
         if isAnimated {
-            lock.withLock { animatedEmoteIds.insert(emoteId) }
+            _ = lock.withLock { animatedEmoteIds.insert(emoteId) }
         }
     }
 }

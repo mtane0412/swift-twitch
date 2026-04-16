@@ -1,13 +1,17 @@
 // KeychainStore.swift
 // Keychain へのトークン保存・取得・削除を提供するサービス
 // Security framework の SecItem* API をラップし、actor で排他制御する
+// SecAccessCreate (deprecated macOS 12.0+) は使用せず、SecItemAdd 時に
+// kSecAttrAccessible でアクセシビリティのみを設定する
 
 import Foundation
 import Security
 
 /// Keychain へのトークン保存・取得・削除を行うサービス
 ///
-/// actor で排他制御し、並行アクセスを安全にする
+/// actor で排他制御し、並行アクセスを安全にする。
+/// `SecAccessCreate` (deprecated) を使用せず、`kSecAttrAccessible` のみで
+/// アクセシビリティを設定する。
 /// - Note: `service` をテスト用に変更することで、本番 Keychain との干渉を防げる
 actor KeychainStore {
 
@@ -30,42 +34,35 @@ actor KeychainStore {
     /// 指定キーに文字列値を保存する
     ///
     /// 既存のアイテムがある場合は削除してから追加する（SecItemUpdate は ACL を引き継ぐため）。
-    /// open ACL の生成に失敗した場合は保存を中断し `accessCreationFailed` を throw する。
     ///
     /// - Parameters:
     ///   - key: 保存キー名
     ///   - value: 保存する文字列値
     /// - Throws: `KeychainError.saveFailed` Keychain 操作に失敗した場合
-    ///           `KeychainError.accessCreationFailed` open ACL 生成に失敗した場合
     func save(key: String, value: String) throws {
         guard let data = value.data(using: .utf8) else {
             throw KeychainError.saveFailed(status: errSecParam)
         }
 
-        let query: [String: Any] = [
+        let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key
         ]
 
         // 既存アイテムがあれば削除してから追加する。
-        // SecItemUpdate は既存の ACL を引き継ぐため open ACL に更新できない。
-        // errSecItemNotFound は「存在しない」を意味するため正常扱い。それ以外の失敗はエラーとする。
-        let deleteStatus = SecItemDelete(query as CFDictionary)
+        // SecItemUpdate は既存の ACL を引き継ぐため上書きではなく削除→追加にする。
+        // errSecItemNotFound は「存在しない」を意味するため正常扱い。
+        let deleteStatus = SecItemDelete(baseQuery as CFDictionary)
         guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
             throw KeychainError.saveFailed(status: deleteStatus)
         }
 
-        // trustedList を nil にすることで任意のアプリからアクセス可能な open ACL を設定する。
-        // SPM ビルドごとにバイナリのコード署名が変わっても Keychain 許可ダイアログが表示されなくなる。
-        // ACL 生成に失敗した場合は保存を中断する（デフォルト ACL での暗黙保存を防ぐ）。
-        guard let access = makeOpenAccess() else {
-            throw KeychainError.accessCreationFailed
-        }
-
-        var addQuery = query
+        var addQuery = baseQuery
         addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccess as String] = access
+        // 再起動後の初回ロック解除後はバックグラウンドからもアクセス可能にする。
+        // macOS アプリの OAuth トークン保管として適切なアクセシビリティ。
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw KeychainError.saveFailed(status: status)
@@ -124,27 +121,6 @@ actor KeychainStore {
         ]
         while SecItemDelete(query as CFDictionary) == errSecSuccess {}
     }
-
-    // MARK: - プライベートメソッド
-
-    /// trustedList が nil の open ACL を持つ SecAccess を作成する
-    ///
-    /// nil の trustedList はすべてのアプリケーションからのアクセスを許可する。
-    /// これにより SPM ビルドごとにバイナリが変わっても Keychain 許可ダイアログが表示されない。
-    /// - Note: SecAccessCreate は macOS 10.10 で deprecated だが、
-    ///   App Store 外の SPM アプリで open ACL を設定する唯一の方法として使用する。
-    /// - Returns: 生成した `SecAccess`。失敗した場合は `nil`
-    private func makeOpenAccess() -> SecAccess? {
-        var access: SecAccess?
-        let status = SecAccessCreate("TwitchChat Token" as CFString, nil, &access)
-        guard status == errSecSuccess else {
-            #if DEBUG
-            print("[KeychainStore] SecAccessCreate failed: OSStatus=\(status)")
-            #endif
-            return nil
-        }
-        return access
-    }
 }
 
 // MARK: - エラー定義
@@ -153,6 +129,4 @@ actor KeychainStore {
 enum KeychainError: Error, Equatable {
     /// 保存に失敗した（OSStatus コード付き）
     case saveFailed(status: OSStatus)
-    /// open ACL（SecAccess）の生成に失敗した
-    case accessCreationFailed
 }
