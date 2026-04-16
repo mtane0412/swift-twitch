@@ -61,8 +61,6 @@ final class ProfileImageCache: @unchecked Sendable {
             return cached
         }
 
-        let url = imageUrl
-
         // 進行中タスクへの相乗り、または新規タスクの作成（排他制御）
         let task: Task<NSImage?, Never> = lock.withLock {
             if let existing = inFlightTasks[userId] {
@@ -72,7 +70,7 @@ final class ProfileImageCache: @unchecked Sendable {
                 guard let self else { return nil as NSImage? }
                 defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: userId) } }
 
-                guard let image = await self.download(from: url) else { return nil }
+                guard let image = await self.download(from: imageUrl) else { return nil }
                 self.store(image, for: userId)
                 return image
             }

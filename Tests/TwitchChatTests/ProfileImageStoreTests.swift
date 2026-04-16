@@ -135,6 +135,27 @@ struct ProfileImageStoreTests {
         #expect(callCount == 1)
     }
 
+    @Test("プロフィール画像URLが nil のユーザーは再取得しない")
+    func testDoesNotRefetchUsersWithNilProfileImageUrl() async {
+        let mockClient = MockProfileImageAPIClient()
+        // profileImageUrl が nil（空URL）のユーザーを返す
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", profileImageUrl: nil)
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        // 1回目: APIレスポンスを受信（URL は nil）
+        await store.fetchUsers(userIds: ["111111"])
+        // 2回目: 同じユーザーID（フェッチ済みのため再取得しない）
+        await store.fetchUsers(userIds: ["111111"])
+
+        // API は1回しか呼ばれていないこと
+        let callCount = await mockClient.callCount
+        #expect(callCount == 1)
+        // profileImageUrl は nil のまま
+        #expect(store.profileImageUrl(for: "111111") == nil)
+    }
+
     @Test("未取得のユーザーのみ API を呼ぶ")
     func testFetchesOnlyNewUsers() async {
         let mockClient = MockProfileImageAPIClient()
