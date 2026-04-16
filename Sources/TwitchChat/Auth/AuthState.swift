@@ -61,6 +61,8 @@ public final class AuthState {
 
     private let authClient: any TwitchAuthClientProtocol
     private let keychainStore: KeychainStore
+    /// ブラウザで URL を開く処理（テスト時は no-op を注入して実際のブラウザ起動を抑制する）
+    private let openURL: @Sendable (URL) -> Void
 
     /// 進行中のログインタスク（cancelDeviceFlow() でキャンセルするために保持）
     private var loginTask: Task<Void, Never>?
@@ -72,12 +74,15 @@ public final class AuthState {
     /// - Parameters:
     ///   - authClient: OAuth クライアント（テスト時はモックを注入）
     ///   - keychainStore: Keychain ストア（テスト時は別サービス名のものを注入）
+    ///   - openURL: ブラウザで URL を開く処理（テスト時は no-op を注入）
     init(
         authClient: any TwitchAuthClientProtocol = TwitchAuthClient(),
-        keychainStore: KeychainStore = KeychainStore()
+        keychainStore: KeychainStore = KeychainStore(),
+        openURL: @escaping @Sendable (URL) -> Void = { NSWorkspace.shared.open($0) }
     ) {
         self.authClient = authClient
         self.keychainStore = keychainStore
+        self.openURL = openURL
     }
 
     // MARK: - パブリックメソッド
@@ -88,13 +93,25 @@ public final class AuthState {
     /// - トークンが有効であれば `.loggedIn` に遷移
     /// - トークンが期限切れであればリフレッシュを試み、成功すれば `.loggedIn`、失敗すれば `.loggedOut`
     func restoreSession() async {
+        #if DEBUG
+        print("[AuthState] restoreSession: Keychain からトークンを読み込み中...")
+        #endif
         guard let savedToken = await keychainStore.load(key: "access_token") else {
+            #if DEBUG
+            print("[AuthState] restoreSession: access_token が見つからないため .loggedOut に遷移")
+            #endif
             status = .loggedOut
             return
         }
+        #if DEBUG
+        print("[AuthState] restoreSession: access_token を取得。validateToken を実行中...")
+        #endif
 
         do {
             let validateResponse = try await authClient.validateToken(accessToken: savedToken)
+            #if DEBUG
+            print("[AuthState] restoreSession: validateToken 成功 — login=\(validateResponse.login)")
+            #endif
             accessToken = savedToken
             // validateResponse.userId を優先して設定し、未保存なら Keychain にも保存する
             userId = validateResponse.userId
@@ -104,8 +121,14 @@ public final class AuthState {
             }
             status = .loggedIn(userLogin: validateResponse.login)
         } catch TwitchAuthError.tokenExpired {
+            #if DEBUG
+            print("[AuthState] restoreSession: トークン期限切れ。リフレッシュを試みる...")
+            #endif
             await tryRefreshToken()
         } catch {
+            #if DEBUG
+            print("[AuthState] restoreSession: validateToken 失敗 — errorType=\(type(of: error))")
+            #endif
             status = .loggedOut
         }
     }
@@ -138,7 +161,7 @@ public final class AuthState {
 
             // デフォルトブラウザで認証ページを開く
             if let url = URL(string: deviceResponse.verificationUri) {
-                NSWorkspace.shared.open(url)
+                openURL(url)
             }
 
             // ユーザーが認証するまでポーリング
