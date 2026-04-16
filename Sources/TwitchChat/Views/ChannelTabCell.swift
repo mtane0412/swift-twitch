@@ -75,6 +75,7 @@ struct ChannelTabCell: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
         // アクティブタブはコンテンツ領域と繋げるため 1pt 高くする
         .frame(height: isSelected ? Self.activeHeight : Self.inactiveHeight)
         .frame(maxHeight: .infinity, alignment: .bottom)
