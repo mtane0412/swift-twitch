@@ -63,7 +63,10 @@ struct SidebarView: View {
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 4)
                 } else {
-                    ForEach(followedStreamStore.streams) { stream in
+                    // 接続中チャンネルはライブリストから除外（接続中セクションに移動済みのため）
+                    // Set を事前構築して O(n*m) → O(n) に最適化
+                    let connectedChannels = Set(channelManager.channelOrder)
+                    ForEach(followedStreamStore.streams.filter { !connectedChannels.contains($0.userLogin.lowercased()) }) { stream in
                         StreamRow(stream: stream, profileImageStore: profileImageStore)
                             .tag(stream.userLogin)
                     }
@@ -103,18 +106,46 @@ struct SidebarView: View {
     }
 
     /// 接続中チャンネルの行（コンテキストメニューで切断可能）
+    ///
+    /// FollowedStreamStore からプロフィール情報を引き、プロフィールアイコン＋接続状態ボーダーで表示する。
+    /// フォロー外のチャンネルの場合はプレースホルダーアイコンを表示する。
     @ViewBuilder
     private func connectedChannelRow(channel: String) -> some View {
-        HStack {
-            // 接続状態インジケーター
-            let vm = channelManager.channels[channel]
-            Circle()
-                .fill(connectionColor(for: vm?.connectionState ?? .disconnected))
-                .frame(width: 8, height: 8)
-            Text(channel)
+        let vm = channelManager.channels[channel]
+        let stream = followedStreamStore.stream(forUserLogin: channel)
+        let connectionColor = connectionColor(for: vm?.connectionState ?? .disconnected)
+        HStack(spacing: 8) {
+            // プロフィールアイコン + 接続状態ボーダー
+            // userId が nil（フォロー外チャンネル）の場合は ProfileImageCache を汚染しないようプレースホルダーを直接描画する
+            if let userId = stream?.userId {
+                ProfileImageView(
+                    userId: userId,
+                    imageUrl: profileImageStore.profileImageUrl(for: userId)
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(connectionColor, lineWidth: 2)
+                )
+            } else {
+                Circle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .overlay {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: ProfileImageCache.displaySize * 0.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(width: ProfileImageCache.displaySize, height: ProfileImageCache.displaySize)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(connectionColor, lineWidth: 2)
+                    )
+            }
+            Text(stream?.userName ?? channel)
                 .font(.body)
+                .lineLimit(1)
             Spacer()
         }
+        .padding(.vertical, 2)
         .contextMenu {
             Button("切断", role: .destructive) {
                 Task { await channelManager.leaveChannel(channel) }
