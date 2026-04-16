@@ -75,11 +75,25 @@ final class ChatViewModel {
     /// チャンネルバッジフェッチタスク（切断時にキャンセル）
     private var channelBadgeFetchTask: Task<Void, Never>?
 
+    /// NOTICE 受信ループタスク（切断時にキャンセル）
+    private var noticeReceiveTask: Task<Void, Never>?
+
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false
 
     /// 最初に受信したメッセージから抽出した room-id（楽観的 UI の ChatMessage 生成に使用）
     private var currentRoomId: String?
+
+    /// 直近の楽観的 UI メッセージの ID（サーバー拒否時に rollback するために保持）
+    private var lastOptimisticMessageId: String?
+
+    /// 楽観的 UI メッセージの送信時刻（rollback 有効期間の判定に使用）
+    private var lastOptimisticSentAt: Date?
+
+    /// 楽観的 UI メッセージを rollback する有効期間（秒）
+    ///
+    /// この期間内に受信した NOTICE のみを直近の送信に対するサーバー拒否とみなす。
+    private static let optimisticRollbackWindow: TimeInterval = 5
 
     // MARK: - 初期化
 
@@ -131,6 +145,15 @@ final class ChatViewModel {
             }
         }
 
+        noticeReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.noticeStream
+            for await notice in stream {
+                guard !Task.isCancelled else { break }
+                self.handleIncomingNotice(notice)
+            }
+        }
+
         do {
             // ログイン済みなら認証接続、ログアウト中なら匿名接続にフォールバック
             let token = await authState.validAccessToken()
@@ -151,6 +174,7 @@ final class ChatViewModel {
     /// チャンネルから切断する
     func disconnect() async {
         receiveTask?.cancel()
+        noticeReceiveTask?.cancel()
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
         // BadgeStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
@@ -158,6 +182,8 @@ final class ChatViewModel {
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil
+        lastOptimisticMessageId = nil
+        lastOptimisticSentAt = nil
     }
 
     // MARK: - プライベートメソッド
@@ -220,6 +246,9 @@ final class ChatViewModel {
                     roomId: currentRoomId
                 )
                 appendMessage(localMessage)
+                // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
+                lastOptimisticMessageId = localMessage.id
+                lastOptimisticSentAt = Date()
             }
         } catch {
             sendError = error.localizedDescription
@@ -230,6 +259,27 @@ final class ChatViewModel {
     /// 送信エラーをリセットする（UI でエラー表示を消す際に呼ぶ）
     func clearSendError() {
         sendError = nil
+    }
+
+    /// サーバーから受信した NOTICE を処理する
+    ///
+    /// エラー系 msg-id に対応する ChatSendError を `sendError` に反映し、
+    /// rollback ウィンドウ内であれば楽観的 UI メッセージを `messages` から除去する。
+    private func handleIncomingNotice(_ notice: TwitchNotice) {
+        guard let error = ChatSendError.from(notice: notice) else {
+            // 情報系通知（host_on, host_off 等）は何もしない
+            return
+        }
+        sendError = error.errorDescription
+
+        // rollback: 直近の楽観的 UI メッセージが rollback ウィンドウ内なら除去する
+        if let messageId = lastOptimisticMessageId,
+           let sentAt = lastOptimisticSentAt,
+           Date().timeIntervalSince(sentAt) <= Self.optimisticRollbackWindow {
+            messages.removeAll { $0.id == messageId }
+            lastOptimisticMessageId = nil
+            lastOptimisticSentAt = nil
+        }
     }
 
     /// IRC メッセージ送信用テキストのサニタイズ
@@ -258,6 +308,26 @@ enum ChatSendError: Error, LocalizedError, Equatable {
     case tooLong
     /// 送信できる状態でない（未接続・未ログイン・スコープ不足）
     case notReady
+    /// レートリミット超過（msg_ratelimit）
+    case rateLimited
+    /// 重複メッセージの連投（msg_duplicate）
+    case duplicate
+    /// エモートオンリーモード（msg_emoteonly）
+    case emoteOnly
+    /// フォロワー限定モード（msg_followersonly / msg_followersonly_followed / msg_followersonly_zero）
+    case followersOnly
+    /// サブスクライバー限定モード（msg_subsonly）
+    case subscribersOnly
+    /// スローモード中（msg_slowmode）
+    case slowMode
+    /// BAN またはチャンネル停止（msg_banned / msg_channel_suspended / tos_ban）
+    case banned
+    /// タイムアウト中（msg_timedout）
+    case timedOut
+    /// メール/電話番号認証が必要（msg_verified_email / msg_requires_verified_phone_number）
+    case verificationRequired
+    /// 上記以外のサーバー起因エラー（エラー文言をそのまま保持）
+    case serverRejected(String)
 
     var errorDescription: String? {
         switch self {
@@ -267,6 +337,70 @@ enum ChatSendError: Error, LocalizedError, Equatable {
             return "メッセージは500文字以内にしてください"
         case .notReady:
             return "コメントの投稿にはログインが必要です"
+        case .rateLimited:
+            return "メッセージの送信頻度が速すぎます。少し待ってから送信してください"
+        case .duplicate:
+            return "直前と同じメッセージは連投できません"
+        case .emoteOnly:
+            return "このチャンネルはエモートのみ送信できます"
+        case .followersOnly:
+            return "このチャンネルはフォロワー限定モードです"
+        case .subscribersOnly:
+            return "このチャンネルはサブスクライバー限定モードです"
+        case .slowMode:
+            return "スローモード中です。時間を空けて送信してください"
+        case .banned:
+            return "このチャンネルで投稿が制限されています"
+        case .timedOut:
+            return "タイムアウト中は投稿できません"
+        case .verificationRequired:
+            return "投稿にはメール/電話番号の認証が必要です"
+        case .serverRejected(let message):
+            return "送信できませんでした: \(message)"
         }
     }
+
+    /// TwitchNotice を ChatSendError に変換する
+    ///
+    /// 送信エラーに相当しない NOTICE（情報系通知など）は nil を返す。
+    ///
+    /// - Parameter notice: サーバーから受信した TwitchNotice
+    /// - Returns: 対応する ChatSendError、または変換対象外の場合は nil
+    static func from(notice: TwitchNotice) -> ChatSendError? {
+        guard let msgId = notice.msgId else { return nil }
+        if let mapped = msgIdToError[msgId] {
+            return mapped
+        }
+        // "msg_" プレフィックスを持つ未知の msg-id はサーバー起因エラーとして扱う
+        if msgId.hasPrefix("msg_") {
+            return .serverRejected(notice.message)
+        }
+        // 情報系通知（host_on, host_off, raid 等）は nil を返してスキップする
+        return nil
+    }
+
+    /// msg-id → ChatSendError のマッピングテーブル
+    ///
+    /// 複数の msg-id が同じエラーに対応する場合は同じ case を指定する。
+    private static let msgIdToError: [String: ChatSendError] = {
+        let entries: [(String, ChatSendError)] = [
+            ("msg_ratelimit",                          .rateLimited),
+            ("msg_duplicate",                          .duplicate),
+            ("msg_emoteonly",                          .emoteOnly),
+            ("msg_followersonly",                      .followersOnly),
+            ("msg_followersonly_followed",             .followersOnly),
+            ("msg_followersonly_zero",                 .followersOnly),
+            ("msg_subsonly",                           .subscribersOnly),
+            ("msg_slowmode",                           .slowMode),
+            ("msg_banned",                             .banned),
+            ("msg_channel_suspended",                  .banned),
+            ("tos_ban",                                .banned),
+            ("no_permission",                          .banned),
+            ("msg_suspended",                          .banned),
+            ("msg_timedout",                           .timedOut),
+            ("msg_verified_email",                     .verificationRequired),
+            ("msg_requires_verified_phone_number",     .verificationRequired),
+        ]
+        return Dictionary(uniqueKeysWithValues: entries)
+    }()
 }

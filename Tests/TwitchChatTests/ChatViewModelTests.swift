@@ -16,6 +16,8 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     private(set) var connectCallCount = 0
     private var messageContinuation: AsyncStream<ChatMessage>.Continuation?
     let messageStream: AsyncStream<ChatMessage>
+    private var noticeContinuation: AsyncStream<TwitchNotice>.Continuation?
+    let noticeStream: AsyncStream<TwitchNotice>
 
     /// sendPrivmsg() で送信されたメッセージのログ（テスト検証用）
     private(set) var sentPrivmsgs: [String] = []
@@ -24,9 +26,13 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     var sendPrivmsgError: (any Error)?
 
     init() {
-        var continuation: AsyncStream<ChatMessage>.Continuation?
-        self.messageStream = AsyncStream { continuation = $0 }
-        self.messageContinuation = continuation
+        var msgContinuation: AsyncStream<ChatMessage>.Continuation?
+        self.messageStream = AsyncStream { msgContinuation = $0 }
+        self.messageContinuation = msgContinuation
+
+        var ntcContinuation: AsyncStream<TwitchNotice>.Continuation?
+        self.noticeStream = AsyncStream { ntcContinuation = $0 }
+        self.noticeContinuation = ntcContinuation
     }
 
     func connect(to channel: String, accessToken: String?, userLogin: String?) async throws {
@@ -38,6 +44,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         disconnectCalled = true
         connectedChannel = nil
         messageContinuation?.finish()
+        noticeContinuation?.finish()
     }
 
     func sendPrivmsg(_ text: String) async throws {
@@ -53,6 +60,11 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     /// テスト用にメッセージを流し込む
     func sendMessage(_ message: ChatMessage) {
         messageContinuation?.yield(message)
+    }
+
+    /// テスト用に NOTICE を流し込む
+    func sendNotice(_ notice: TwitchNotice) {
+        noticeContinuation?.yield(notice)
     }
 }
 
@@ -243,6 +255,99 @@ struct ChatViewModelTests {
 
         // 検証: ログアウト中は canSendMessage = false
         #expect(viewModel.canSendMessage == false)
+    }
+
+    // MARK: - NOTICE によるエラー反映
+
+    @Test("msg_ratelimit NOTICE を受信すると sendError にレートリミット文言が設定される")
+    func msgRatelimitNOTICEを受信するとsendErrorにレートリミット文言が設定される() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者001")
+
+        // sendMessage で楽観 UI を追加してから NOTICE を流し込む
+        try await viewModel.sendMessage("速攻コメント")
+        await mockClient.sendNotice(TwitchNotice(
+            msgId: "msg_ratelimit",
+            channel: "テストチャンネル",
+            message: "You are sending messages too quickly."
+        ))
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // 検証: sendError が日本語のレートリミット文言になっている
+        #expect(viewModel.sendError != nil)
+        #expect(viewModel.sendError == ChatSendError.rateLimited.errorDescription)
+    }
+
+    @Test("msg_duplicate NOTICE を受信すると楽観 UI メッセージが messages から取り消される")
+    func msgDuplicateNOTICEを受信すると楽観UIメッセージがmessagesから取り消される() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者002")
+
+        // sendMessage で楽観 UI を追加してから NOTICE を流し込む
+        try await viewModel.sendMessage("同じ文言")
+        #expect(viewModel.messages.count == 1)
+
+        await mockClient.sendNotice(TwitchNotice(
+            msgId: "msg_duplicate",
+            channel: "テストチャンネル",
+            message: "Your message was not sent because it is identical to the previous one."
+        ))
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // 検証: 楽観 UI メッセージが取り消されて messages が空になる
+        #expect(viewModel.messages.isEmpty)
+        #expect(viewModel.sendError == ChatSendError.duplicate.errorDescription)
+    }
+
+    @Test("msg_banned NOTICE を受信すると sendError に BAN 文言が設定される")
+    func msgBannedNOTICEを受信するとsendErrorにBAN文言が設定される() async throws {
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者003")
+
+        try await viewModel.sendMessage("書き込みテスト")
+        await mockClient.sendNotice(TwitchNotice(
+            msgId: "msg_banned",
+            channel: "テストチャンネル",
+            message: "You are permanently banned from talking in this channel."
+        ))
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(viewModel.sendError == ChatSendError.banned.errorDescription)
+        // 楽観 UI メッセージも取り消される
+        #expect(viewModel.messages.isEmpty)
+    }
+
+    @Test("未対応の msg-id の NOTICE は sendError を変化させない")
+    func 未対応のmsgidのNOTICEはsendErrorを変化させない() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者004")
+
+        // sendError が nil の状態から
+        #expect(viewModel.sendError == nil)
+
+        // 情報系 NOTICE（host_on など）を流し込む
+        await mockClient.sendNotice(TwitchNotice(
+            msgId: "host_on",
+            channel: "テストチャンネル",
+            message: "Now hosting another channel."
+        ))
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // 検証: sendError は変化しない
+        #expect(viewModel.sendError == nil)
+    }
+
+    @Test("msg-id なしの NOTICE は sendError を変化させない")
+    func msgidなしのNOTICEはsendErrorを変化させない() async throws {
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者005")
+
+        await mockClient.sendNotice(TwitchNotice(
+            msgId: nil,
+            channel: nil,
+            message: "Login unsuccessful"
+        ))
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(viewModel.sendError == nil)
     }
 
     @Test("isSending は sendMessage の実行中だけ true になる")
