@@ -18,6 +18,9 @@ let package = Package(
         .executableTarget(
             name: "TwitchChat",
             path: "Sources/TwitchChat",
+            // Info.plist はリンカフラグで直接バイナリに埋め込むため、
+            // SPM のリソース対象から除外して "unhandled file" 警告を抑制する
+            exclude: ["Info.plist"],
             linkerSettings: [
                 // Info.plist をバイナリに埋め込み、macOS が GUI アプリとして認識できるようにする
                 .unsafeFlags([

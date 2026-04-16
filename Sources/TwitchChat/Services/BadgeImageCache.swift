@@ -64,7 +64,7 @@ final class BadgeImageCache: @unchecked Sendable {
             }
             let newTask = Task { [weak self] in
                 guard let self else { return nil as NSImage? }
-                defer { self.lock.withLock { self.inFlightTasks.removeValue(forKey: key) } }
+                defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: key) } }
 
                 // BadgeStore から URL を解決してダウンロード
                 guard let url = await store.imageURL(for: badge),
