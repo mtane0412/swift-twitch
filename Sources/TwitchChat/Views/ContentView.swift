@@ -41,12 +41,11 @@ struct ContentView: View {
                 if let viewModel = channelManager.selectedViewModel {
                     ChatDetailView(viewModel: viewModel)
                 } else {
-                    Spacer()
                     Text("チャンネルを選択するか、ライブ中のストリーマーをクリックしてチャットを開始してください")
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
                         .padding()
-                    Spacer()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }

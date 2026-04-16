@@ -18,19 +18,18 @@ struct ChannelTabBar: View {
 
     /// 各タブの最大幅
     private static let maxTabWidth: CGFloat = 180
-    /// タブバー全体の高さ（アクティブタブは +1pt で Divider を隠す）
+    /// タブバー全体の高さ（アクティブタブは +2pt 分の余白を含む）
     static let height: CGFloat = ChannelTabCell.inactiveHeight + 2
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ForEach(channelManager.channelOrder, id: \.self) { channel in
-                    if let vm = channelManager.channels[channel] {
+                    if channelManager.channels[channel] != nil {
                         let stream = followedStreamStore.stream(forUserLogin: channel)
                         let uid = stream?.userId ?? channel
                         let name = stream?.userName ?? channel
                         ChannelTabCell(
-                            viewModel: vm,
                             isSelected: channel == channelManager.selectedChannel,
                             displayName: name,
                             profileImageUrl: profileImageStore.profileImageUrl(for: uid),

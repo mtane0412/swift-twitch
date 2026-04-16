@@ -23,7 +23,8 @@ struct ChannelDisplayNameResolver {
 
     /// チャンネルログイン名に対応する表示名を返す
     ///
-    /// - Parameter channelLogin: チャンネルのログイン名（大文字小文字は自動正規化）
+    /// 大文字小文字の正規化は `FollowedStreamStore.stream(forUserLogin:)` が担う。
+    /// - Parameter channelLogin: チャンネルのログイン名
     /// - Returns: フォロー中かつライブ中なら `FollowedStream.userName`、それ以外は `channelLogin` をそのまま返す
     func displayName(for channelLogin: String) -> String {
         store.stream(forUserLogin: channelLogin)?.userName ?? channelLogin

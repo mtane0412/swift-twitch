@@ -22,7 +22,7 @@ struct ChannelDisplayNameResolverTests {
         viewerCount: Int = 500
     ) -> HelixFollowedStreamData {
         HelixFollowedStreamData(
-            id: UUID().uuidString,
+            id: "test-stream-id-1",
             userId: userId,
             userLogin: userLogin,
             userName: userName,
@@ -50,7 +50,7 @@ struct ChannelDisplayNameResolverTests {
     // MARK: - テスト
 
     @Test("フォロー中ストリームがある場合、userName を返す")
-    func testDisplayNameReturnsUserNameForFollowedStream() async throws {
+    func testDisplayNameReturnsUserNameForFollowedStream() async {
         // 前提: "yamada_game" チャンネルがフォロー中でライブ中
         let store = await makeStore(streams: [
             makeHelixStream(userLogin: "yamada_game", userName: "山田太郎")
@@ -62,7 +62,7 @@ struct ChannelDisplayNameResolverTests {
     }
 
     @Test("フォロー外チャンネルの場合、channelLogin をそのまま返す")
-    func testDisplayNameReturnsChannelLoginForUnfollowedChannel() async throws {
+    func testDisplayNameReturnsChannelLoginForUnfollowedChannel() async {
         // 前提: ストリームなし（フォロー外または未ライブ）
         let store = await makeStore(streams: [])
         let resolver = ChannelDisplayNameResolver(store: store)
@@ -72,7 +72,7 @@ struct ChannelDisplayNameResolverTests {
     }
 
     @Test("大文字混在の channelLogin も正規化して解決される")
-    func testDisplayNameNormalizesChannelLogin() async throws {
+    func testDisplayNameNormalizesChannelLogin() async {
         // 前提: "suzuki_live" チャンネルがフォロー中でライブ中（小文字で登録）
         let store = await makeStore(streams: [
             makeHelixStream(userLogin: "suzuki_live", userName: "鈴木次郎")

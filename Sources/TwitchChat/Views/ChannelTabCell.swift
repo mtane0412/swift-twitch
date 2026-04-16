@@ -6,14 +6,12 @@ import SwiftUI
 
 /// チャンネルタブバーの 1 タブを表すセルビュー
 ///
-/// - アクティブタブは `windowBackgroundColor` でコンテンツエリアと同色になり「繋がって見える」
+/// - アクティブタブは `controlBackgroundColor` でコンテンツエリアと同色になり「繋がって見える」
 /// - 非アクティブタブは少し暗い背景色で区別する
 /// - `UnevenRoundedRectangle` で上部のみ角丸のタブ形状を実現する
 /// - × ボタンはホバー中または選択中のタブにのみ表示する
 struct ChannelTabCell: View {
 
-    /// このタブに対応する ChatViewModel
-    let viewModel: ChatViewModel
     /// このタブが選択中かどうか
     let isSelected: Bool
     /// タブに表示する名前（フォロー中は表示名、フォロー外は channelLogin）
@@ -64,6 +62,7 @@ struct ChannelTabCell: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("タブを閉じる")
                     // × ボタンの幅を確保して他のタブの幅計算が安定するよう hidden で埋め
                 } else {
                     Image(systemName: "xmark")
