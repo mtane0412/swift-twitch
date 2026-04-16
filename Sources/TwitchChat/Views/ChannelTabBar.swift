@@ -37,13 +37,18 @@ struct ChannelTabBar: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
+                // インデックス辞書を ForEach の外で一度だけ構築し tabVisualOffset の O(n^2) を防ぐ
+                let indexMap = Dictionary(
+                    uniqueKeysWithValues: channelManager.channelOrder.enumerated().map { ($1, $0) }
+                )
                 ForEach(channelManager.channelOrder, id: \.self) { channel in
                     if channelManager.channels[channel] != nil {
                         let stream = followedStreamStore.stream(forUserLogin: channel)
                         let userId = stream?.userId
                         let name = stream?.userName ?? channel
                         let isDragging = draggingChannel == channel
-                        let visualOffset = tabVisualOffset(for: channel)
+                        let thisIdx = indexMap[channel] ?? 0
+                        let visualOffset = tabVisualOffset(for: channel, at: thisIdx)
 
                         ChannelTabCell(
                             isSelected: channel == channelManager.selectedChannel,
@@ -59,9 +64,12 @@ struct ChannelTabBar: View {
                         .scaleEffect(isDragging ? 1.03 : 1.0, anchor: .bottom)
                         .shadow(radius: isDragging ? 6 : 0, y: isDragging ? -2 : 0)
                         .zIndex(isDragging ? 1 : 0)
-                        // ドラッグ中タブは animation なし（カーソルへの即時追従）
-                        // 他のタブは visualOffset 変化時にアニメーションで退避
-                        .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: visualOffset)
+                        // ドラッグ中のみ他タブのアニメーションを有効にする
+                        // draggingChannel == nil（ドロップ後）は nil を返してドロップ時の余分なアニメーションを防ぐ
+                        .animation(
+                            (draggingChannel != nil && !isDragging) ? .easeInOut(duration: 0.2) : nil,
+                            value: visualOffset
+                        )
                         // ChannelTabCell 内の onTapGesture / Button と同時に認識させる
                         .simultaneousGesture(
                             DragGesture(minimumDistance: 5)
@@ -106,10 +114,10 @@ struct ChannelTabBar: View {
     ///
     /// - ドラッグ中のタブ: `dragOffset` でカーソルに完全追従
     /// - 他のタブ: ドラッグ中タブがそのタブの中心を通過した場合にタブ幅分退避する
-    private func tabVisualOffset(for channel: String) -> CGFloat {
+    /// - `thisIdx` を呼び元で渡すことで、メソッド内での O(n) 探索を排除する
+    private func tabVisualOffset(for channel: String, at thisIdx: Int) -> CGFloat {
         guard let draggingCh = draggingChannel,
-              let startIdx = draggingStartIndex,
-              let thisIdx = channelManager.channelOrder.firstIndex(of: channel) else { return 0 }
+              let startIdx = draggingStartIndex else { return 0 }
 
         if channel == draggingCh {
             return dragOffset
@@ -138,7 +146,8 @@ struct ChannelTabBar: View {
         let finalCenterX = CGFloat(startIdx) * Self.maxTabWidth + Self.maxTabWidth / 2 + dragOffset
         // floor を使って負の値でも正しく切り捨てる（Int 変換は 0 方向への truncation のため）
         let raw = Int(floor(finalCenterX / Self.maxTabWidth))
-        return min(max(raw, 0), channelManager.channelOrder.count - 1)
+        // channelOrder が空のとき count - 1 が -1 になるため max(..., 0) でガードする
+        return min(max(raw, 0), max(channelManager.channelOrder.count - 1, 0))
     }
 
     /// ドラッグ状態をリセットする
