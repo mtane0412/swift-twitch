@@ -110,8 +110,10 @@ final class ProfileImageStore {
                 queryItems: queryItems
             )
             // キャッシュ上限超過時は全消去してメモリ増大を防ぐ
+            // fetchedUserIds も同時にクリアしないと上限超過後に再取得されなくなるため一緒にリセットする
             if profileImageUrls.count + response.data.count > Self.maxCacheEntries {
                 profileImageUrls.removeAll()
+                fetchedUserIds.removeAll()
             }
             for userData in response.data {
                 // レスポンスを受信したユーザーはフェッチ済みとしてマーク（URL が nil でも再取得しない）
