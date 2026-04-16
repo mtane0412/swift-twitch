@@ -38,7 +38,7 @@ struct ContentView: View {
 
                 // チャット本体: 選択中チャンネルのチャット、未選択時はプレースホルダー
                 if let viewModel = channelManager.selectedViewModel {
-                    ChatDetailView(viewModel: viewModel)
+                    ChatDetailView(viewModel: viewModel, authState: authState)
                 } else {
                     Text("チャンネルを選択するか、ライブ中のストリーマーをクリックしてチャットを開始してください")
                         .multilineTextAlignment(.center)

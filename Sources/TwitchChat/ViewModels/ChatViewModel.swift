@@ -52,6 +52,12 @@ final class ChatViewModel {
     /// 接続中のチャンネル名
     private(set) var channelName: String = ""
 
+    /// メッセージ送信中フラグ（UI のローディング表示用）
+    private(set) var isSending: Bool = false
+
+    /// 最後の送信エラーメッセージ（UI 表示用、成功時は nil にリセット）
+    private(set) var sendError: String?
+
     // MARK: - プライベートプロパティ
 
     private let ircClient: any TwitchIRCClientProtocol
@@ -71,6 +77,9 @@ final class ChatViewModel {
 
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false
+
+    /// 最初に受信したメッセージから抽出した room-id（楽観的 UI の ChatMessage 生成に使用）
+    private var currentRoomId: String?
 
     // MARK: - 初期化
 
@@ -103,6 +112,7 @@ final class ChatViewModel {
         connectionState = .connecting
         messages = []
         channelBadgesFetched = false
+        currentRoomId = nil
 
         // チャンネル切替時に前チャンネルのバッジが誤解決されないようクリア
         await badgeStore.resetChannelBadges()
@@ -147,6 +157,7 @@ final class ChatViewModel {
         await badgeStore.cancelGlobalFetch()
         await ircClient.disconnect()
         connectionState = .disconnected
+        currentRoomId = nil
     }
 
     // MARK: - プライベートメソッド
@@ -158,9 +169,104 @@ final class ChatViewModel {
             channelBadgesFetched = true
             channelBadgeFetchTask = Task { await badgeStore.fetchChannelBadges(channelId: roomId) }
         }
+        // 楽観的 UI のために room-id を保持する（最初に取得できたものを使い続ける）
+        if currentRoomId == nil {
+            currentRoomId = message.roomId
+        }
         messages.append(message)
         if messages.count > Self.maxMessages {
             messages.removeFirst(messages.count - Self.maxMessages)
+        }
+    }
+
+    // MARK: - 送信
+
+    /// コメント投稿が可能かどうか
+    ///
+    /// 接続済み・ログイン済み・`chat:edit` スコープ保有の3条件をすべて満たす場合のみ `true`
+    var canSendMessage: Bool {
+        guard connectionState == .connected else { return false }
+        guard case .loggedIn = authState.status else { return false }
+        return authState.canSendChat
+    }
+
+    /// 入力テキストをサニタイズして PRIVMSG を送信し、楽観的 UI を更新する
+    ///
+    /// Twitch IRC は自分の PRIVMSG をエコーバックしないため、
+    /// 送信成功後にローカルで ChatMessage を生成して `messages` に追加する。
+    ///
+    /// - Parameter text: 生の入力テキスト（改行・空白を含む場合がある）
+    /// - Throws: `ChatSendError.empty`（空文字）、`.tooLong`（500 文字超）、
+    ///           `.notReady`（未接続・未ログイン・スコープ不足）、
+    ///           または IRC クライアントが throw するエラー
+    func sendMessage(_ text: String) async throws {
+        let sanitized = Self.sanitize(text)
+        guard !sanitized.isEmpty else { throw ChatSendError.empty }
+        guard sanitized.count <= 500 else { throw ChatSendError.tooLong }
+        guard canSendMessage else { throw ChatSendError.notReady }
+
+        isSending = true
+        sendError = nil
+        defer { isSending = false }
+
+        do {
+            try await ircClient.sendPrivmsg(sanitized)
+            // 楽観的 UI: 自分の PRIVMSG はサーバーからエコーバックされないのでローカルで追加する
+            if case .loggedIn(let login) = authState.status {
+                let localMessage = ChatMessage(
+                    localUsername: login,
+                    displayName: login,
+                    text: sanitized,
+                    roomId: currentRoomId
+                )
+                appendMessage(localMessage)
+            }
+        } catch {
+            sendError = error.localizedDescription
+            throw error
+        }
+    }
+
+    /// 送信エラーをリセットする（UI でエラー表示を消す際に呼ぶ）
+    func clearSendError() {
+        sendError = nil
+    }
+
+    /// IRC メッセージ送信用テキストのサニタイズ
+    ///
+    /// - `\r` を除去（CRLF の `\r` だけを除いて `\n` と `\r\n` を統一）
+    /// - `\n` をスペースに変換（IRC は行区切りプロトコルのため改行禁止）
+    /// - 前後の空白をトリム
+    ///
+    /// - Parameter text: 生の入力テキスト
+    /// - Returns: サニタイズ済みテキスト
+    static func sanitize(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+    }
+}
+
+// MARK: - 送信エラー定義
+
+/// チャットメッセージ送信時のエラー
+enum ChatSendError: Error, LocalizedError, Equatable {
+    /// 送信テキストが空（トリム後）
+    case empty
+    /// 送信テキストが 500 文字を超えている
+    case tooLong
+    /// 送信できる状態でない（未接続・未ログイン・スコープ不足）
+    case notReady
+
+    var errorDescription: String? {
+        switch self {
+        case .empty:
+            return "メッセージを入力してください"
+        case .tooLong:
+            return "メッセージは500文字以内にしてください"
+        case .notReady:
+            return "コメントの投稿にはログインが必要です"
         }
     }
 }

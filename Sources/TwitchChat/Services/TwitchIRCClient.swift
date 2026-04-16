@@ -21,6 +21,12 @@ protocol TwitchIRCClientProtocol: Actor {
 
     /// IRC 接続を切断する
     func disconnect() async
+
+    /// 接続中チャンネルに PRIVMSG を送信する
+    ///
+    /// - Parameter text: 送信する本文（呼び出し元でサニタイズ済みである前提）
+    /// - Throws: `.notConnected`（未接続）、`.notAuthenticated`（匿名接続中）
+    func sendPrivmsg(_ text: String) async throws
 }
 
 /// Twitch IRC クライアント
@@ -53,6 +59,16 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// 受信ループのタスク（disconnect() でキャンセルするために保持）
     private var receiveLoopTask: Task<Void, Never>?
 
+    /// 現在 JOIN しているチャンネル名（小文字正規化済み）
+    ///
+    /// 未接続の場合は nil。PRIVMSG 送信のターゲットとして使用する
+    private var joinedChannel: String?
+
+    /// 認証接続（OAuth トークン）かどうか
+    ///
+    /// true のときのみ PRIVMSG 送信が許可される（匿名接続では false）
+    private var isAuthenticated: Bool = false
+
     /// 受信した ChatMessage を配信する AsyncStream
     let messageStream: AsyncStream<ChatMessage>
 
@@ -80,7 +96,10 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     func connect(to channel: String, accessToken: String? = nil, userLogin: String? = nil) async throws {
         let normalizedChannel = channel.lowercased()
         try await webSocketClient.connect(to: Self.websocketURL)
+        // 認証接続かどうかを記録してから認証シーケンスを送信
+        isAuthenticated = (accessToken != nil && userLogin != nil)
         try await sendAuthSequence(channel: normalizedChannel, accessToken: accessToken, userLogin: userLogin)
+        joinedChannel = normalizedChannel
         // receiveLoop を別タスクで起動し、connect() がブロックされないようにする
         receiveLoopTask = Task { await receiveLoop() }
     }
@@ -90,7 +109,23 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         receiveLoopTask?.cancel()
         receiveLoopTask = nil
         await webSocketClient.disconnect()
+        joinedChannel = nil
+        isAuthenticated = false
         // messageContinuation?.finish() を呼ばない → 再接続時に同じストリームを再利用できる
+    }
+
+    /// 接続中チャンネルに PRIVMSG を送信する
+    ///
+    /// - Parameter text: 送信する本文（呼び出し元でサニタイズ済みである前提）
+    /// - Throws: `.notConnected`（未接続）、`.notAuthenticated`（匿名接続中）
+    func sendPrivmsg(_ text: String) async throws {
+        guard let channel = joinedChannel else {
+            throw TwitchIRCClientError.notConnected
+        }
+        guard isAuthenticated else {
+            throw TwitchIRCClientError.notAuthenticated
+        }
+        try await webSocketClient.send("PRIVMSG #\(channel) :\(text)")
     }
 
     // MARK: - プライベートメソッド
@@ -170,10 +205,20 @@ enum TwitchIRCClientError: Error, LocalizedError {
     /// accessToken と userLogin の指定が不整合（片方のみ指定された場合）
     case invalidAuthParameters
 
+    /// 未接続状態で送信しようとした場合（connect() 前、または disconnect() 後）
+    case notConnected
+
+    /// 匿名接続中に PRIVMSG 送信しようとした場合（コメント投稿には認証接続が必要）
+    case notAuthenticated
+
     var errorDescription: String? {
         switch self {
         case .invalidAuthParameters:
             return "accessToken と userLogin はどちらも指定するか、どちらも省略してください"
+        case .notConnected:
+            return "チャンネルに接続していません"
+        case .notAuthenticated:
+            return "コメントの投稿にはログインが必要です"
         }
     }
 }
