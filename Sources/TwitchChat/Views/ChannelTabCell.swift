@@ -45,12 +45,8 @@ struct ChannelTabCell: View {
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 5) {
-                // プロフィールアイコン + 接続状態ボーダー
+                // プロフィールアイコン
                 ProfileImageView(userId: userId, imageUrl: profileImageUrl, size: Self.iconSize)
-                    .overlay {
-                        Circle()
-                            .strokeBorder(viewModel.connectionState.connectionColor, lineWidth: 1.5)
-                    }
 
                 // チャンネル名（truncation あり）
                 Text(displayName)
