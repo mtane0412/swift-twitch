@@ -2,8 +2,8 @@
 // TwitchUser モデルのデコードテスト
 // Twitch Helix API /helix/users レスポンスが正しくデコードされるかを検証する
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 @Suite("TwitchUser モデルテスト")

@@ -1,8 +1,8 @@
 // BadgeImageCacheTests.swift
 // BadgeImageCache のキャッシュキーと表示サイズのテスト
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 @Suite("BadgeImageCacheTests")

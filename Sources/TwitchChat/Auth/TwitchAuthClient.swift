@@ -72,7 +72,7 @@ final class TwitchAuthClient: TwitchAuthClientProtocol {
         let scopeString = AuthConfig.scopes
             .map { $0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0 }
             .joined(separator: "+")
-        request.httpBody = "client_id=\(clientID)&scopes=\(scopeString)".data(using: .utf8)
+        request.httpBody = Data("client_id=\(clientID)&scopes=\(scopeString)".utf8)
 
         #if DEBUG
         if let body = request.httpBody, let bodyString = String(data: body, encoding: .utf8) {

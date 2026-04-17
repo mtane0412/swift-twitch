@@ -2,8 +2,8 @@
 // FollowedStreamStore の単体テスト
 // MockHelixAPIClient を使ってネットワーク通信なしでストア振る舞いを検証する
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 // MARK: - テスト用モック

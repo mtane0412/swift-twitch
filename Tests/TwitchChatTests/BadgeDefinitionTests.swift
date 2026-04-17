@@ -1,8 +1,8 @@
 // BadgeDefinitionTests.swift
 // Twitch Helix API バッジ定義レスポンスのデコードテスト
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 @Suite("BadgeDefinitionTests")

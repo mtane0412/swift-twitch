@@ -2,8 +2,8 @@
 // AuthState の認証状態遷移テスト
 // 外部 API 通信は MockTwitchAuthClient を使用する
 
-import Testing
 import AppKit
+import Testing
 @testable import TwitchChat
 
 @Suite("AuthState", .serialized)

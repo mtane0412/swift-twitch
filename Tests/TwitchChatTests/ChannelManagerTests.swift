@@ -2,8 +2,8 @@
 // ChannelManager の単体テスト
 // MockTwitchIRCClient と MockHelixAPIClient を使って複数チャンネル管理の振る舞いを検証する
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 @Suite("ChannelManager テスト")

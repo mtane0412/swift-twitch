@@ -1,0 +1,64 @@
+# .swiftlint.yml
+# TwitchChat プロジェクト用 SwiftLint 設定
+# Swift 6.0 / Swift Testing / macOS 15+ 向け
+
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - .build
+
+# 有効化するオプトインルール
+opt_in_rules:
+  - empty_count
+  - closure_spacing
+  - modifier_order
+  - sorted_imports
+  - unneeded_parentheses_in_closure_argument
+  - first_where                            # .filter { }.first より .first(where:) を推奨
+  - redundant_nil_coalescing              # ?? nil は冗長
+  - vertical_parameter_alignment_on_call  # 複数行呼び出しの引数縦揃え
+
+# 無効化するルール
+disabled_rules:
+  # Swift Testing の #expect マクロで誤検知するため
+  - trailing_closure
+  # テスト関数名が日本語（大文字/小文字チェック非対応）かつ
+  # 単一文字変数（l, r, k 等）の慣用的な使用を許容するため
+  - identifier_name
+  # 意図的な整列フォーマット（マッピングテーブル等）を許容するため
+  - comma
+  # クロージャの implicit return は可読性優先で不要
+  - implicit_return
+  # タプル3要素は一部の内部処理で使用しているため
+  - large_tuple
+  # テストコードでの .data(using: .utf8)! は許容（force-unwrap は意図的）
+  - non_optional_string_data_conversion
+
+# 行の長さ（初回導入のため緩めに設定）
+line_length:
+  warning: 150
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+# 循環的複雑度（既存の複雑な関数を考慮して緩めに設定）
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+
+# 型の本体の長さ
+type_body_length:
+  warning: 400
+  error: 600
+
+# ファイルの長さ
+file_length:
+  warning: 700
+  error: 1000
+
+# 関数の本体の長さ
+function_body_length:
+  warning: 50
+  error: 100

@@ -2,8 +2,8 @@
 // TwitchAuthClient の Device Code Flow 関連テスト
 // モッククライアントを使用して外部 API 通信なしで振る舞いを検証する
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 @Suite("TwitchAuthClient")

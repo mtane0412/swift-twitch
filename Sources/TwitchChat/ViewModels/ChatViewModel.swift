@@ -446,7 +446,7 @@ enum ChatSendError: Error, LocalizedError, Equatable {
             ("msg_suspended",                          .banned),
             ("msg_timedout",                           .timedOut),
             ("msg_verified_email",                     .verificationRequired),
-            ("msg_requires_verified_phone_number",     .verificationRequired),
+            ("msg_requires_verified_phone_number",     .verificationRequired)
         ]
         return Dictionary(uniqueKeysWithValues: entries)
     }()

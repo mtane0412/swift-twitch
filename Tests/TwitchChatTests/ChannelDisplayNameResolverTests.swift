@@ -2,8 +2,8 @@
 // ChannelDisplayNameResolver の単体テスト
 // FollowedStreamStore のデータを使ったチャンネル表示名解決ロジックを検証する
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 @Suite("ChannelDisplayNameResolver テスト")
