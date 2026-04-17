@@ -391,7 +391,8 @@ struct TwitchIRCClientTests {
         await mockWS.throwOnNextReceive(URLError(.networkConnectionLost))
 
         // 再接続が走るまで待機（connectCallCount が 2 以上になるまでポーリング）
-        await waitFor(timeout: 2.0) { await mockWS.connectCallCount >= 2 }
+        let reconnected = await waitFor(timeout: 2.0) { await mockWS.connectCallCount >= 2 }
+        #expect(reconnected, "タイムアウト前に再接続が完了しなかった")
 
         try await Task.sleep(nanoseconds: 100_000_000) // 再接続後の認証シーケンス送信を待つ
 
@@ -457,7 +458,8 @@ struct TwitchIRCClientTests {
         await mockWS.enqueueMessage(":tmi.twitch.tv RECONNECT")
 
         // 再接続が走るまで待機
-        await waitFor(timeout: 2.0) { await mockWS.connectCallCount >= 2 }
+        let reconnected = await waitFor(timeout: 2.0) { await mockWS.connectCallCount >= 2 }
+        #expect(reconnected, "タイムアウト前に再接続が完了しなかった")
 
         // 検証: 再接続が走っている
         let countAfterReconnect = await mockWS.connectCallCount
@@ -593,7 +595,8 @@ struct TwitchIRCClientTests {
         #expect(countAfterConnect == 1)
 
         // PONG を返さずに待機 → interval + timeout 経過でタイムアウト → 再接続
-        await waitFor(timeout: 3.0) { await mockWS.connectCallCount >= 2 }
+        let reconnected = await waitFor(timeout: 3.0) { await mockWS.connectCallCount >= 2 }
+        #expect(reconnected, "タイムアウト前に PING タイムアウト再接続が完了しなかった")
 
         // 検証: 再接続が走っている
         let countAfterTimeout = await mockWS.connectCallCount
@@ -610,11 +613,14 @@ struct TwitchIRCClientTests {
     /// - Parameters:
     ///   - timeout: 最大待機秒数（デフォルト 1.0 秒）
     ///   - condition: 満たされるべき非同期条件
-    private func waitFor(timeout: TimeInterval = 1.0, condition: () async -> Bool) async {
+    /// - Returns: 条件が満たされた場合は `true`、タイムアウトした場合は `false`
+    @discardableResult
+    private func waitFor(timeout: TimeInterval = 1.0, condition: () async -> Bool) async -> Bool {
         let start = Date()
         while Date().timeIntervalSince(start) < timeout {
-            if await condition() { return }
+            if await condition() { return true }
             try? await Task.sleep(nanoseconds: 10_000_000) // 10ms ポーリング
         }
+        return false
     }
 }

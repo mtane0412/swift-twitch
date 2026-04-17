@@ -132,12 +132,12 @@ struct ChatViewModelTests {
 
         // 前提: チャンネルに接続する
         await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
         #expect(viewModel.connectionState == .connected)
 
         // IRC クライアントが再接続中を通知する
         await mockClient.sendConnectionState(.reconnecting(attempt: 1))
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .reconnecting(attempt: 1) }
 
         // 検証: ViewModel が .reconnecting(attempt: 1) 状態になる
         #expect(viewModel.connectionState == .reconnecting(attempt: 1))
@@ -150,15 +150,15 @@ struct ChatViewModelTests {
 
         // 前提: チャンネルに接続してメッセージを受信する
         await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
         let message = makeTestChatMessage(displayName: "視聴者001", text: "再接続テスト前のメッセージ")
         await mockClient.sendMessage(message)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.messages.count == 1 }
         #expect(viewModel.messages.count == 1)
 
         // 再接続中を通知する
         await mockClient.sendConnectionState(.reconnecting(attempt: 1))
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .reconnecting(attempt: 1) }
 
         // 検証: メッセージ履歴がリセットされていない
         #expect(viewModel.messages.count == 1)
@@ -172,15 +172,15 @@ struct ChatViewModelTests {
 
         // 前提: 接続 → 再接続中 → 再接続成功の遷移
         await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
 
         await mockClient.sendConnectionState(.reconnecting(attempt: 1))
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .reconnecting(attempt: 1) }
         #expect(viewModel.connectionState == .reconnecting(attempt: 1))
 
         // 再接続成功を通知する
         await mockClient.sendConnectionState(.connected)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
 
         // 検証: .connected に戻る
         #expect(viewModel.connectionState == .connected)
