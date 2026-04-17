@@ -59,8 +59,9 @@ struct ContentView: View {
                             Task { await channelManager.joinChannel(channelLogin) }
                         },
                         onCancel: {
+                            // isBlankTabOpen を false にするだけで selectedChannel は変更しない
+                            // selectedViewModel が既存の選択チャンネルを自然に復元する
                             isBlankTabOpen = false
-                            channelManager.selectedChannel = channelManager.channelOrder.last
                         }
                     )
                 } else if let viewModel = channelManager.selectedViewModel {

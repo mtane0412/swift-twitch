@@ -56,7 +56,8 @@ struct ChannelTabBar: View {
                         let visualOffset = tabVisualOffset(for: channel, at: thisIdx)
 
                         ChannelTabCell(
-                            isSelected: channel == channelManager.selectedChannel,
+                            // blank tab が開いているときは通常タブを非選択にして blank tab を際立たせる
+                            isSelected: !isBlankTabOpen && channel == channelManager.selectedChannel,
                             displayName: name,
                             profileImageUrl: userId.flatMap { profileImageStore.profileImageUrl(for: $0) },
                             userId: userId,
@@ -114,8 +115,9 @@ struct ChannelTabBar: View {
                         userId: nil,
                         onSelect: { /* 既に選択中のため no-op */ },
                         onClose: {
+                            // isBlankTabOpen を false にするだけで selectedChannel は変更しない
+                            // ContentView の selectedViewModel が既存の選択チャンネルを自然に復元する
                             isBlankTabOpen = false
-                            channelManager.selectedChannel = channelManager.channelOrder.last
                         }
                     )
                     .frame(width: Self.maxTabWidth)
@@ -124,7 +126,8 @@ struct ChannelTabBar: View {
                 // 「+」ボタン: blank tab が閉じているときのみ表示
                 if !isBlankTabOpen {
                     Button {
-                        channelManager.selectedChannel = nil
+                        // selectedChannel はクリアしない
+                        // tab の isSelected は !isBlankTabOpen && ... で制御するため視覚的に正しく表示される
                         isBlankTabOpen = true
                     } label: {
                         Image(systemName: "plus")

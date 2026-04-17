@@ -211,12 +211,14 @@ struct ChannelSearchView: View {
                 return
             }
 
+            // 入力直後から検索中の体感を出し、古い検索結果も即座にクリアする
+            isSearching = true
+            searchResults = []
             // 300ms デバウンス（タイピング途中の API リクエストを防ぐ）
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
 
             // 検索 API を呼び出す
-            isSearching = true
             let results = await followedChannelStore.searchChannels(query: query)
             guard !Task.isCancelled else { return }
 

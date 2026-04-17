@@ -9,5 +9,6 @@
 import AppKit
 
 #if !swift(>=6.3)
-extension NSImage: @unchecked Sendable {}
+// @retroactive: SE-0364 に従い、外部モジュール型への外部プロトコル準拠追加には必須
+extension NSImage: @unchecked @retroactive Sendable {}
 #endif

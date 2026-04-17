@@ -110,7 +110,11 @@ final class FollowedChannelStore {
             }
         } while cursor != nil
 
-        channels = allChannels
+        // 全ページ取得成功時のみキャッシュを更新する
+        // cursor が非 nil で break した場合（途中エラー）は既存キャッシュを保持する
+        if cursor == nil {
+            channels = allChannels
+        }
     }
 
     /// チャンネル名でチャンネルを検索する（フォロー外も含む）
