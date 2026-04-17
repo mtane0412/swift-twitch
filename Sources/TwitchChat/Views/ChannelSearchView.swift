@@ -175,8 +175,9 @@ struct ChannelSearchView: View {
 
     /// フォロー中チャンネルまたは検索結果の候補リスト
     ///
-    /// VStack はコンテンツ高さに収縮する。`frame(maxHeight:)` で上限のみ設定することで
-    /// 1件なら1件分、6件なら6件分の高さになる。
+    /// `fixedSize(horizontal: false, vertical: true)` でオーバーレイ親から提案されるサイズを無視し、
+    /// VStack が常にコンテンツ高さを使うようにする。`frame(maxHeight:)` は上限キャップ。
+    /// （overlay 内では VStack が親の高さまで拡張してしまうため fixedSize が必要）
     private var candidateList: some View {
         VStack(spacing: 0) {
             if !filteredChannels.isEmpty {
@@ -201,6 +202,7 @@ struct ChannelSearchView: View {
                 }
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxHeight: Self.candidateListMaxHeight)
         .background(Color(.controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
