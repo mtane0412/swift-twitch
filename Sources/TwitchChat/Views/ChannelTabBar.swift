@@ -16,11 +16,14 @@ import SwiftUI
 /// - タブが多い場合は `ScrollView(.horizontal)` で横スクロール可能にする
 /// - アクティブタブは非アクティブタブより高く描画され、コンテンツエリアと視覚的に繋がって見える
 /// - タブをドラッグすると Chrome 同様にカーソルへ追従し、他タブがリアルタイムに退避する
+/// - タブ末尾の「+」ボタンで blank tab を開き、任意のチャンネル名を入力して接続できる
 struct ChannelTabBar: View {
 
     let channelManager: ChannelManager
     let followedStreamStore: FollowedStreamStore
     let profileImageStore: ProfileImageStore
+    /// blank tab（チャンネル名入力フォーム）の開閉状態
+    @Binding var isBlankTabOpen: Bool
 
     /// ドラッグ中のチャンネル名
     @State private var draggingChannel: String?
@@ -98,6 +101,39 @@ struct ChannelTabBar: View {
                                 }
                         )
                     }
+                }
+
+                // blank tab（チャンネル名入力フォーム用タブ）
+                if isBlankTabOpen {
+                    ChannelTabCell(
+                        isSelected: true,
+                        displayName: "新しいタブ",
+                        profileImageUrl: nil,
+                        userId: nil,
+                        onSelect: { /* 既に選択中のため no-op */ },
+                        onClose: {
+                            isBlankTabOpen = false
+                            channelManager.selectedChannel = channelManager.channelOrder.last
+                        }
+                    )
+                    .frame(width: Self.maxTabWidth)
+                }
+
+                // 「+」ボタン: blank tab が閉じているときのみ表示
+                if !isBlankTabOpen {
+                    Button {
+                        channelManager.selectedChannel = nil
+                        isBlankTabOpen = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: ChannelTabCell.inactiveHeight)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("新しいタブを開く")
+                    .padding(.leading, 4)
                 }
             }
             // ScrollView 内でタブを底揃えにする
