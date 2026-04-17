@@ -75,6 +75,8 @@ final class FollowedChannelStore {
     /// - 認証エラーはサイレントスキップする
     func fetchAll() async {
         guard let userId = currentUserId else { return }
+        // 既にフェッチ中の場合は重複実行を防ぐ
+        guard !isLoading else { return }
 
         isLoading = true
         defer { isLoading = false }
@@ -119,7 +121,7 @@ final class FollowedChannelStore {
     /// - Parameter query: 検索クエリ
     /// - Returns: 検索にヒットした `ChannelSearchResult` の配列
     func searchChannels(query: String) async -> [ChannelSearchResult] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
         do {

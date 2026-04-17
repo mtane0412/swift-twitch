@@ -10,7 +10,7 @@ import Foundation
 ///
 /// `FollowedStream` はライブ中のみ取得できるが、`FollowedChannel` はオフラインチャンネルも含む。
 /// チャンネル名入力補完のデータソースとして使用する。
-struct FollowedChannel: Sendable, Identifiable, Equatable {
+struct FollowedChannel: Sendable, Identifiable, Equatable, Hashable {
     var id: String { broadcasterId }
     /// 配信者の Twitch ユーザーID
     let broadcasterId: String

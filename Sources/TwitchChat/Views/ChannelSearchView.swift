@@ -143,7 +143,7 @@ struct ChannelSearchView: View {
                 .focused($isTextFieldFocused)
                 .onSubmit {
                     // 候補が選択中ならそのチャンネルを開く。なければ入力テキストを確定する
-                    if !candidateLogins.isEmpty {
+                    if candidateLogins.indices.contains(selectedCandidateIndex) {
                         onChannelSelected(candidateLogins[selectedCandidateIndex])
                     } else {
                         submitCurrentText()

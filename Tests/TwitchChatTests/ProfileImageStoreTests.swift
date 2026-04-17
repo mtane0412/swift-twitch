@@ -97,6 +97,17 @@ struct ProfileImageStoreTests {
         #expect(store.profileImageUrl(for: "222222") == URL(string: "https://example.com/user2.png"))
     }
 
+    @Test("ログイン名が空の場合は API を呼ばない")
+    func testFetchSkipsWhenEmptyLogins() async {
+        let mockClient = MockProfileImageAPIClient()
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(logins: [])
+
+        let callCount = await mockClient.callCount
+        #expect(callCount == 0)
+    }
+
     @Test("ユーザーIDが空の場合は API を呼ばない")
     func testFetchSkipsWhenEmptyUserIds() async {
         let mockClient = MockProfileImageAPIClient()

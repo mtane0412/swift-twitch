@@ -33,7 +33,7 @@ struct ChannelSearchFilterTests {
         let channels = [
             makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
             makeChannel(broadcasterId: "2", broadcasterLogin: "shroud", broadcasterName: "shroud"),
-            makeChannel(broadcasterId: "3", broadcasterLogin: "pokimane", broadcasterName: "Pokimane"),
+            makeChannel(broadcasterId: "3", broadcasterLogin: "pokimane", broadcasterName: "Pokimane")
         ]
 
         let result = ChannelSearchFilter.filter(channels: channels, query: "")
@@ -45,7 +45,7 @@ struct ChannelSearchFilterTests {
     @Test("スペースのみの場合、空配列を返す（未入力時は何も表示しない）")
     func whitespaceOnlyQueryReturnsEmpty() {
         let channels = [
-            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
+            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja")
         ]
 
         let result = ChannelSearchFilter.filter(channels: channels, query: "   ")
@@ -60,7 +60,7 @@ struct ChannelSearchFilterTests {
         // 前提: "poki" で始まるチャンネルが1件ある
         let channels = [
             makeChannel(broadcasterId: "1", broadcasterLogin: "pokimane", broadcasterName: "Pokimane"),
-            makeChannel(broadcasterId: "2", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "ninja", broadcasterName: "Ninja")
         ]
 
         let result = ChannelSearchFilter.filter(channels: channels, query: "poki")
@@ -77,7 +77,7 @@ struct ChannelSearchFilterTests {
         // 前提: 日本語表示名 "ゲーム実況者A" のチャンネルがある
         let channels = [
             makeChannel(broadcasterId: "1", broadcasterLogin: "gameaaa", broadcasterName: "ゲーム実況者A"),
-            makeChannel(broadcasterId: "2", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "ninja", broadcasterName: "Ninja")
         ]
 
         let result = ChannelSearchFilter.filter(channels: channels, query: "ゲーム")
@@ -92,7 +92,7 @@ struct ChannelSearchFilterTests {
     @Test("検索クエリは大文字小文字を区別しない（broadcasterLogin）")
     func caseInsensitiveLogin() {
         let channels = [
-            makeChannel(broadcasterId: "1", broadcasterLogin: "shroud", broadcasterName: "shroud"),
+            makeChannel(broadcasterId: "1", broadcasterLogin: "shroud", broadcasterName: "shroud")
         ]
 
         // 操作: 大文字で "SHR" と入力
@@ -100,12 +100,13 @@ struct ChannelSearchFilterTests {
 
         // 検証: shroud が見つかる
         #expect(result.count == 1)
+        #expect(result[0].broadcasterLogin == "shroud")
     }
 
     @Test("検索クエリは大文字小文字を区別しない（broadcasterName）")
     func caseInsensitiveName() {
         let channels = [
-            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
+            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja")
         ]
 
         // 操作: 小文字で "ninja" と入力（broadcasterName は "Ninja"）
@@ -113,6 +114,7 @@ struct ChannelSearchFilterTests {
 
         // 検証: Ninja が見つかる
         #expect(result.count == 1)
+        #expect(result[0].broadcasterLogin == "ninja")
     }
 
     // MARK: - マッチしない場合
@@ -121,7 +123,7 @@ struct ChannelSearchFilterTests {
     func noMatchReturnsEmpty() {
         let channels = [
             makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
-            makeChannel(broadcasterId: "2", broadcasterLogin: "shroud", broadcasterName: "shroud"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "shroud", broadcasterName: "shroud")
         ]
 
         let result = ChannelSearchFilter.filter(channels: channels, query: "zzz")
@@ -137,13 +139,17 @@ struct ChannelSearchFilterTests {
         let channels = [
             makeChannel(broadcasterId: "1", broadcasterLogin: "shroud", broadcasterName: "shroud"),
             makeChannel(broadcasterId: "2", broadcasterLogin: "shrew", broadcasterName: "shrew"),
-            makeChannel(broadcasterId: "3", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
+            makeChannel(broadcasterId: "3", broadcasterLogin: "ninja", broadcasterName: "Ninja")
         ]
 
         let result = ChannelSearchFilter.filter(channels: channels, query: "shr")
 
-        // 検証: shroud と shrew の2件が返る
+        // 検証: shroud と shrew の2件が返る（ninja は含まれない）
         #expect(result.count == 2)
+        let logins = result.map(\.broadcasterLogin)
+        #expect(logins.contains("shroud"))
+        #expect(logins.contains("shrew"))
+        #expect(!logins.contains("ninja"))
     }
 
     // MARK: - broadcasterLogin と broadcasterName の OR 一致
@@ -152,7 +158,7 @@ struct ChannelSearchFilterTests {
     func matchEitherLoginOrName() {
         // 前提: broadcasterLogin は "abc123" だが broadcasterName は "日本語チャンネル"
         let channels = [
-            makeChannel(broadcasterId: "1", broadcasterLogin: "abc123", broadcasterName: "日本語チャンネル"),
+            makeChannel(broadcasterId: "1", broadcasterLogin: "abc123", broadcasterName: "日本語チャンネル")
         ]
 
         // "日本語" で検索 → broadcasterLogin は不一致だが broadcasterName が一致

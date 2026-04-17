@@ -80,7 +80,7 @@ final class ProfileImageStore {
     /// - Parameter login: Twitch ログイン名（英数字小文字）
     /// - Returns: プロフィール画像URL（未取得またはユーザーが存在しない場合は `nil`）
     func profileImageUrl(forLogin login: String) -> URL? {
-        guard let userId = loginToUserId[login] else { return nil }
+        guard let userId = loginToUserId[login.lowercased()] else { return nil }
         return profileImageUrls[userId]
     }
 
@@ -89,7 +89,7 @@ final class ProfileImageStore {
     /// - Parameter login: Twitch ログイン名（英数字小文字）
     /// - Returns: Twitch ユーザーID（未取得の場合は `nil`）
     func userId(forLogin login: String) -> String? {
-        loginToUserId[login]
+        loginToUserId[login.lowercased()]
     }
 
     /// 複数ユーザーのプロフィール画像URLを一括取得する
@@ -121,7 +121,8 @@ final class ProfileImageStore {
     /// - Note: 取得済みログインは API を呼ばない。100件超の場合は自動チャンク分割。
     ///         認証エラーはサイレントスキップ（プロフィール画像は必須ではないため）。
     func fetchUsers(logins: [String]) async {
-        let newLogins = logins.filter { !fetchedLogins.contains($0) && !inFlightLogins.contains($0) }
+        let normalized = logins.map { $0.lowercased() }
+        let newLogins = normalized.filter { !fetchedLogins.contains($0) && !inFlightLogins.contains($0) }
         guard !newLogins.isEmpty else { return }
 
         inFlightLogins.formUnion(newLogins)
@@ -181,9 +182,9 @@ final class ProfileImageStore {
             }
             for userData in response.data {
                 fetchedUserIds.insert(userData.id)
-                fetchedLogins.insert(userData.login)
+                fetchedLogins.insert(userData.login.lowercased())
                 // userId → login の逆引きも記録してログイン名からもURL参照できるようにする
-                loginToUserId[userData.login] = userData.id
+                loginToUserId[userData.login.lowercased()] = userData.id
                 if let url = userData.profileImageUrl {
                     profileImageUrls[userData.id] = url
                 }
@@ -192,10 +193,10 @@ final class ProfileImageStore {
             switch mode {
             case .userId:
                 let returnedIds = Set(response.data.map(\.id))
-                fallbackIds.forEach { if !returnedIds.contains($0) { fetchedUserIds.insert($0) } }
+                fetchedUserIds.formUnion(Set(fallbackIds).subtracting(returnedIds))
             case .login:
-                let returnedLogins = Set(response.data.map(\.login))
-                fallbackIds.forEach { if !returnedLogins.contains($0) { fetchedLogins.insert($0) } }
+                let returnedLogins = Set(response.data.map { $0.login.lowercased() })
+                fetchedLogins.formUnion(Set(fallbackIds).subtracting(returnedLogins))
             }
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             #if DEBUG
