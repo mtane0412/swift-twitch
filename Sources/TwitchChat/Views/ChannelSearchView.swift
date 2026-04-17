@@ -175,34 +175,32 @@ struct ChannelSearchView: View {
 
     /// フォロー中チャンネルまたは検索結果の候補リスト
     ///
-    /// `candidateListMaxHeight` で高さを制限し、超えた場合はスクロール可能にする
+    /// VStack はコンテンツ高さに収縮する。`frame(maxHeight:)` で上限のみ設定することで
+    /// 1件なら1件分、6件なら6件分の高さになる。
     private var candidateList: some View {
-        ScrollView(.vertical) {
-            VStack(spacing: 0) {
-                if !filteredChannels.isEmpty {
-                    // フォロー中チャンネルの候補
-                    ForEach(filteredChannels) { channel in
-                        followedChannelRow(channel)
-                    }
-                } else if isSearching {
-                    // 検索 API 取得中
-                    ProgressView()
-                        .padding(16)
-                } else if !searchResults.isEmpty {
-                    // 検索 API のフォールバック結果
-                    Text("チャンネル検索結果")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 8)
-                    ForEach(searchResults) { result in
-                        searchResultRow(result)
-                    }
+        VStack(spacing: 0) {
+            if !filteredChannels.isEmpty {
+                // フォロー中チャンネルの候補
+                ForEach(filteredChannels) { channel in
+                    followedChannelRow(channel)
+                }
+            } else if isSearching {
+                // 検索 API 取得中
+                ProgressView()
+                    .padding(16)
+            } else if !searchResults.isEmpty {
+                // 検索 API のフォールバック結果
+                Text("チャンネル検索結果")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                ForEach(searchResults.prefix(Self.maxCandidates)) { result in
+                    searchResultRow(result)
                 }
             }
         }
-        .scrollDisabled(!needsScroll)
         .frame(maxHeight: Self.candidateListMaxHeight)
         .background(Color(.controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -210,11 +208,6 @@ struct ChannelSearchView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(.separatorColor), lineWidth: 1)
         )
-    }
-
-    /// スクロールが必要かどうか（候補が少なければ無効化してスクロールバーを出さない）
-    private var needsScroll: Bool {
-        filteredChannels.count > Self.maxCandidates || searchResults.count > Self.maxCandidates
     }
 
     // MARK: - 候補行: フォロー中チャンネル
