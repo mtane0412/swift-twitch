@@ -21,10 +21,17 @@ actor MockWebSocketClient: WebSocketClientProtocol {
     /// 接続済みフラグ
     private(set) var isConnected = false
 
+    /// connect(to:) の呼び出し回数（再接続検証用）
+    private(set) var connectCallCount = 0
+
     /// 受信を待機する継続
     private var pendingReceiveContinuations: [CheckedContinuation<String, Error>] = []
 
+    /// 次の receive() で throw するエラーのキュー
+    private var scheduledErrors: [any Error] = []
+
     func connect(to url: URL) async throws {
+        connectCallCount += 1
         isConnected = true
     }
 
@@ -33,6 +40,10 @@ actor MockWebSocketClient: WebSocketClientProtocol {
     }
 
     func receive() async throws -> String {
+        // 予約エラーがあれば throw する
+        if !scheduledErrors.isEmpty {
+            throw scheduledErrors.removeFirst()
+        }
         // キューにメッセージがあれば即返す
         if !receivableMessages.isEmpty {
             return receivableMessages.removeFirst()
@@ -59,6 +70,17 @@ actor MockWebSocketClient: WebSocketClientProtocol {
             continuation.resume(returning: message)
         } else {
             receivableMessages.append(message)
+        }
+    }
+
+    /// 次の receive() でエラーを throw するように予約する（予期せぬ切断のシミュレーション用）
+    func throwOnNextReceive(_ error: any Error) {
+        if let continuation = pendingReceiveContinuations.first {
+            // 既に receive() で待機中なら即時エラー
+            pendingReceiveContinuations.removeFirst()
+            continuation.resume(throwing: error)
+        } else {
+            scheduledErrors.append(error)
         }
     }
 }
@@ -341,5 +363,258 @@ struct TwitchIRCClientTests {
         #expect(receivedNotices[0].msgId == nil)
         #expect(receivedNotices[0].channel == nil)
         #expect(receivedNotices[0].message == "Login unsuccessful")
+    }
+
+    // MARK: - 自動再接続
+
+    @Test("予期せぬ切断後にバックオフ付きで再接続シーケンスが再送される")
+    func 予期せぬ切断後にバックオフ付きで再接続シーケンスが再送される() async throws {
+        let mockWS = MockWebSocketClient()
+        // 前提: テスト用に極小バックオフを注入（0.01s で即再接続）
+        let client = TwitchIRCClient(
+            webSocketClient: mockWS,
+            backoffConfig: .fastTest,
+            pingConfig: .fastTest
+        )
+
+        // チャンネル接続
+        let connectTask = Task {
+            try await client.connect(to: "haishinshaB", accessToken: nil, userLogin: nil)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000) // 接続完了を待つ
+
+        // 1回目の接続で JOIN が送られていることを確認
+        let sentBeforeDisconnect = await mockWS.sentMessages
+        #expect(sentBeforeDisconnect.contains("JOIN #haishinshab"))
+
+        // 予期せぬ切断をシミュレート（ネットワーク喪失エラー）
+        await mockWS.throwOnNextReceive(URLError(.networkConnectionLost))
+
+        // 再接続が走るまで待機（connectCallCount が 2 以上になるまでポーリング）
+        await waitFor(timeout: 2.0) { await mockWS.connectCallCount >= 2 }
+
+        try await Task.sleep(nanoseconds: 100_000_000) // 再接続後の認証シーケンス送信を待つ
+
+        // 検証: 再接続後に JOIN が再送されている
+        let sentAfterReconnect = await mockWS.sentMessages
+        let joinCount = sentAfterReconnect.filter { $0 == "JOIN #haishinshab" }.count
+        #expect(joinCount >= 2)
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("意図的な disconnect() の後は再接続しない")
+    func 意図的なdisconnect後は再接続しない() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(
+            webSocketClient: mockWS,
+            backoffConfig: .fastTest,
+            pingConfig: .fastTest
+        )
+
+        // 前提: チャンネルに接続する
+        let connectTask = Task {
+            try await client.connect(to: "視聴者ちゃんねる", accessToken: nil, userLogin: nil)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 初回接続が1回であることを確認
+        let countAfterConnect = await mockWS.connectCallCount
+        #expect(countAfterConnect == 1)
+
+        // 意図的に切断する
+        await client.disconnect()
+        connectTask.cancel()
+
+        // 十分な時間待っても再接続が走らないことを確認（fastTest でも 200ms は十分）
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // 検証: connectCallCount が 1 のまま（再接続していない）
+        let countAfterDisconnect = await mockWS.connectCallCount
+        #expect(countAfterDisconnect == 1)
+    }
+
+    @Test("RECONNECT コマンド受信時に再接続が走る")
+    func RECONNECTコマンド受信時に再接続が走る() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(
+            webSocketClient: mockWS,
+            backoffConfig: .fastTest,
+            pingConfig: .fastTest
+        )
+
+        // 前提: チャンネルに接続する
+        let connectTask = Task {
+            try await client.connect(to: "配信者ABC", accessToken: nil, userLogin: nil)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let countAfterConnect = await mockWS.connectCallCount
+        #expect(countAfterConnect == 1)
+
+        // Twitch からの RECONNECT コマンドを送り込む
+        await mockWS.enqueueMessage(":tmi.twitch.tv RECONNECT")
+
+        // 再接続が走るまで待機
+        await waitFor(timeout: 2.0) { await mockWS.connectCallCount >= 2 }
+
+        // 検証: 再接続が走っている
+        let countAfterReconnect = await mockWS.connectCallCount
+        #expect(countAfterReconnect >= 2)
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("再接続中は connectionStateStream に reconnecting(attempt:) が流れる")
+    func 再接続中はconnectionStateStreamにreconnectingが流れる() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(
+            webSocketClient: mockWS,
+            backoffConfig: .fastTest,
+            pingConfig: .fastTest
+        )
+
+        // 前提: connectionStateStream を購読して reconnecting を待機
+        let stateStream = await client.connectionStateStream
+
+        // チャンネルに接続する
+        let connectTask = Task {
+            try await client.connect(to: "配信者XYZ", accessToken: nil, userLogin: nil)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 予期せぬ切断をシミュレート
+        await mockWS.throwOnNextReceive(URLError(.networkConnectionLost))
+
+        // connectionStateStream から .connected → .reconnecting の遷移を受け取る
+        var receivedConnected = false
+        var receivedReconnecting = false
+        for await state in stateStream {
+            if state == .connected { receivedConnected = true }
+            if case .reconnecting(1) = state { receivedReconnecting = true; break }
+        }
+
+        // 検証: connected の後に reconnecting(attempt: 1) が流れる
+        #expect(receivedConnected)
+        #expect(receivedReconnecting)
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("再接続成功後は connectionStateStream に connected が流れる")
+    func 再接続成功後はconnectionStateStreamにconnectedが流れる() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(
+            webSocketClient: mockWS,
+            backoffConfig: .fastTest,
+            pingConfig: .fastTest
+        )
+
+        // 前提: connectionStateStream を購読
+        let stateStream = await client.connectionStateStream
+
+        // チャンネルに接続する
+        let connectTask = Task {
+            try await client.connect(to: "配信者DDD", accessToken: nil, userLogin: nil)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 予期せぬ切断をシミュレート
+        await mockWS.throwOnNextReceive(URLError(.networkConnectionLost))
+
+        // .reconnecting の後の .connected を待つ
+        var seenReconnecting = false
+        var seenConnectedAfterReconnect = false
+        for await state in stateStream {
+            if case .reconnecting = state { seenReconnecting = true }
+            if seenReconnecting && state == .connected {
+                seenConnectedAfterReconnect = true
+                break
+            }
+        }
+
+        // 検証: 再接続成功で .connected に戻っている
+        #expect(seenConnectedAfterReconnect)
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("PING keepalive の PING が周期的に送信される")
+    func PING_keepaliveのPINGが周期的に送信される() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(
+            webSocketClient: mockWS,
+            backoffConfig: .default,
+            // 前提: PING 間隔を短縮（0.05s ごとに送信）
+            pingConfig: PingConfiguration(interval: 0.05, timeout: 30.0)
+        )
+
+        // チャンネルに接続する
+        let connectTask = Task {
+            try await client.connect(to: "配信者EEE", accessToken: nil, userLogin: nil)
+        }
+
+        // PING が 2 回以上送信されるまで待機（最大 2 秒、並行テスト実行時の遅延を許容）
+        await waitFor(timeout: 2.0) {
+            let sent = await mockWS.sentMessages
+            return sent.filter { $0 == "PING :tmi.twitch.tv" }.count >= 2
+        }
+
+        // 検証: keepalive PING が少なくとも 2 回送信されている
+        let sent = await mockWS.sentMessages
+        let pingCount = sent.filter { $0 == "PING :tmi.twitch.tv" }.count
+        #expect(pingCount >= 2)
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("PONG が届かなければ PING タイムアウトで切断→再接続が走る")
+    func PONGが届かなければPINGタイムアウトで切断後再接続が走る() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(
+            webSocketClient: mockWS,
+            backoffConfig: .fastTest,
+            // 前提: interval=0.05s, timeout=0.05s → 0.1s 後にタイムアウト検知
+            pingConfig: PingConfiguration(interval: 0.05, timeout: 0.05)
+        )
+
+        // チャンネルに接続する（PONG は返さない）
+        let connectTask = Task {
+            try await client.connect(to: "配信者FFF", accessToken: nil, userLogin: nil)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000) // 接続完了を待つ
+
+        let countAfterConnect = await mockWS.connectCallCount
+        #expect(countAfterConnect == 1)
+
+        // PONG を返さずに待機 → interval + timeout 経過でタイムアウト → 再接続
+        await waitFor(timeout: 3.0) { await mockWS.connectCallCount >= 2 }
+
+        // 検証: 再接続が走っている
+        let countAfterTimeout = await mockWS.connectCallCount
+        #expect(countAfterTimeout >= 2)
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    // MARK: - テストヘルパー
+
+    /// 条件が満たされるまで最大 `timeout` 秒ポーリングする（10ms 間隔）
+    ///
+    /// - Parameters:
+    ///   - timeout: 最大待機秒数（デフォルト 1.0 秒）
+    ///   - condition: 満たされるべき非同期条件
+    private func waitFor(timeout: TimeInterval = 1.0, condition: () async -> Bool) async {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if await condition() { return }
+            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms ポーリング
+        }
     }
 }

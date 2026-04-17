@@ -13,6 +13,10 @@ enum ConnectionState: Equatable {
     case connecting
     /// 接続済み
     case connected
+    /// 再接続中（切断検知後、指数バックオフでリトライ中）
+    ///
+    /// - Parameter attempt: 現在の再接続試行回数（1 始まり）
+    case reconnecting(attempt: Int)
     /// エラー
     case error(String)
 
@@ -21,6 +25,7 @@ enum ConnectionState: Equatable {
         case (.disconnected, .disconnected): return true
         case (.connecting, .connecting): return true
         case (.connected, .connected): return true
+        case (.reconnecting(let l), .reconnecting(let r)): return l == r
         case (.error(let l), .error(let r)): return l == r
         default: return false
         }
@@ -77,6 +82,9 @@ final class ChatViewModel {
 
     /// NOTICE 受信ループタスク（切断時にキャンセル）
     private var noticeReceiveTask: Task<Void, Never>?
+
+    /// IRC クライアントの接続状態変化を購読するタスク（切断時にキャンセル）
+    private var connectionStateReceiveTask: Task<Void, Never>?
 
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false
@@ -154,6 +162,16 @@ final class ChatViewModel {
             }
         }
 
+        // IRC クライアントの接続状態変化（再接続 / 再接続成功）を ViewModel の状態に反映する
+        connectionStateReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.connectionStateStream
+            for await state in stream {
+                guard !Task.isCancelled else { break }
+                self.applyClientConnectionState(state)
+            }
+        }
+
         do {
             // ログイン済みなら認証接続、ログアウト中なら匿名接続にフォールバック
             let token = await authState.validAccessToken()
@@ -177,6 +195,7 @@ final class ChatViewModel {
     func disconnect() async {
         receiveTask?.cancel()
         noticeReceiveTask?.cancel()
+        connectionStateReceiveTask?.cancel()
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
         // BadgeStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
@@ -203,6 +222,23 @@ final class ChatViewModel {
         messages.append(message)
         if messages.count > Self.maxMessages {
             messages.removeFirst(messages.count - Self.maxMessages)
+        }
+    }
+
+    /// IRC クライアントから通知された接続状態を ViewModel の ConnectionState に反映する
+    ///
+    /// - `.connected` → `.connected`（再接続成功時も含む。`messages` はリセットしない）
+    /// - `.reconnecting(attempt:)` → `.reconnecting(attempt:)`
+    /// - `.disconnected` → 無視（`disconnect()` で明示的に遷移させるため）
+    private func applyClientConnectionState(_ state: ClientConnectionState) {
+        switch state {
+        case .connected:
+            connectionState = .connected
+        case .reconnecting(let attempt):
+            connectionState = .reconnecting(attempt: attempt)
+        case .disconnected:
+            // ViewModel.disconnect() で明示的に .disconnected へ遷移させるので無視
+            break
         }
     }
 
