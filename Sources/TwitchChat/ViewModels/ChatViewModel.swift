@@ -289,6 +289,11 @@ final class ChatViewModel {
                 // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
                 optimisticPendingMessages[localMessage.id] = Date()
             }
+        } catch TwitchIRCClientError.rateLimited(let retryAfter) {
+            // クライアント側レートリミットエラーを ChatSendError に変換して上位に伝える
+            let sendError = ChatSendError.clientRateLimited(retryAfter: retryAfter)
+            self.sendError = sendError.localizedDescription
+            throw sendError
         } catch {
             sendError = error.localizedDescription
             throw error
@@ -355,6 +360,10 @@ enum ChatSendError: Error, LocalizedError, Equatable {
     case tooLong
     /// 送信できる状態でない（未接続・未ログイン・スコープ不足）
     case notReady
+    /// クライアント側レートリミット超過（送信前の事前チェック）
+    ///
+    /// - Parameter retryAfter: 送信可能になるまでの残り秒数
+    case clientRateLimited(retryAfter: TimeInterval)
     /// レートリミット超過（msg_ratelimit）
     case rateLimited
     /// 重複メッセージの連投（msg_duplicate）
@@ -384,6 +393,8 @@ enum ChatSendError: Error, LocalizedError, Equatable {
             return "メッセージは500文字以内にしてください"
         case .notReady:
             return "コメントの投稿にはログインが必要です"
+        case .clientRateLimited(let retryAfter):
+            return "送信頻度が上限に達しました。あと \(Int(ceil(retryAfter))) 秒後に再試行してください"
         case .rateLimited:
             return "メッセージの送信頻度が速すぎます。少し待ってから送信してください"
         case .duplicate:

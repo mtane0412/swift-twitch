@@ -614,6 +614,67 @@ struct TwitchIRCClientTests {
         connectTask.cancel()
     }
 
+    // MARK: - クライアント側レートリミット
+
+    @Test("30回連続sendPrivmsgは成功し31回目はrateLimitedをthrowする")
+    func 連続三十回sendPrivmsgは成功し三十一回目はrateLimitedをthrowする() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 認証接続
+        let connectTask = Task {
+            try await client.connect(to: "testchannel", accessToken: "テスト用トークン", userLogin: "視聴者001")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 30回は成功する
+        for i in 1...30 {
+            try await client.sendPrivmsg("送信テスト \(i)回目")
+        }
+
+        // 31回目はレートリミット超過
+        do {
+            try await client.sendPrivmsg("レートリミット超過テスト")
+            Issue.record("rateLimited が throw されるべきです")
+        } catch TwitchIRCClientError.rateLimited(let retryAfter) {
+            #expect(retryAfter > 0)
+        }
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("disconnect後は送信カウントがリセットされ再接続後は送信できる")
+    func disconnect後は送信カウントがリセットされ再接続後は送信できる() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 認証接続して上限まで送信する
+        let connectTask = Task {
+            try await client.connect(to: "testchannel", accessToken: "テスト用トークン", userLogin: "視聴者002")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        for i in 1...30 {
+            try await client.sendPrivmsg("送信テスト \(i)回目")
+        }
+        // 上限に達した状態で切断
+        await client.disconnect()
+        connectTask.cancel()
+
+        // 再接続
+        let reconnectTask = Task {
+            try await client.connect(to: "testchannel", accessToken: "テスト用トークン", userLogin: "視聴者002")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 切断によりカウントがリセットされているので送信できる
+        try await client.sendPrivmsg("再接続後の送信テスト")
+
+        await client.disconnect()
+        reconnectTask.cancel()
+    }
+
     // MARK: - テストヘルパー
 
     /// 条件が満たされるまで最大 `timeout` 秒ポーリングする（10ms 間隔）
