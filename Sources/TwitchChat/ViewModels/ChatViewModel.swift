@@ -187,6 +187,7 @@ final class ChatViewModel {
             connectionState = .error(error.localizedDescription)
             receiveTask?.cancel()
             noticeReceiveTask?.cancel()
+            connectionStateReceiveTask?.cancel()
             globalBadgeFetchTask?.cancel()
         }
     }
@@ -231,6 +232,8 @@ final class ChatViewModel {
     /// - `.reconnecting(attempt:)` → `.reconnecting(attempt:)`
     /// - `.disconnected` → 無視（`disconnect()` で明示的に遷移させるため）
     private func applyClientConnectionState(_ state: ClientConnectionState) {
+        // 切断済み状態に遅延到達した通知が上書きしないようにガードする
+        guard connectionState != .disconnected else { return }
         switch state {
         case .connected:
             connectionState = .connected

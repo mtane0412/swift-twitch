@@ -581,8 +581,8 @@ struct TwitchIRCClientTests {
         let client = TwitchIRCClient(
             webSocketClient: mockWS,
             backoffConfig: .fastTest,
-            // 前提: interval=0.05s, timeout=0.05s → 0.1s 後にタイムアウト検知
-            pingConfig: PingConfiguration(interval: 0.05, timeout: 0.05)
+            // 前提: interval=0.05s, timeout=0.1s → 0.15s 後にタイムアウト検知
+            pingConfig: PingConfiguration(interval: 0.05, timeout: 0.1)
         )
 
         // チャンネルに接続する（PONG は返さない）

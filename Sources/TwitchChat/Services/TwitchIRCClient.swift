@@ -174,9 +174,11 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
     /// 意図的切断フラグ
     ///
-    /// `disconnect()` で true にセットし、`connect()` で false にリセットする。
-    /// receiveLoop の catch ではこのフラグが false のときのみ再接続を行う。
-    private var isIntentionallyDisconnected: Bool = true
+    /// 初回 `connect()` 呼び出しで false にリセットされ、`disconnect()` で true に戻る。
+    /// `receiveLoop` / `performReconnect` はこのフラグが false のときのみ再接続を行う。
+    /// 初期値 false は connect() 前に receiveLoop / performReconnect が起動しないため
+    /// 実質的に観測可能な影響はないが、意味的に「まだ接続していない」状態と整合させる。
+    private var isIntentionallyDisconnected: Bool = false
 
     /// 現在の再接続試行回数（初回接続時は 0、再接続のたびに +1）
     private var reconnectAttempt: Int = 0
@@ -421,12 +423,16 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
             do {
                 try await webSocketClient.connect(to: Self.websocketURL)
+                // 接続成功後に意図的切断が呼ばれた場合は即リターン
+                if isIntentionallyDisconnected { await webSocketClient.disconnect(); return }
                 isAuthenticated = (lastAccessToken != nil && lastUserLogin != nil)
                 try await sendAuthSequence(
                     channel: channel,
                     accessToken: lastAccessToken,
                     userLogin: lastUserLogin
                 )
+                // 認証シーケンス送信後に意図的切断が呼ばれた場合は即リターン
+                if isIntentionallyDisconnected { await webSocketClient.disconnect(); return }
                 // 再接続成功
                 reconnectAttempt = 0
                 joinedChannel = channel
@@ -448,7 +454,7 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         let base = backoffConfig.initialDelay * pow(backoffConfig.multiplier, Double(attempt - 1))
         let capped = min(base, backoffConfig.maxDelay)
         let jitter = capped * backoffConfig.jitterRatio
-        return capped + Double.random(in: -jitter...jitter)
+        return max(0, capped + Double.random(in: -jitter...jitter))
     }
 
     // MARK: - PING keepalive
@@ -484,7 +490,9 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     private func performKeepalivePing() async {
         if let last = lastPongAt,
            Date().timeIntervalSince(last) > pingConfig.interval + pingConfig.timeout {
-            // PONG タイムアウト → 切断して receiveLoop の catch 経由で再接続をトリガー
+            // PONG タイムアウト → keepalive タイマーを停止してから切断し、
+            // receiveLoop の catch 経由で再接続をトリガーする
+            stopPingKeepalive()
             await webSocketClient.disconnect()
             return
         }
