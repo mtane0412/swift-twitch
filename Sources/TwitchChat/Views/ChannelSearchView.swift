@@ -65,8 +65,6 @@ struct ChannelSearchView: View {
     private static let textFieldFontSize: CGFloat = 20
     /// 候補リストの最大表示件数
     private static let maxCandidates: Int = 6
-    /// 候補リストの最大高さ（ウィンドウからはみ出ないよう制限する）
-    private static let candidateListMaxHeight: CGFloat = 280
     /// 候補行のアイコンサイズ
     private static let iconSize: CGFloat = 32
     /// ライブ中縁取りの太さ
@@ -95,8 +93,6 @@ struct ChannelSearchView: View {
     var body: some View {
         VStack(spacing: 0) {
             // 上下均等の Spacer で TextField を中央に固定する
-            // Color.clear や frame(maxHeight:.infinity) は Spacer() と競合して
-            // スペースを独占するため使用しない
             Spacer()
 
             TextField("チャンネル名を入力", text: $searchText)
@@ -108,9 +104,10 @@ struct ChannelSearchView: View {
                     submitCurrentText()
                 }
 
-            // 下 Spacer への overlay で候補を表示する
-            // overlay はレイアウトサイズに影響しないため TextField の位置が変わらない
-            Spacer()
+            // ゼロ高さのアンカービュー: Spacer のバランスに影響せず TextField が常に中央に固定される
+            // overlay の内容は候補リストをテキストフィールド直下に表示する起点として機能する
+            Color.clear
+                .frame(height: 0)
                 .overlay(alignment: .top) {
                     if shouldShowCandidates {
                         candidateList
@@ -118,6 +115,8 @@ struct ChannelSearchView: View {
                             .padding(.top, 8)
                     }
                 }
+
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -175,9 +174,9 @@ struct ChannelSearchView: View {
 
     /// フォロー中チャンネルまたは検索結果の候補リスト
     ///
-    /// `fixedSize(horizontal: false, vertical: true)` でオーバーレイ親から提案されるサイズを無視し、
-    /// VStack が常にコンテンツ高さを使うようにする。`frame(maxHeight:)` は上限キャップ。
-    /// （overlay 内では VStack が親の高さまで拡張してしまうため fixedSize が必要）
+    /// - `fixedSize(horizontal: false, vertical: true)` でゼロ高さアンカーから提案される 0pt を無視し、
+    ///   VStack が常にコンテンツ高さを使うようにする
+    /// - background は Shape fill を使用することで、view の実際のサイズのみ塗りつぶす
     private var candidateList: some View {
         VStack(spacing: 0) {
             if !filteredChannels.isEmpty {
@@ -203,13 +202,14 @@ struct ChannelSearchView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(maxHeight: Self.candidateListMaxHeight)
-        .background(Color(.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(.controlBackgroundColor))
+        }
+        .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(.separatorColor), lineWidth: 1)
-        )
+        }
     }
 
     // MARK: - 候補行: フォロー中チャンネル
