@@ -632,12 +632,12 @@ struct TwitchIRCClientTests {
             try await client.sendPrivmsg("送信テスト \(i)回目")
         }
 
-        // 31回目はレートリミット超過
-        do {
+        // 31回目はレートリミット超過（#expect の closure 形式でエラーを検証する）
+        await #expect {
             try await client.sendPrivmsg("レートリミット超過テスト")
-            Issue.record("rateLimited が throw されるべきです")
-        } catch TwitchIRCClientError.rateLimited(let retryAfter) {
-            #expect(retryAfter > 0)
+        } throws: { error in
+            guard case TwitchIRCClientError.rateLimited(let retryAfter) = error else { return false }
+            return retryAfter > 0
         }
 
         await client.disconnect()
@@ -668,8 +668,10 @@ struct TwitchIRCClientTests {
         }
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        // 切断によりカウントがリセットされているので送信できる
-        try await client.sendPrivmsg("再接続後の送信テスト")
+        // 切断によりカウントがリセットされているので複数回送信できる
+        for i in 1...3 {
+            try await client.sendPrivmsg("再接続後の送信テスト \(i)回目")
+        }
 
         await client.disconnect()
         reconnectTask.cancel()

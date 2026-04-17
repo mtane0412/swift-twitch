@@ -513,7 +513,7 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 // MARK: - エラー定義
 
 /// TwitchIRCClient のエラー
-enum TwitchIRCClientError: Error, LocalizedError, Equatable {
+enum TwitchIRCClientError: Error, LocalizedError {
     /// accessToken と userLogin の指定が不整合（片方のみ指定された場合）
     case invalidAuthParameters
 
@@ -537,7 +537,26 @@ enum TwitchIRCClientError: Error, LocalizedError, Equatable {
         case .notAuthenticated:
             return "コメントの投稿にはログインが必要です"
         case .rateLimited(let retryAfter):
-            return "送信頻度が上限に達しました。あと \(Int(ceil(retryAfter))) 秒後に再試行してください"
+            // retryAfter が 0 以下になる場合でも「あと 1 秒」と表示して混乱を防ぐ
+            let seconds = max(1, Int(ceil(retryAfter)))
+            return "送信頻度が上限に達しました。あと \(seconds) 秒後に再試行してください"
+        }
+    }
+}
+
+extension TwitchIRCClientError: Equatable {
+    /// カスタム等値比較
+    ///
+    /// `rateLimited(retryAfter:)` の `TimeInterval` は浮動小数点比較のため、
+    /// 1ms（0.001秒）の許容誤差を設けて比較する。
+    static func == (lhs: TwitchIRCClientError, rhs: TwitchIRCClientError) -> Bool {
+        switch (lhs, rhs) {
+        case (.invalidAuthParameters, .invalidAuthParameters): return true
+        case (.notConnected, .notConnected): return true
+        case (.notAuthenticated, .notAuthenticated): return true
+        case (.rateLimited(let l), .rateLimited(let r)):
+            return abs(l - r) < 0.001
+        default: return false
         }
     }
 }

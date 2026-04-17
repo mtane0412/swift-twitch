@@ -27,17 +27,21 @@ struct RateLimiter {
     let maxMessages: Int
 
     /// 現在時刻を返すクロージャ（テスト時に差し替え可能）
-    var now: () -> Date
+    ///
+    /// `let` で宣言することで初期化後の意図しない変更を防ぐ
+    let now: () -> Date
 
     // MARK: - イニシャライザ
 
     /// レートリミッターを初期化する
     ///
     /// - Parameters:
-    ///   - maxMessages: ウィンドウ内の最大送信数（デフォルト: 30）
-    ///   - windowDuration: ウィンドウの幅（秒）（デフォルト: 30.0）
+    ///   - maxMessages: ウィンドウ内の最大送信数（デフォルト: 30）。1以上を指定すること
+    ///   - windowDuration: ウィンドウの幅（秒）（デフォルト: 30.0）。正の値を指定すること
     ///   - now: 現在時刻クロージャ（デフォルト: `Date()`）
     init(maxMessages: Int = 30, windowDuration: TimeInterval = 30.0, now: @escaping () -> Date = { Date() }) {
+        precondition(maxMessages > 0, "maxMessages は 1 以上の値を指定してください（指定値: \(maxMessages)）")
+        precondition(windowDuration > 0, "windowDuration は正の値を指定してください（指定値: \(windowDuration)）")
         self.maxMessages = maxMessages
         self.windowDuration = windowDuration
         self.now = now

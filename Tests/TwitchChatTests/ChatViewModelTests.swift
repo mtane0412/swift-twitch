@@ -521,6 +521,9 @@ struct ChatViewModelTests {
         } catch ChatSendError.clientRateLimited(let retryAfter) {
             // 検証: retryAfter が正しく伝播されている
             #expect(retryAfter == 15.0)
+        } catch {
+            // 予期しない別エラーが throw された場合はテスト失敗にする
+            Issue.record("予期しないエラーが throw されました: \(error)")
         }
 
         // 検証: sendError に残り秒数付きのメッセージが設定されている

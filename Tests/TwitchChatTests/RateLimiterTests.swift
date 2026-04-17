@@ -47,8 +47,8 @@ struct RateLimiterTests {
             Issue.record("rateLimited が throw されるべきです")
         } catch TwitchIRCClientError.rateLimited(let retryAfter) {
             // 最古のタイムスタンプ（t=1000）+ windowDuration(30) - 現在時刻(1010) = 20秒
-            #expect(retryAfter > 0)
-            #expect(retryAfter <= 30.0)
+            let expectedRetryAfter: TimeInterval = 20.0
+            #expect(abs(retryAfter - expectedRetryAfter) < 0.001, "retryAfter が期待値 \(expectedRetryAfter) と一致しません（実際: \(retryAfter)）")
         }
     }
 

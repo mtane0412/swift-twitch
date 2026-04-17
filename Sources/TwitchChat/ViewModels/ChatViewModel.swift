@@ -394,7 +394,9 @@ enum ChatSendError: Error, LocalizedError, Equatable {
         case .notReady:
             return "コメントの投稿にはログインが必要です"
         case .clientRateLimited(let retryAfter):
-            return "送信頻度が上限に達しました。あと \(Int(ceil(retryAfter))) 秒後に再試行してください"
+            // retryAfter が 0 以下になる場合でも「あと 1 秒」と表示して混乱を防ぐ
+            let seconds = max(1, Int(ceil(retryAfter)))
+            return "送信頻度が上限に達しました。あと \(seconds) 秒後に再試行してください"
         case .rateLimited:
             return "メッセージの送信頻度が速すぎます。少し待ってから送信してください"
         case .duplicate:
