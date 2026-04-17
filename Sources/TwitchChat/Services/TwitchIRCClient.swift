@@ -298,7 +298,13 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         }
         // クライアント側レートリミット事前チェック（30秒あたり30メッセージ）
         try rateLimiter.checkAndRecord()
-        try await webSocketClient.send("PRIVMSG #\(channel) :\(text)")
+        do {
+            try await webSocketClient.send("PRIVMSG #\(channel) :\(text)")
+        } catch {
+            // 送信失敗時はレートリミットスロットを返却する（実際には送られていないため）
+            rateLimiter.rollbackLast()
+            throw error
+        }
     }
 
     // MARK: - プライベートメソッド

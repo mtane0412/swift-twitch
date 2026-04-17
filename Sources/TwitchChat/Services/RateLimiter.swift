@@ -71,6 +71,15 @@ struct RateLimiter {
         timestamps.append(current)
     }
 
+    /// 直前の `checkAndRecord()` で追加されたタイムスタンプを1件取り消す
+    ///
+    /// 送信側で `webSocketClient.send` が失敗した場合に呼ぶことで、
+    /// 実際には送信されていないメッセージがレートリミットスロットを消費し続けることを防ぐ。
+    mutating func rollbackLast() {
+        guard !timestamps.isEmpty else { return }
+        timestamps.removeLast()
+    }
+
     /// タイムスタンプをすべてリセットする
     ///
     /// 切断時など、送信カウントをゼロに戻す際に呼ぶ。

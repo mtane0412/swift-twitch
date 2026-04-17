@@ -26,9 +26,12 @@ struct RateLimiterTests {
         try limiter.checkAndRecord()
         try limiter.checkAndRecord()
 
-        // 4回目はレートリミット超過
-        #expect(throws: TwitchIRCClientError.self) {
+        // 4回目はレートリミット超過（rateLimited case であることを検証する）
+        #expect {
             try limiter.checkAndRecord()
+        } throws: { error in
+            if case TwitchIRCClientError.rateLimited = error { return true }
+            return false
         }
     }
 
@@ -98,9 +101,12 @@ struct RateLimiterTests {
 
         try limiter.checkAndRecord()
         try limiter.checkAndRecord()
-        // 超過状態
-        #expect(throws: TwitchIRCClientError.self) {
+        // 超過状態（rateLimited case であることを検証する）
+        #expect {
             try limiter.checkAndRecord()
+        } throws: { error in
+            if case TwitchIRCClientError.rateLimited = error { return true }
+            return false
         }
 
         // reset 後は再び送信できる
@@ -118,9 +124,12 @@ struct RateLimiterTests {
         for _ in 0..<30 {
             try limiter.checkAndRecord()
         }
-        // 31回目は超過
-        #expect(throws: TwitchIRCClientError.self) {
+        // 31回目は超過（rateLimited case であることを検証する）
+        #expect {
             try limiter.checkAndRecord()
+        } throws: { error in
+            if case TwitchIRCClientError.rateLimited = error { return true }
+            return false
         }
     }
 }
