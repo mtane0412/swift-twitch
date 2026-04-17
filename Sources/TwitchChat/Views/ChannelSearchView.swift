@@ -26,6 +26,35 @@ enum ChannelSearchFilter {
     }
 }
 
+// MARK: - キーボードナビゲーションロジック
+
+/// 候補リストのキーボードナビゲーションロジック
+///
+/// ビューから独立した純粋関数として定義し、テスト可能にする
+enum CandidateNavigator {
+    /// 現在のインデックスから1つ下（次）の候補に移動する
+    ///
+    /// - Parameters:
+    ///   - current: 現在の選択インデックス
+    ///   - count: 候補の総件数
+    /// - Returns: 末尾を超えない次のインデックス（末尾ではクランプ）
+    static func nextIndex(current: Int, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return min(current + 1, count - 1)
+    }
+
+    /// 現在のインデックスから1つ上（前）の候補に移動する
+    ///
+    /// - Parameters:
+    ///   - current: 現在の選択インデックス
+    ///   - count: 候補の総件数
+    /// - Returns: 先頭を下回らない前のインデックス（先頭ではクランプ）
+    static func previousIndex(current: Int, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return max(current - 1, 0)
+    }
+}
+
 // MARK: - ChannelSearchView
 
 /// チャンネル名を入力してチャットを開くための検索フォームビュー
@@ -55,6 +84,8 @@ struct ChannelSearchView: View {
     @State private var searchText: String = ""
     @State private var searchResults: [ChannelSearchResult] = []
     @State private var isSearching: Bool = false
+    /// キーボード選択中の候補インデックス（候補が出現したとき 0 にリセット）
+    @State private var selectedCandidateIndex: Int = 0
     @FocusState private var isTextFieldFocused: Bool
 
     // MARK: - 定数
@@ -88,6 +119,16 @@ struct ChannelSearchView: View {
         return !filteredChannels.isEmpty || isSearching || !searchResults.isEmpty
     }
 
+    /// キーボードナビゲーション対象の候補ログイン名一覧
+    ///
+    /// filteredChannels と searchResults は排他表示のためどちらか一方のみ返す
+    private var candidateLogins: [String] {
+        if !filteredChannels.isEmpty {
+            return filteredChannels.map(\.broadcasterLogin)
+        }
+        return searchResults.prefix(Self.maxCandidates).map(\.broadcasterLogin)
+    }
+
     // MARK: - ボディ
 
     var body: some View {
@@ -101,7 +142,28 @@ struct ChannelSearchView: View {
                 .frame(width: Self.formWidth)
                 .focused($isTextFieldFocused)
                 .onSubmit {
-                    submitCurrentText()
+                    // 候補が選択中ならそのチャンネルを開く。なければ入力テキストを確定する
+                    if !candidateLogins.isEmpty {
+                        onChannelSelected(candidateLogins[selectedCandidateIndex])
+                    } else {
+                        submitCurrentText()
+                    }
+                }
+                // 下矢印キー: 次の候補に移動
+                .onKeyPress(.downArrow) {
+                    selectedCandidateIndex = CandidateNavigator.nextIndex(
+                        current: selectedCandidateIndex,
+                        count: candidateLogins.count
+                    )
+                    return .handled
+                }
+                // 上矢印キー: 前の候補に移動
+                .onKeyPress(.upArrow) {
+                    selectedCandidateIndex = CandidateNavigator.previousIndex(
+                        current: selectedCandidateIndex,
+                        count: candidateLogins.count
+                    )
+                    return .handled
                 }
 
             // ゼロ高さのアンカービュー: Spacer のバランスに影響せず TextField が常に中央に固定される
@@ -162,6 +224,14 @@ struct ChannelSearchView: View {
             searchResults = results
             isSearching = false
         }
+        // テキスト入力変化時: filteredChannels が即時更新されるため選択インデックスをリセットする
+        .onChange(of: searchText) { _, _ in
+            selectedCandidateIndex = 0
+        }
+        // 検索 API 結果が到着したとき: 最初の候補を選択状態にする
+        .onChange(of: searchResults) { _, _ in
+            selectedCandidateIndex = 0
+        }
         // Escape キーで blank tab を閉じる
         .onKeyPress(.escape) {
             guard let onCancel else { return .ignored }
@@ -180,9 +250,9 @@ struct ChannelSearchView: View {
     private var candidateList: some View {
         VStack(spacing: 0) {
             if !filteredChannels.isEmpty {
-                // フォロー中チャンネルの候補
-                ForEach(filteredChannels) { channel in
-                    followedChannelRow(channel)
+                // フォロー中チャンネルの候補（インデックスで選択ハイライトを判定）
+                ForEach(Array(filteredChannels.enumerated()), id: \.element.id) { index, channel in
+                    followedChannelRow(channel, isSelected: index == selectedCandidateIndex)
                 }
             } else if isSearching {
                 // 検索 API 取得中
@@ -196,8 +266,11 @@ struct ChannelSearchView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
-                ForEach(searchResults.prefix(Self.maxCandidates)) { result in
-                    searchResultRow(result)
+                ForEach(
+                    Array(searchResults.prefix(Self.maxCandidates).enumerated()),
+                    id: \.element.id
+                ) { index, result in
+                    searchResultRow(result, isSelected: index == selectedCandidateIndex)
                 }
             }
         }
@@ -216,8 +289,12 @@ struct ChannelSearchView: View {
 
     /// フォロー中チャンネルの候補行
     ///
+    /// - Parameters:
+    ///   - channel: 表示するチャンネル
+    ///   - isSelected: キーボードで選択中かどうか（ハイライト表示に使用）
+    ///
     /// ライブ中かどうかは `followedStreamStore` との cross-reference で判定する
-    private func followedChannelRow(_ channel: FollowedChannel) -> some View {
+    private func followedChannelRow(_ channel: FollowedChannel, isSelected: Bool) -> some View {
         let liveStream = followedStreamStore.stream(forUserLogin: channel.broadcasterLogin)
         let isLive = liveStream != nil
 
@@ -261,6 +338,8 @@ struct ChannelSearchView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            // キーボード選択中の行をアクセントカラーで薄くハイライトする
+            .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -269,7 +348,11 @@ struct ChannelSearchView: View {
     // MARK: - 候補行: チャンネル検索結果
 
     /// チャンネル検索結果（検索 API フォールバック）の候補行
-    private func searchResultRow(_ result: ChannelSearchResult) -> some View {
+    ///
+    /// - Parameters:
+    ///   - result: 表示する検索結果
+    ///   - isSelected: キーボードで選択中かどうか（ハイライト表示に使用）
+    private func searchResultRow(_ result: ChannelSearchResult, isSelected: Bool) -> some View {
         Button {
             onChannelSelected(result.broadcasterLogin)
         } label: {
@@ -303,6 +386,8 @@ struct ChannelSearchView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            // キーボード選択中の行をアクセントカラーで薄くハイライトする
+            .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

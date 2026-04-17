@@ -164,3 +164,54 @@ struct ChannelSearchFilterTests {
         #expect(resultByLogin.count == 1)
     }
 }
+
+// MARK: - CandidateNavigator テスト
+
+@Suite("CandidateNavigator")
+struct CandidateNavigatorTests {
+
+    // MARK: - 下方向移動
+
+    @Test("候補が0件の時、下移動は0を返す（クラッシュしない）")
+    func navigateDownWithEmptyList() {
+        #expect(CandidateNavigator.nextIndex(current: 0, count: 0) == 0)
+    }
+
+    @Test("先頭（0）から下移動で1に進む")
+    func navigateDownFromFirst() {
+        #expect(CandidateNavigator.nextIndex(current: 0, count: 3) == 1)
+    }
+
+    @Test("中間から下移動で1つ次に進む")
+    func navigateDownFromMiddle() {
+        #expect(CandidateNavigator.nextIndex(current: 1, count: 4) == 2)
+    }
+
+    @Test("末尾から下移動は末尾にクランプされる（ループしない）")
+    func navigateDownFromLast() {
+        // 3件の候補（index 0..2）の末尾から下移動しても index 2 のまま
+        #expect(CandidateNavigator.nextIndex(current: 2, count: 3) == 2)
+    }
+
+    // MARK: - 上方向移動
+
+    @Test("候補が0件の時、上移動は0を返す（クラッシュしない）")
+    func navigateUpWithEmptyList() {
+        #expect(CandidateNavigator.previousIndex(current: 0, count: 0) == 0)
+    }
+
+    @Test("先頭から上移動は先頭にクランプされる（ループしない）")
+    func navigateUpFromFirst() {
+        #expect(CandidateNavigator.previousIndex(current: 0, count: 3) == 0)
+    }
+
+    @Test("中間から上移動で1つ前に戻る")
+    func navigateUpFromMiddle() {
+        #expect(CandidateNavigator.previousIndex(current: 2, count: 4) == 1)
+    }
+
+    @Test("末尾から上移動で1つ前に戻る")
+    func navigateUpFromLast() {
+        #expect(CandidateNavigator.previousIndex(current: 2, count: 3) == 1)
+    }
+}
