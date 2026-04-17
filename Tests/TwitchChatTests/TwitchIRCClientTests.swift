@@ -632,4 +632,3 @@ struct TwitchIRCClientTests {
         return false
     }
 }
-
