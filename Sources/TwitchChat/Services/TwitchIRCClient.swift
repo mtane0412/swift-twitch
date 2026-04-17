@@ -1,8 +1,72 @@
 // TwitchIRCClient.swift
 // Twitch IRC 接続を管理するクライアント
 // 匿名接続（justinfan 方式）と認証接続（OAuth トークン）の両方をサポートする
+// 予期せぬ切断時は指数バックオフで自動再接続する
 
 import Foundation
+
+// MARK: - 接続状態
+
+/// IRC クライアントの接続状態
+///
+/// `TwitchIRCClientProtocol.connectionStateStream` で配信される。
+/// ViewModel はこのストリームを購読して UI 上の接続状態インジケータを更新する。
+enum ClientConnectionState: Sendable, Equatable {
+    /// 接続済み（初回接続・再接続成功の両方）
+    case connected
+    /// 再接続中（指数バックオフでリトライ中）
+    ///
+    /// - Parameter attempt: 現在の再接続試行回数（1 始まり）
+    case reconnecting(attempt: Int)
+    /// 切断済み（意図的な disconnect() 後）
+    case disconnected
+}
+
+// MARK: - バックオフ設定
+
+/// 指数バックオフの設定
+///
+/// テスト時は `.fastTest` を注入して待機時間を短縮できる
+struct BackoffConfiguration: Sendable {
+    /// 初回遅延（秒）
+    let initialDelay: TimeInterval
+    /// 最大遅延（秒）
+    let maxDelay: TimeInterval
+    /// 遅延を増加させる倍率
+    let multiplier: Double
+    /// ジッタ率（0.0 〜 1.0）。計算遅延の ±jitterRatio 分がランダムに加減算される
+    let jitterRatio: Double
+
+    /// 本番環境向けデフォルト設定（1s → 2s → 4s → … 最大 60s、±20% ジッタ）
+    static let `default` = BackoffConfiguration(
+        initialDelay: 1.0, maxDelay: 60.0, multiplier: 2.0, jitterRatio: 0.2
+    )
+
+    /// テスト用の極小バックオフ（即時再接続、ジッタなし）
+    static let fastTest = BackoffConfiguration(
+        initialDelay: 0.01, maxDelay: 0.05, multiplier: 2.0, jitterRatio: 0.0
+    )
+}
+
+// MARK: - PING keepalive 設定
+
+/// 能動的 PING keepalive の設定
+///
+/// テスト時は間隔・タイムアウトを短縮した設定を注入して検証を高速化できる
+struct PingConfiguration: Sendable {
+    /// PING 送信間隔（秒）
+    let interval: TimeInterval
+    /// PONG 受信猶予（秒）。interval + timeout を過ぎても PONG が来なければタイムアウト扱い
+    let timeout: TimeInterval
+
+    /// 本番環境向けデフォルト設定（60 秒ごとに送信、30 秒で PONG タイムアウト）
+    static let `default` = PingConfiguration(interval: 60.0, timeout: 30.0)
+
+    /// テスト用の極小設定（即タイムアウト）
+    static let fastTest = PingConfiguration(interval: 0.05, timeout: 0.05)
+}
+
+// MARK: - プロトコル
 
 /// Twitch IRC クライアントの抽象化プロトコル
 ///
@@ -16,6 +80,12 @@ protocol TwitchIRCClientProtocol: Actor {
     /// レートリミット超過・BAN・スローモードなどのエラー通知が流れる。
     /// `CAP REQ :twitch.tv/commands` が有効な場合のみ `msg-id` タグ付きで届く。
     var noticeStream: AsyncStream<TwitchNotice> { get }
+
+    /// 接続状態の変化を配信する AsyncStream
+    ///
+    /// `.connected` / `.reconnecting(attempt:)` / `.disconnected` を順に yield する。
+    /// ViewModel はこれを購読して UI の接続インジケータを更新する。
+    var connectionStateStream: AsyncStream<ClientConnectionState> { get }
 
     /// 指定チャンネルに接続する
     ///
@@ -34,6 +104,8 @@ protocol TwitchIRCClientProtocol: Actor {
     /// - Throws: `.notConnected`（未接続）、`.notAuthenticated`（匿名接続中）
     func sendPrivmsg(_ text: String) async throws
 }
+
+// MARK: - TwitchIRCClient
 
 /// Twitch IRC クライアント
 ///
@@ -58,13 +130,32 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// 匿名接続で使用するニックネーム
     private static let anonymousNick = "justinfan12345"
 
-    // MARK: - プロパティ
+    // MARK: - ストリームプロパティ
+
+    /// 受信した ChatMessage を配信する AsyncStream
+    let messageStream: AsyncStream<ChatMessage>
+
+    /// サーバーから受信した NOTICE を配信する AsyncStream
+    let noticeStream: AsyncStream<TwitchNotice>
+
+    /// 接続状態の変化を配信する AsyncStream
+    let connectionStateStream: AsyncStream<ClientConnectionState>
+
+    // MARK: - プライベートプロパティ
 
     private let webSocketClient: any WebSocketClientProtocol
     private var messageContinuation: AsyncStream<ChatMessage>.Continuation?
     private var noticeContinuation: AsyncStream<TwitchNotice>.Continuation?
+    private var connectionStateContinuation: AsyncStream<ClientConnectionState>.Continuation?
+
     /// 受信ループのタスク（disconnect() でキャンセルするために保持）
     private var receiveLoopTask: Task<Void, Never>?
+
+    /// PING keepalive タイマータスク
+    private var pingKeepaliveTask: Task<Void, Never>?
+
+    /// 最終 PONG 受信時刻（keepalive タイムアウト検知用）
+    private var lastPongAt: Date?
 
     /// 現在 JOIN しているチャンネル名（小文字正規化済み）
     ///
@@ -76,18 +167,41 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// true のときのみ PRIVMSG 送信が許可される（匿名接続では false）
     private var isAuthenticated: Bool = false
 
-    /// 受信した ChatMessage を配信する AsyncStream
-    let messageStream: AsyncStream<ChatMessage>
+    /// 再接続用に保持する接続引数
+    private var lastChannel: String?
+    private var lastAccessToken: String?
+    private var lastUserLogin: String?
 
-    /// サーバーから受信した NOTICE を配信する AsyncStream
-    let noticeStream: AsyncStream<TwitchNotice>
+    /// 意図的切断フラグ
+    ///
+    /// 初回 `connect()` 呼び出しで false にリセットされ、`disconnect()` で true に戻る。
+    /// `receiveLoop` / `performReconnect` はこのフラグが false のときのみ再接続を行う。
+    /// 初期値 false は connect() 前に receiveLoop / performReconnect が起動しないため
+    /// 実質的に観測可能な影響はないが、意味的に「まだ接続していない」状態と整合させる。
+    private var isIntentionallyDisconnected: Bool = false
+
+    /// 現在の再接続試行回数（初回接続時は 0、再接続のたびに +1）
+    private var reconnectAttempt: Int = 0
+
+    /// バックオフ設定
+    private let backoffConfig: BackoffConfiguration
+
+    /// PING keepalive 設定
+    private let pingConfig: PingConfiguration
 
     // MARK: - 初期化
 
     /// TwitchIRCClient を初期化する
     ///
-    /// - Parameter webSocketClient: WebSocket クライアント実装（テスト時はモックを注入）
-    init(webSocketClient: any WebSocketClientProtocol = URLSessionWebSocketClient()) {
+    /// - Parameters:
+    ///   - webSocketClient: WebSocket クライアント実装（テスト時はモックを注入）
+    ///   - backoffConfig: 指数バックオフ設定（テスト時は `.fastTest` を指定して待機を短縮）
+    ///   - pingConfig: PING keepalive 設定（テスト時は `.fastTest` を指定）
+    init(
+        webSocketClient: any WebSocketClientProtocol = URLSessionWebSocketClient(),
+        backoffConfig: BackoffConfiguration = .default,
+        pingConfig: PingConfiguration = .default
+    ) {
         var msgContinuation: AsyncStream<ChatMessage>.Continuation?
         self.messageStream = AsyncStream { msgContinuation = $0 }
         self.messageContinuation = msgContinuation
@@ -96,7 +210,13 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         self.noticeStream = AsyncStream { ntcContinuation = $0 }
         self.noticeContinuation = ntcContinuation
 
+        var stateContinuation: AsyncStream<ClientConnectionState>.Continuation?
+        self.connectionStateStream = AsyncStream { stateContinuation = $0 }
+        self.connectionStateContinuation = stateContinuation
+
         self.webSocketClient = webSocketClient
+        self.backoffConfig = backoffConfig
+        self.pingConfig = pingConfig
     }
 
     // MARK: - 接続・切断
@@ -110,22 +230,50 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// - Throws: WebSocket 接続エラー
     func connect(to channel: String, accessToken: String? = nil, userLogin: String? = nil) async throws {
         let normalizedChannel = channel.lowercased()
+
+        // 再接続用に引数を保持する
+        lastChannel = normalizedChannel
+        lastAccessToken = accessToken
+        lastUserLogin = userLogin
+
+        // 意図的切断フラグをクリアし、試行回数をリセットする
+        isIntentionallyDisconnected = false
+        reconnectAttempt = 0
+
         try await webSocketClient.connect(to: Self.websocketURL)
         // 認証接続かどうかを記録してから認証シーケンスを送信
         isAuthenticated = (accessToken != nil && userLogin != nil)
         try await sendAuthSequence(channel: normalizedChannel, accessToken: accessToken, userLogin: userLogin)
         joinedChannel = normalizedChannel
+
+        // 接続成功を通知
+        connectionStateContinuation?.yield(.connected)
+
+        // PING keepalive タイマーを開始
+        startPingKeepalive()
+
         // receiveLoop を別タスクで起動し、connect() がブロックされないようにする
         receiveLoopTask = Task { await receiveLoop() }
     }
 
     /// IRC 接続を切断する
     func disconnect() async {
+        // 意図的切断フラグを立てて再接続を抑止する
+        isIntentionallyDisconnected = true
+
         receiveLoopTask?.cancel()
         receiveLoopTask = nil
+        stopPingKeepalive()
+
         await webSocketClient.disconnect()
         joinedChannel = nil
         isAuthenticated = false
+        lastChannel = nil
+        lastAccessToken = nil
+        lastUserLogin = nil
+
+        // 切断状態を通知
+        connectionStateContinuation?.yield(.disconnected)
         // messageContinuation?.finish() を呼ばない → 再接続時に同じストリームを再利用できる
     }
 
@@ -173,8 +321,9 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
     /// メッセージ受信ループ
     ///
-    /// WebSocket からメッセージを連続受信し、IRC メッセージを解析して配信する
-    /// 接続が切断されるまでループを継続する
+    /// WebSocket からメッセージを連続受信し、IRC メッセージを解析して配信する。
+    /// 予期せぬ切断（意図的切断・タスクキャンセル以外）が発生した場合は
+    /// `performReconnect()` を呼んでバックオフ付き再接続を試みる。
     private func receiveLoop() async {
         while true {
             do {
@@ -185,7 +334,16 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
                     await handleLine(line)
                 }
             } catch {
-                // 切断またはキャンセル時はループ終了
+                // 意図的切断またはタスクキャンセル時はループ終了（再接続しない）
+                // Task.isCancelled は receiveLoopTask?.cancel() で立つフラグ。
+                // webSocketClient.disconnect() が CancellationError を throw しても
+                // Task.isCancelled は立たないため、RECONNECT / PING タイムアウト起因の
+                // 切断を正しく再接続パスに誘導できる。
+                if isIntentionallyDisconnected || Task.isCancelled {
+                    break
+                }
+                // 予期せぬ切断 → バックオフ付き再接続を試みる
+                await performReconnect()
                 break
             }
         }
@@ -200,6 +358,10 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
             // PING に対して PONG を返してコネクションを維持する
             let server = ircMessage.trailing ?? "tmi.twitch.tv"
             try? await webSocketClient.send("PONG :\(server)")
+
+        case "PONG":
+            // keepalive の PONG 受信時刻を更新してタイムアウトをリセットする
+            lastPongAt = Date()
 
         case "PRIVMSG":
             // チャットメッセージを ChatMessage に変換して配信
@@ -221,9 +383,120 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
             )
             noticeContinuation?.yield(notice)
 
+        case "RECONNECT":
+            // Twitch サーバーがメンテナンス等で再接続を要求してきた場合
+            // webSocketClient を切断して receiveLoop の catch 経由でバックオフ再接続する
+            // （isIntentionallyDisconnected は立てないため再接続が走る）
+            await webSocketClient.disconnect()
+
         default:
             break
         }
+    }
+
+    // MARK: - 自動再接続
+
+    /// 指数バックオフで再接続を繰り返し試行する
+    ///
+    /// `isIntentionallyDisconnected` が false の間、バックオフ遅延を増やしながら
+    /// WebSocket 再接続と認証シーケンスの再送を試みる。
+    /// 成功したら `receiveLoop` と PING keepalive を再起動する。
+    private func performReconnect() async {
+        guard !isIntentionallyDisconnected, let channel = lastChannel else { return }
+
+        stopPingKeepalive()
+        await webSocketClient.disconnect() // 念のため既存接続を閉じる
+
+        while !isIntentionallyDisconnected {
+            reconnectAttempt += 1
+            connectionStateContinuation?.yield(.reconnecting(attempt: reconnectAttempt))
+
+            let delay = computeBackoffDelay(attempt: reconnectAttempt)
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                // キャンセル時は終了
+                return
+            }
+
+            if isIntentionallyDisconnected { return }
+
+            do {
+                try await webSocketClient.connect(to: Self.websocketURL)
+                // 接続成功後に意図的切断が呼ばれた場合は即リターン
+                if isIntentionallyDisconnected { await webSocketClient.disconnect(); return }
+                isAuthenticated = (lastAccessToken != nil && lastUserLogin != nil)
+                try await sendAuthSequence(
+                    channel: channel,
+                    accessToken: lastAccessToken,
+                    userLogin: lastUserLogin
+                )
+                // 認証シーケンス送信後に意図的切断が呼ばれた場合は即リターン
+                if isIntentionallyDisconnected { await webSocketClient.disconnect(); return }
+                // 再接続成功
+                reconnectAttempt = 0
+                joinedChannel = channel
+                connectionStateContinuation?.yield(.connected)
+                receiveLoopTask = Task { await receiveLoop() }
+                startPingKeepalive()
+                return
+            } catch {
+                // 次のイテレーションで再試行（バックオフ増加）
+            }
+        }
+    }
+
+    /// 指数バックオフ遅延を計算する
+    ///
+    /// - Parameter attempt: 試行回数（1 始まり）
+    /// - Returns: 遅延秒数（上限 `maxDelay`、±`jitterRatio` のジッタ付き）
+    private func computeBackoffDelay(attempt: Int) -> TimeInterval {
+        let base = backoffConfig.initialDelay * pow(backoffConfig.multiplier, Double(attempt - 1))
+        let capped = min(base, backoffConfig.maxDelay)
+        let jitter = capped * backoffConfig.jitterRatio
+        return max(0, capped + Double.random(in: -jitter...jitter))
+    }
+
+    // MARK: - PING keepalive
+
+    /// 能動的 PING keepalive タイマーを開始する
+    ///
+    /// `pingConfig.interval` ごとに PING を送信し、PONG が来なければ
+    /// `interval + timeout` 経過でタイムアウトとして WebSocket を切断する。
+    private func startPingKeepalive() {
+        stopPingKeepalive()
+        lastPongAt = Date() // 接続直後は「今 PONG が来た」と同等に扱う
+        // pingConfig.interval を actor コンテキスト内でキャプチャしてから Task に渡す
+        let intervalNs = UInt64(pingConfig.interval * 1_000_000_000)
+        pingKeepaliveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: intervalNs)
+                if Task.isCancelled { break }
+                await self?.performKeepalivePing()
+            }
+        }
+    }
+
+    /// keepalive タイマーを停止する
+    private func stopPingKeepalive() {
+        pingKeepaliveTask?.cancel()
+        pingKeepaliveTask = nil
+    }
+
+    /// keepalive 用の PING を送信し、PONG タイムアウトを検知する
+    ///
+    /// `lastPongAt` から `interval + timeout` 秒以上経過していれば、
+    /// ゾンビ接続とみなして webSocketClient を切断する（→ receiveLoop の catch → 再接続）。
+    private func performKeepalivePing() async {
+        if let last = lastPongAt,
+           Date().timeIntervalSince(last) > pingConfig.interval + pingConfig.timeout {
+            // PONG タイムアウト → keepalive タイマーを停止してから切断し、
+            // receiveLoop の catch 経由で再接続をトリガーする
+            stopPingKeepalive()
+            await webSocketClient.disconnect()
+            return
+        }
+        try? await webSocketClient.send("PING :tmi.twitch.tv")
     }
 }
 

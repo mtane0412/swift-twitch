@@ -15,6 +15,7 @@ extension ConnectionState {
         switch self {
         case .connected: .green
         case .connecting: .yellow
+        case .reconnecting: .orange
         case .error: .red
         case .disconnected: .gray
         }

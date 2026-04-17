@@ -18,6 +18,8 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     let messageStream: AsyncStream<ChatMessage>
     private var noticeContinuation: AsyncStream<TwitchNotice>.Continuation?
     let noticeStream: AsyncStream<TwitchNotice>
+    private var connectionStateContinuation: AsyncStream<ClientConnectionState>.Continuation?
+    let connectionStateStream: AsyncStream<ClientConnectionState>
 
     /// sendPrivmsg() で送信されたメッセージのログ（テスト検証用）
     private(set) var sentPrivmsgs: [String] = []
@@ -33,11 +35,17 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         var ntcContinuation: AsyncStream<TwitchNotice>.Continuation?
         self.noticeStream = AsyncStream { ntcContinuation = $0 }
         self.noticeContinuation = ntcContinuation
+
+        var stateContinuation: AsyncStream<ClientConnectionState>.Continuation?
+        self.connectionStateStream = AsyncStream { stateContinuation = $0 }
+        self.connectionStateContinuation = stateContinuation
     }
 
     func connect(to channel: String, accessToken: String?, userLogin: String?) async throws {
         connectCallCount += 1
         connectedChannel = channel
+        // 接続成功を connectionStateStream に通知する
+        connectionStateContinuation?.yield(.connected)
     }
 
     func disconnect() async {
@@ -45,6 +53,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         connectedChannel = nil
         messageContinuation?.finish()
         noticeContinuation?.finish()
+        connectionStateContinuation?.finish()
     }
 
     func sendPrivmsg(_ text: String) async throws {
@@ -65,6 +74,11 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     /// テスト用に NOTICE を流し込む
     func sendNotice(_ notice: TwitchNotice) {
         noticeContinuation?.yield(notice)
+    }
+
+    /// テスト用に接続状態を流し込む（再接続シミュレーション用）
+    func sendConnectionState(_ state: ClientConnectionState) {
+        connectionStateContinuation?.yield(state)
     }
 }
 
@@ -109,6 +123,67 @@ struct ChatViewModelTests {
         await viewModel.disconnect()
 
         #expect(viewModel.connectionState == .disconnected)
+    }
+
+    @Test("IRC クライアントが reconnecting を通知すると ViewModel も reconnecting 状態になる")
+    func IRCクライアントがreconnectingを通知するとViewModelもreconnecting状態になる() async throws {
+        let mockClient = MockTwitchIRCClient()
+        let viewModel = ChatViewModel(ircClient: mockClient)
+
+        // 前提: チャンネルに接続する
+        await viewModel.connect(to: "テストチャンネル")
+        await waitFor { viewModel.connectionState == .connected }
+        #expect(viewModel.connectionState == .connected)
+
+        // IRC クライアントが再接続中を通知する
+        await mockClient.sendConnectionState(.reconnecting(attempt: 1))
+        await waitFor { viewModel.connectionState == .reconnecting(attempt: 1) }
+
+        // 検証: ViewModel が .reconnecting(attempt: 1) 状態になる
+        #expect(viewModel.connectionState == .reconnecting(attempt: 1))
+    }
+
+    @Test("再接続中にメッセージ履歴がリセットされない")
+    func 再接続中にメッセージ履歴がリセットされない() async throws {
+        let mockClient = MockTwitchIRCClient()
+        let viewModel = ChatViewModel(ircClient: mockClient)
+
+        // 前提: チャンネルに接続してメッセージを受信する
+        await viewModel.connect(to: "テストチャンネル")
+        await waitFor { viewModel.connectionState == .connected }
+        let message = makeTestChatMessage(displayName: "視聴者001", text: "再接続テスト前のメッセージ")
+        await mockClient.sendMessage(message)
+        await waitFor { viewModel.messages.count == 1 }
+        #expect(viewModel.messages.count == 1)
+
+        // 再接続中を通知する
+        await mockClient.sendConnectionState(.reconnecting(attempt: 1))
+        await waitFor { viewModel.connectionState == .reconnecting(attempt: 1) }
+
+        // 検証: メッセージ履歴がリセットされていない
+        #expect(viewModel.messages.count == 1)
+        #expect(viewModel.messages[0].displayName == "視聴者001")
+    }
+
+    @Test("再接続成功（connected 通知）で ViewModel が connected 状態に戻る")
+    func 再接続成功でViewModelがconnected状態に戻る() async throws {
+        let mockClient = MockTwitchIRCClient()
+        let viewModel = ChatViewModel(ircClient: mockClient)
+
+        // 前提: 接続 → 再接続中 → 再接続成功の遷移
+        await viewModel.connect(to: "テストチャンネル")
+        await waitFor { viewModel.connectionState == .connected }
+
+        await mockClient.sendConnectionState(.reconnecting(attempt: 1))
+        await waitFor { viewModel.connectionState == .reconnecting(attempt: 1) }
+        #expect(viewModel.connectionState == .reconnecting(attempt: 1))
+
+        // 再接続成功を通知する
+        await mockClient.sendConnectionState(.connected)
+        await waitFor { viewModel.connectionState == .connected }
+
+        // 検証: .connected に戻る
+        #expect(viewModel.connectionState == .connected)
     }
 
     // MARK: - メッセージ受信
