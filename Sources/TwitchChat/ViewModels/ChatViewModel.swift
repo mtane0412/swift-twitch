@@ -168,6 +168,8 @@ final class ChatViewModel {
         } catch {
             connectionState = .error(error.localizedDescription)
             receiveTask?.cancel()
+            noticeReceiveTask?.cancel()
+            globalBadgeFetchTask?.cancel()
         }
     }
 
@@ -271,15 +273,19 @@ final class ChatViewModel {
         }
         sendError = error.errorDescription
 
-        // rollback: ウィンドウ内の pending メッセージのうち最も古いものを除去する
-        // Twitch はメッセージを受け付けた順に NOTICE を返すため、最も古い pending を除去する
         let now = Date()
         let windowStart = now.addingTimeInterval(-Self.optimisticRollbackWindow)
-        if let (oldestId, _) = optimisticPendingMessages
-            .filter({ $0.value >= windowStart })
-            .min(by: { $0.value < $1.value }) {
-            messages.removeAll { $0.id == oldestId }
-            optimisticPendingMessages.removeValue(forKey: oldestId)
+
+        // 期限切れエントリを先に除去して辞書が無限に膨らむのを防ぐ
+        optimisticPendingMessages = optimisticPendingMessages.filter { $0.value >= windowStart }
+
+        // rollback: ウィンドウ内で最も新しい pending を除去する
+        // NOTICE はユーザーが直前に送ったメッセージへの拒否通知であるため、
+        // 最後に追加されたものが拒否された可能性が最も高い
+        if let (newestId, _) = optimisticPendingMessages
+            .max(by: { $0.value < $1.value }) {
+            messages.removeAll { $0.id == newestId }
+            optimisticPendingMessages.removeValue(forKey: newestId)
         }
     }
 
