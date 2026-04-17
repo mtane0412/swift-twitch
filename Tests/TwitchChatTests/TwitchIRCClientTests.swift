@@ -622,7 +622,9 @@ struct TwitchIRCClientTests {
         let mockWS = MockWebSocketClient()
         let client = TwitchIRCClient(webSocketClient: mockWS)
 
-        let userstateMessage = "@badges=moderator/1,subscriber/12;color=#1E90FF;display-name=テストユーザー;emote-sets=0;mod=1;subscriber=1;user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
+        let userstateMessage = "@badges=moderator/1,subscriber/12;color=#1E90FF;"
+            + "display-name=テストユーザー;emote-sets=0;mod=1;subscriber=1;"
+            + "user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
         await mockWS.enqueueMessage(userstateMessage)
 
         // userStateStream を取得してから接続開始

@@ -151,45 +151,7 @@ final class ChatViewModel {
         // グローバルバッジ定義を並行フェッチ（切断時にキャンセルできるよう保持）
         globalBadgeFetchTask = Task { await badgeStore.fetchGlobalBadges() }
 
-        receiveTask = Task { [weak self] in
-            // メッセージ受信ループを別タスクで開始
-            // weak self で循環参照を回避する
-            guard let self else { return }
-            let stream = await self.ircClient.messageStream
-            for await message in stream {
-                guard !Task.isCancelled else { break }
-                self.appendMessage(message)
-            }
-        }
-
-        noticeReceiveTask = Task { [weak self] in
-            guard let self else { return }
-            let stream = await self.ircClient.noticeStream
-            for await notice in stream {
-                guard !Task.isCancelled else { break }
-                self.handleIncomingNotice(notice)
-            }
-        }
-
-        // IRC クライアントの接続状態変化（再接続 / 再接続成功）を ViewModel の状態に反映する
-        connectionStateReceiveTask = Task { [weak self] in
-            guard let self else { return }
-            let stream = await self.ircClient.connectionStateStream
-            for await state in stream {
-                guard !Task.isCancelled else { break }
-                self.applyClientConnectionState(state)
-            }
-        }
-
-        // USERSTATE を購読して自分のユーザー情報を更新する（楽観的 UI の精度向上）
-        userStateReceiveTask = Task { [weak self] in
-            guard let self else { return }
-            let stream = await self.ircClient.userStateStream
-            for await userState in stream {
-                guard !Task.isCancelled else { break }
-                self.currentUserState = userState
-            }
-        }
+        startStreamTasks()
 
         do {
             // ログイン済みなら認証接続、ログアウト中なら匿名接続にフォールバック
@@ -209,6 +171,48 @@ final class ChatViewModel {
             connectionStateReceiveTask?.cancel()
             userStateReceiveTask?.cancel()
             globalBadgeFetchTask?.cancel()
+        }
+    }
+
+    /// メッセージ・NOTICE・接続状態・USERSTATE の受信ループタスクをすべて開始する
+    ///
+    /// connect() の本体長を抑えるために切り出したヘルパーメソッド。
+    /// 各タスクは weak self で循環参照を防ぎ、disconnect() でキャンセルされる。
+    private func startStreamTasks() {
+        receiveTask = Task { [weak self] in
+            // メッセージ受信ループ（weak self で循環参照を回避する）
+            guard let self else { return }
+            let stream = await self.ircClient.messageStream
+            for await message in stream {
+                guard !Task.isCancelled else { break }
+                self.appendMessage(message)
+            }
+        }
+        noticeReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.noticeStream
+            for await notice in stream {
+                guard !Task.isCancelled else { break }
+                self.handleIncomingNotice(notice)
+            }
+        }
+        // IRC クライアントの接続状態変化（再接続 / 再接続成功）を ViewModel の状態に反映する
+        connectionStateReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.connectionStateStream
+            for await state in stream {
+                guard !Task.isCancelled else { break }
+                self.applyClientConnectionState(state)
+            }
+        }
+        // USERSTATE を購読して自分のユーザー情報を更新する（楽観的 UI の精度向上）
+        userStateReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.userStateStream
+            for await userState in stream {
+                guard !Task.isCancelled else { break }
+                self.currentUserState = userState
+            }
         }
     }
 

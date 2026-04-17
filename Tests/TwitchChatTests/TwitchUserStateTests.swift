@@ -14,7 +14,9 @@ struct TwitchUserStateTests {
     @Test("USERSTATE から displayName / color / badges を正しく抽出できる")
     func USERSTATEからすべてのフィールドを抽出できる() throws {
         // 前提: バッジ・色・表示名が揃った USERSTATE メッセージ
-        let rawMessage = "@badge-info=subscriber/12;badges=moderator/1,subscriber/12;color=#1E90FF;display-name=テストユーザー;emote-sets=0;mod=1;subscriber=1;user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
+        let rawMessage = "@badge-info=subscriber/12;badges=moderator/1,subscriber/12;"
+            + "color=#1E90FF;display-name=テストユーザー;emote-sets=0;mod=1;"
+            + "subscriber=1;user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
         let ircMessage = try #require(IRCMessageParser.parse(rawMessage), "IRCMessage のパースに失敗しました")
 
         // 検証: TwitchUserState に正しく変換される
