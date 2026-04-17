@@ -589,9 +589,10 @@ struct ChatViewModelTests {
         let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "yamadataro")
 
         // USERSTATE を流し込み、ViewModel に反映されるまでポーリング
-        let userState = TwitchUserState(from: IRCMessageParser.parse(
-            "@badges=moderator/1;color=#1E90FF;display-name=山田太郎;emote-sets=0;mod=1;subscriber=0;user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
-        )!)!
+        let rawUserState = "@badges=moderator/1;color=#1E90FF;display-name=山田太郎;"
+            + "emote-sets=0;mod=1;subscriber=0;user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
+        let ircMsg = try #require(IRCMessageParser.parse(rawUserState), "IRCMessage のパースに失敗しました")
+        let userState = try #require(TwitchUserState(from: ircMsg), "TwitchUserState の生成に失敗しました")
         await mockClient.sendUserState(userState)
         await waitFor { viewModel.currentUserState != nil }
 
@@ -613,16 +614,22 @@ struct ChatViewModelTests {
         let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "testuser")
 
         // 1回目の USERSTATE（古い情報）を流し込み、ViewModel への反映をポーリング
-        let firstUserState = TwitchUserState(from: IRCMessageParser.parse(
-            "@badges=;color=#FF0000;display-name=古い表示名;emote-sets=0;mod=0;subscriber=0;user-type= :tmi.twitch.tv USERSTATE #testchannel"
-        )!)!
+        let rawFirst = "@badges=;color=#FF0000;display-name=古い表示名;"
+            + "emote-sets=0;mod=0;subscriber=0;user-type= :tmi.twitch.tv USERSTATE #testchannel"
+        let firstIrcMsg = try #require(IRCMessageParser.parse(rawFirst), "IRCMessage のパースに失敗しました")
+        let firstUserState = try #require(
+            TwitchUserState(from: firstIrcMsg), "TwitchUserState の生成に失敗しました"
+        )
         await mockClient.sendUserState(firstUserState)
         await waitFor { viewModel.currentUserState?.displayName == "古い表示名" }
 
         // 2回目の USERSTATE（最新の情報）を流し込み、更新をポーリング
-        let secondUserState = TwitchUserState(from: IRCMessageParser.parse(
-            "@badges=subscriber/6;color=#00FF7F;display-name=新しい表示名;emote-sets=0;mod=0;subscriber=1;user-type= :tmi.twitch.tv USERSTATE #testchannel"
-        )!)!
+        let rawSecond = "@badges=subscriber/6;color=#00FF7F;display-name=新しい表示名;"
+            + "emote-sets=0;mod=0;subscriber=1;user-type= :tmi.twitch.tv USERSTATE #testchannel"
+        let secondIrcMsg = try #require(IRCMessageParser.parse(rawSecond), "IRCMessage のパースに失敗しました")
+        let secondUserState = try #require(
+            TwitchUserState(from: secondIrcMsg), "TwitchUserState の生成に失敗しました"
+        )
         await mockClient.sendUserState(secondUserState)
         await waitFor { viewModel.currentUserState?.displayName == "新しい表示名" }
 
