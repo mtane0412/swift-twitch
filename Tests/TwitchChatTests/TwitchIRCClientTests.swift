@@ -277,4 +277,69 @@ struct TwitchIRCClientTests {
         await client.disconnect()
         connectTask.cancel()
     }
+
+    // MARK: - NOTICE 受信
+
+    @Test("msg-id タグ付き NOTICE を受信すると noticeStream に TwitchNotice が流れる")
+    func msgidタグ付きNOTICEを受信するとnoticeStreamにTwitchNoticeが流れる() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: NOTICE を事前にキュー
+        let rawNotice = "@msg-id=msg_ratelimit :tmi.twitch.tv NOTICE #haishinsha :You are sending messages too quickly."
+        await mockWS.enqueueMessage(rawNotice)
+
+        var receivedNotices: [TwitchNotice] = []
+        let noticeStream = await client.noticeStream
+
+        let connectTask = Task {
+            try await client.connect(to: "haishinsha", accessToken: "テスト用トークン", userLogin: "視聴者001")
+        }
+
+        // 最初の NOTICE を受信する
+        for await notice in noticeStream {
+            receivedNotices.append(notice)
+            break
+        }
+
+        await client.disconnect()
+        connectTask.cancel()
+
+        // 検証: TwitchNotice が正しいプロパティで届く（"#haishinsha" → "haishinsha" に正規化）
+        #expect(receivedNotices.count == 1)
+        #expect(receivedNotices[0].msgId == "msg_ratelimit")
+        #expect(receivedNotices[0].channel == "haishinsha")
+        #expect(receivedNotices[0].message == "You are sending messages too quickly.")
+    }
+
+    @Test("msg-id タグなしの NOTICE も noticeStream に流れ msgId が nil になる")
+    func msgidタグなしのNOTICEもnoticeStreamに流れmsgIdがnilになる() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: msg-id タグがない NOTICE（匿名接続時など）
+        let rawNotice = ":tmi.twitch.tv NOTICE * :Login unsuccessful"
+        await mockWS.enqueueMessage(rawNotice)
+
+        var receivedNotices: [TwitchNotice] = []
+        let noticeStream = await client.noticeStream
+
+        let connectTask = Task {
+            try await client.connect(to: "testchannel")
+        }
+
+        for await notice in noticeStream {
+            receivedNotices.append(notice)
+            break
+        }
+
+        await client.disconnect()
+        connectTask.cancel()
+
+        // 検証: msgId が nil、channel も nil（"*" はチャンネルではないため）、message は trailing の通り
+        #expect(receivedNotices.count == 1)
+        #expect(receivedNotices[0].msgId == nil)
+        #expect(receivedNotices[0].channel == nil)
+        #expect(receivedNotices[0].message == "Login unsuccessful")
+    }
 }

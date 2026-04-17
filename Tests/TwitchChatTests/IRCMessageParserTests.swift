@@ -123,6 +123,59 @@ struct IRCMessageParserTests {
         #expect(result?.tags["display-name"] == "テスト ユーザー")
     }
 
+    // MARK: - NOTICE メッセージ
+
+    @Test("msg-id タグ付き NOTICE をパースできる")
+    func msgidタグ付きNOTICEをパースできる() {
+        // Twitch がレートリミット超過時に返す NOTICE の実際の形式
+        let rawMessage = "@msg-id=msg_ratelimit :tmi.twitch.tv NOTICE #haishinsha :You are sending messages too quickly."
+        let result = IRCMessageParser.parse(rawMessage)
+
+        #expect(result != nil)
+        #expect(result?.command == "NOTICE")
+        #expect(result?.tags["msg-id"] == "msg_ratelimit")
+        #expect(result?.params == ["#haishinsha"])
+        #expect(result?.trailing == "You are sending messages too quickly.")
+        #expect(result?.prefix == "tmi.twitch.tv")
+    }
+
+    @Test("重複メッセージの NOTICE をパースできる")
+    func 重複メッセージのNOTICEをパースできる() {
+        let rawMessage = "@msg-id=msg_duplicate :tmi.twitch.tv NOTICE #haishinsha :Your message was not sent because it is identical to the previous one you sent, less than 30 seconds ago."
+        let result = IRCMessageParser.parse(rawMessage)
+
+        #expect(result != nil)
+        #expect(result?.command == "NOTICE")
+        #expect(result?.tags["msg-id"] == "msg_duplicate")
+        #expect(result?.params == ["#haishinsha"])
+        #expect(result?.trailing == "Your message was not sent because it is identical to the previous one you sent, less than 30 seconds ago.")
+    }
+
+    @Test("msg-id タグなしの NOTICE もパースできる")
+    func msgidタグなしのNOTICEもパースできる() {
+        // 匿名接続時など、msg-id が付かない NOTICE も IRC メッセージとして解析できる
+        let rawMessage = ":tmi.twitch.tv NOTICE * :Login unsuccessful"
+        let result = IRCMessageParser.parse(rawMessage)
+
+        #expect(result != nil)
+        #expect(result?.command == "NOTICE")
+        #expect(result?.tags["msg-id"] == nil)
+        #expect(result?.params == ["*"])
+        #expect(result?.trailing == "Login unsuccessful")
+    }
+
+    @Test("msg-id=msg_banned の NOTICE をパースできる")
+    func msgidmsgbannedのNOTICEをパースできる() {
+        let rawMessage = "@msg-id=msg_banned :tmi.twitch.tv NOTICE #haishinsha :You are permanently banned from talking in haishinsha."
+        let result = IRCMessageParser.parse(rawMessage)
+
+        #expect(result != nil)
+        #expect(result?.command == "NOTICE")
+        #expect(result?.tags["msg-id"] == "msg_banned")
+        #expect(result?.params == ["#haishinsha"])
+        #expect(result?.trailing == "You are permanently banned from talking in haishinsha.")
+    }
+
     // MARK: - 数値コマンド（RPL）
 
     @Test("数値コマンド 001 をパースできる")

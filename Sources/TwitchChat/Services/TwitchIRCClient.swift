@@ -11,6 +11,12 @@ protocol TwitchIRCClientProtocol: Actor {
     /// 受信した ChatMessage を配信する AsyncStream
     var messageStream: AsyncStream<ChatMessage> { get }
 
+    /// サーバーから受信した NOTICE を配信する AsyncStream
+    ///
+    /// レートリミット超過・BAN・スローモードなどのエラー通知が流れる。
+    /// `CAP REQ :twitch.tv/commands` が有効な場合のみ `msg-id` タグ付きで届く。
+    var noticeStream: AsyncStream<TwitchNotice> { get }
+
     /// 指定チャンネルに接続する
     ///
     /// - Parameters:
@@ -56,6 +62,7 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
     private let webSocketClient: any WebSocketClientProtocol
     private var messageContinuation: AsyncStream<ChatMessage>.Continuation?
+    private var noticeContinuation: AsyncStream<TwitchNotice>.Continuation?
     /// 受信ループのタスク（disconnect() でキャンセルするために保持）
     private var receiveLoopTask: Task<Void, Never>?
 
@@ -72,15 +79,23 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// 受信した ChatMessage を配信する AsyncStream
     let messageStream: AsyncStream<ChatMessage>
 
+    /// サーバーから受信した NOTICE を配信する AsyncStream
+    let noticeStream: AsyncStream<TwitchNotice>
+
     // MARK: - 初期化
 
     /// TwitchIRCClient を初期化する
     ///
     /// - Parameter webSocketClient: WebSocket クライアント実装（テスト時はモックを注入）
     init(webSocketClient: any WebSocketClientProtocol = URLSessionWebSocketClient()) {
-        var continuation: AsyncStream<ChatMessage>.Continuation?
-        self.messageStream = AsyncStream { continuation = $0 }
-        self.messageContinuation = continuation
+        var msgContinuation: AsyncStream<ChatMessage>.Continuation?
+        self.messageStream = AsyncStream { msgContinuation = $0 }
+        self.messageContinuation = msgContinuation
+
+        var ntcContinuation: AsyncStream<TwitchNotice>.Continuation?
+        self.noticeStream = AsyncStream { ntcContinuation = $0 }
+        self.noticeContinuation = ntcContinuation
+
         self.webSocketClient = webSocketClient
     }
 
@@ -191,6 +206,20 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
             if let chatMessage = ChatMessage(from: ircMessage) {
                 messageContinuation?.yield(chatMessage)
             }
+
+        case "NOTICE":
+            // サーバーからの通知（レートリミット・BAN・スローモードなど）を配信
+            // params[0] は "#channel" 形式または "*"（サーバー全体通知）。
+            // "#" プレフィックスを持つ場合のみ除去する。"*" などは nil にする。
+            let channel = ircMessage.params.first.flatMap { raw in
+                raw.hasPrefix("#") ? String(raw.dropFirst()) : nil
+            }
+            let notice = TwitchNotice(
+                msgId: ircMessage.tags["msg-id"],
+                channel: channel,
+                message: ircMessage.trailing ?? ""
+            )
+            noticeContinuation?.yield(notice)
 
         default:
             break
