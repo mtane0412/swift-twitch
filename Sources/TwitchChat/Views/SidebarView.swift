@@ -15,12 +15,16 @@ struct SidebarView: View {
     var channelManager: ChannelManager
     var followedStreamStore: FollowedStreamStore
     var profileImageStore: ProfileImageStore
+    /// blank tab の開閉状態（サイドバーからチャンネル選択時に blank tab を閉じるために使用）
+    @Binding var isBlankTabOpen: Bool
 
     var body: some View {
         List(selection: Binding(
             get: { channelManager.selectedChannel },
             set: { newValue in
                 guard let channel = newValue else { return }
+                // サイドバーからの選択で blank tab を閉じる
+                isBlankTabOpen = false
                 if channelManager.isJoined(channel) {
                     // 既接続: 選択のみ切り替え（再接続させない）
                     channelManager.selectChannel(channel)

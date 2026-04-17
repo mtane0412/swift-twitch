@@ -26,9 +26,12 @@ actor MockProfileImageAPIClient: HelixAPIClientProtocol {
             throw URLError(.userAuthenticationRequired)
         }
         if T.self == HelixUsersResponse.self {
-            // リクエストされた id にマッチするユーザーのみを返す（実際の API の挙動を再現）
+            // id または login でマッチするユーザーを返す（実際の API の挙動を再現）
             let requestedIds = queryItems?.filter { $0.name == "id" }.compactMap { $0.value } ?? []
-            let filtered = usersToReturn.filter { requestedIds.contains($0.id) }
+            let requestedLogins = queryItems?.filter { $0.name == "login" }.compactMap { $0.value } ?? []
+            let filtered = usersToReturn.filter {
+                requestedIds.contains($0.id) || requestedLogins.contains($0.login)
+            }
             let response = HelixUsersResponse(data: filtered)
             return response as! T  // swiftlint:disable:this force_cast
         }
@@ -92,6 +95,17 @@ struct ProfileImageStoreTests {
 
         #expect(store.profileImageUrl(for: "111111") == URL(string: "https://example.com/user1.png"))
         #expect(store.profileImageUrl(for: "222222") == URL(string: "https://example.com/user2.png"))
+    }
+
+    @Test("ログイン名が空の場合は API を呼ばない")
+    func testFetchSkipsWhenEmptyLogins() async {
+        let mockClient = MockProfileImageAPIClient()
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(logins: [])
+
+        let callCount = await mockClient.callCount
+        #expect(callCount == 0)
     }
 
     @Test("ユーザーIDが空の場合は API を呼ばない")
@@ -194,5 +208,116 @@ struct ProfileImageStoreTests {
         store.clear()
 
         #expect(store.profileImageUrl(for: "111111") == nil)
+    }
+
+    // MARK: - ログイン名による参照（loginToUserId マッピング）
+
+    @Test("fetchUsers(userIds:) 後に profileImageUrl(forLogin:) でURLを取得できる")
+    func testProfileImageUrlByLoginAfterUserIdFetch() async {
+        // fetchUsers(userIds:) のレスポンスには login も含まれるため loginToUserId が更新される
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "よしおっくす", profileImageUrl: URL(string: "https://example.com/yoshi.png"))
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        // userId でフェッチ（実際には ChannelSearchView が searchResults の id で呼ぶケース）
+        await store.fetchUsers(userIds: ["111111"])
+
+        // ログイン名でも URL が取得できること
+        #expect(store.profileImageUrl(forLogin: "よしおっくす") == URL(string: "https://example.com/yoshi.png"))
+    }
+
+    @Test("fetchUsers(userIds:) 後に userId(forLogin:) でユーザーIDを取得できる")
+    func testUserIdByLoginAfterUserIdFetch() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "よしおっくす")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(userIds: ["111111"])
+
+        #expect(store.userId(forLogin: "よしおっくす") == "111111")
+    }
+
+    @Test("未フェッチのログイン名に対して profileImageUrl(forLogin:) は nil を返す")
+    func testProfileImageUrlByLoginReturnsNilWhenNotFetched() {
+        let mockClient = MockProfileImageAPIClient()
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        #expect(store.profileImageUrl(forLogin: "unknownchannel") == nil)
+    }
+
+    // MARK: - ログイン名によるフェッチ
+
+    @Test("fetchUsers(logins:) でログイン名から画像URLを取得できる")
+    func testFetchUsersByLogin() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "yoshiox", profileImageUrl: URL(string: "https://example.com/yoshi.png"))
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        // ログイン名でフェッチ
+        await store.fetchUsers(logins: ["yoshiox"])
+
+        // ログイン名・ユーザーID の両方でURLが取得できること
+        #expect(store.profileImageUrl(forLogin: "yoshiox") == URL(string: "https://example.com/yoshi.png"))
+        #expect(store.userId(forLogin: "yoshiox") == "111111")
+        #expect(store.profileImageUrl(for: "111111") == URL(string: "https://example.com/yoshi.png"))
+    }
+
+    @Test("fetchUsers(logins:) は login クエリパラメータで API を呼ぶ")
+    func testFetchUsersByLoginUsesLoginQueryParam() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "yoshiox")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(logins: ["yoshiox"])
+
+        // クエリパラメータが "login" であること（"id" ではない）
+        let lastQueryItems = await mockClient.lastQueryItems
+        let loginParams = lastQueryItems?.filter { $0.name == "login" }.compactMap { $0.value } ?? []
+        #expect(loginParams.contains("yoshiox"))
+        let idParams = lastQueryItems?.filter { $0.name == "id" }.compactMap { $0.value } ?? []
+        #expect(idParams.isEmpty)
+    }
+
+    @Test("fetchUsers(logins:) は既にフェッチ済みのログインを再取得しない")
+    func testFetchUsersByLoginDoesNotRefetch() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "yoshiox")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        // 1回目のフェッチ
+        await store.fetchUsers(logins: ["yoshiox"])
+        // 2回目は同じログイン（再取得不要）
+        await store.fetchUsers(logins: ["yoshiox"])
+
+        let callCount = await mockClient.callCount
+        #expect(callCount == 1)
+    }
+
+    @Test("ストアをクリアすると loginToUserId マッピングもリセットされる")
+    func testClearResetsLoginToUserIdMapping() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "yoshiox", profileImageUrl: URL(string: "https://example.com/yoshi.png"))
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(logins: ["yoshiox"])
+        #expect(store.profileImageUrl(forLogin: "yoshiox") != nil)
+
+        store.clear()
+
+        // クリア後はログインマッピングもリセットされること
+        #expect(store.profileImageUrl(forLogin: "yoshiox") == nil)
+        #expect(store.userId(forLogin: "yoshiox") == nil)
     }
 }

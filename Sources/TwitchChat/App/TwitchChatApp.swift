@@ -13,36 +13,44 @@ struct TwitchChatApp: App {
     @State private var authState = AuthState()
     /// 複数チャンネル接続を管理するマネージャー
     @State private var channelManager: ChannelManager?
-    /// フォロー中ストリーム一覧ストア
+    /// フォロー中ライブストリーム一覧ストア（60秒ごと自動更新）
     @State private var followedStreamStore: FollowedStreamStore?
+    /// フォロー中チャンネル一覧ストア（起動時1回取得・キャッシュ）
+    @State private var followedChannelStore: FollowedChannelStore?
     /// ユーザープロフィール画像URLストア
     @State private var profileImageStore: ProfileImageStore?
 
     var body: some Scene {
         WindowGroup {
-            // channelManager、followedStreamStore、profileImageStore は authState に依存するため
-            // ContentView 内で遅延初期化する
-            if let channelManager, let followedStreamStore, let profileImageStore {
+            // 各ストアは authState に依存するため onAppear で遅延初期化する
+            if let channelManager,
+               let followedStreamStore,
+               let followedChannelStore,
+               let profileImageStore {
                 ContentView(
                     authState: authState,
                     channelManager: channelManager,
                     followedStreamStore: followedStreamStore,
+                    followedChannelStore: followedChannelStore,
                     profileImageStore: profileImageStore
                 )
                 .task {
                     await authState.restoreSession()
-                    // ログイン済みならフォロー中ストリーム自動更新を開始
                     if case .loggedIn = authState.status {
                         followedStreamStore.startAutoRefresh()
+                        // フォロー中全チャンネルを起動時に一回取得してキャッシュする
+                        await followedChannelStore.fetchAll()
                     }
                 }
                 .onChange(of: authState.status) { _, newStatus in
                     switch newStatus {
                     case .loggedIn:
                         followedStreamStore.startAutoRefresh()
+                        Task { await followedChannelStore.fetchAll() }
                     case .loggedOut:
                         followedStreamStore.stopAutoRefresh()
                         followedStreamStore.clear()
+                        followedChannelStore.clear()
                         profileImageStore.clear()
                         Task { await channelManager.disconnectAll() }
                     case .unknown:
@@ -55,6 +63,10 @@ struct TwitchChatApp: App {
                         let helixClient = HelixAPIClient(tokenProvider: authState)
                         channelManager = ChannelManager(authState: authState)
                         followedStreamStore = FollowedStreamStore(
+                            apiClient: helixClient,
+                            authState: authState
+                        )
+                        followedChannelStore = FollowedChannelStore(
                             apiClient: helixClient,
                             authState: authState
                         )

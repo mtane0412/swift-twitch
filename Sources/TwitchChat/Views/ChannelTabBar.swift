@@ -16,11 +16,14 @@ import SwiftUI
 /// - タブが多い場合は `ScrollView(.horizontal)` で横スクロール可能にする
 /// - アクティブタブは非アクティブタブより高く描画され、コンテンツエリアと視覚的に繋がって見える
 /// - タブをドラッグすると Chrome 同様にカーソルへ追従し、他タブがリアルタイムに退避する
+/// - タブ末尾の「+」ボタンで blank tab を開き、任意のチャンネル名を入力して接続できる
 struct ChannelTabBar: View {
 
     let channelManager: ChannelManager
     let followedStreamStore: FollowedStreamStore
     let profileImageStore: ProfileImageStore
+    /// blank tab（チャンネル名入力フォーム）の開閉状態
+    @Binding var isBlankTabOpen: Bool
 
     /// ドラッグ中のチャンネル名
     @State private var draggingChannel: String?
@@ -44,14 +47,17 @@ struct ChannelTabBar: View {
                 ForEach(channelManager.channelOrder, id: \.self) { channel in
                     if channelManager.channels[channel] != nil {
                         let stream = followedStreamStore.stream(forUserLogin: channel)
-                        let userId = stream?.userId
+                        // ライブ中でない / フォロー外チャンネルは stream が nil のため
+                        // profileImageStore の loginToUserId マッピングをフォールバックとして使用する
+                        let userId = stream?.userId ?? profileImageStore.userId(forLogin: channel)
                         let name = stream?.userName ?? channel
                         let isDragging = draggingChannel == channel
                         let thisIdx = indexMap[channel] ?? 0
                         let visualOffset = tabVisualOffset(for: channel, at: thisIdx)
 
                         ChannelTabCell(
-                            isSelected: channel == channelManager.selectedChannel,
+                            // blank tab が開いているときは通常タブを非選択にして blank tab を際立たせる
+                            isSelected: !isBlankTabOpen && channel == channelManager.selectedChannel,
                             displayName: name,
                             profileImageUrl: userId.flatMap { profileImageStore.profileImageUrl(for: $0) },
                             userId: userId,
@@ -99,6 +105,41 @@ struct ChannelTabBar: View {
                         )
                     }
                 }
+
+                // blank tab（チャンネル名入力フォーム用タブ）
+                if isBlankTabOpen {
+                    ChannelTabCell(
+                        isSelected: true,
+                        displayName: "新しいタブ",
+                        profileImageUrl: nil,
+                        userId: nil,
+                        onSelect: { /* 既に選択中のため no-op */ },
+                        onClose: {
+                            // isBlankTabOpen を false にするだけで selectedChannel は変更しない
+                            // ContentView の selectedViewModel が既存の選択チャンネルを自然に復元する
+                            isBlankTabOpen = false
+                        }
+                    )
+                    .frame(width: Self.maxTabWidth)
+                }
+
+                // 「+」ボタン: blank tab が閉じているときのみ表示
+                if !isBlankTabOpen {
+                    Button {
+                        // selectedChannel はクリアしない
+                        // tab の isSelected は !isBlankTabOpen && ... で制御するため視覚的に正しく表示される
+                        isBlankTabOpen = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: ChannelTabCell.inactiveHeight)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("新しいタブを開く")
+                    .padding(.leading, 4)
+                }
             }
             // ScrollView 内でタブを底揃えにする
             .frame(height: Self.height, alignment: .bottom)
@@ -106,6 +147,16 @@ struct ChannelTabBar: View {
         .frame(height: Self.height)
         // タブバー背景: チャット欄（controlBackgroundColor）より明示的に少し暗くする
         .background(Color(.controlBackgroundColor).brightness(-0.05))
+        // チャンネルが追加されたとき、followedStreamStore に userId がないチャンネルを
+        // ログイン名で非同期フェッチし、プロフィール画像を取得する
+        .task(id: channelManager.channelOrder) {
+            let unknownLogins = channelManager.channelOrder.filter { login in
+                followedStreamStore.stream(forUserLogin: login)?.userId == nil
+                && profileImageStore.userId(forLogin: login) == nil
+            }
+            guard !unknownLogins.isEmpty else { return }
+            await profileImageStore.fetchUsers(logins: unknownLogins)
+        }
     }
 
     // MARK: - ドラッグ計算
