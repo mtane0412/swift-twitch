@@ -25,7 +25,12 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     private(set) var sentPrivmsgs: [String] = []
 
     /// sendPrivmsg() が throw するエラー（nil の場合は成功）
-    var sendPrivmsgError: (any Error)?
+    private var sendPrivmsgError: (any Error)?
+
+    /// テスト用に sendPrivmsg のエラーを設定する
+    func setSendPrivmsgError(_ error: (any Error)?) {
+        sendPrivmsgError = error
+    }
 
     init() {
         var msgContinuation: AsyncStream<ChatMessage>.Continuation?
@@ -499,6 +504,37 @@ struct ChatViewModelTests {
         )
         await authState.login()
         return authState
+    }
+
+    // MARK: - クライアント側レートリミット
+
+    @Test("sendPrivmsgがrateLimitedをthrowするとclientRateLimitedに変換されsendErrorが設定される")
+    func sendPrivmsgがrateLimitedをthrowするとclientRateLimitedに変換されsendErrorが設定される() async throws {
+        // 前提: 認証接続済みの状態で、sendPrivmsg がレートリミットエラーを throw するよう設定
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者001")
+        await mockClient.setSendPrivmsgError(TwitchIRCClientError.rateLimited(retryAfter: 15.0))
+
+        // sendMessage を呼ぶとレートリミットエラーが throw される
+        do {
+            try await viewModel.sendMessage("レートリミットテスト")
+            Issue.record("clientRateLimited が throw されるべきです")
+        } catch ChatSendError.clientRateLimited(let retryAfter) {
+            // 検証: retryAfter が正しく伝播されている
+            #expect(retryAfter == 15.0)
+        } catch {
+            // 予期しない別エラーが throw された場合はテスト失敗にする
+            Issue.record("予期しないエラーが throw されました: \(error)")
+        }
+
+        // 検証: sendError に残り秒数付きのメッセージが設定されている
+        #expect(viewModel.sendError == ChatSendError.clientRateLimited(retryAfter: 15.0).errorDescription)
+    }
+
+    @Test("clientRateLimitedのerrorDescriptionには残り秒数が含まれる")
+    func clientRateLimitedのerrorDescriptionには残り秒数が含まれる() {
+        // 15.5秒の場合は ceil して16秒と表示される
+        let error = ChatSendError.clientRateLimited(retryAfter: 15.5)
+        #expect(error.errorDescription == "送信頻度が上限に達しました。あと 16 秒後に再試行してください")
     }
 
     /// 認証接続済み（connected）の ChatViewModel と MockTwitchIRCClient のペアを返す

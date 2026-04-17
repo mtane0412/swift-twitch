@@ -189,6 +189,9 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// PING keepalive 設定
     private let pingConfig: PingConfiguration
 
+    /// クライアント側レートリミッター
+    private var rateLimiter: RateLimiter
+
     // MARK: - 初期化
 
     /// TwitchIRCClient を初期化する
@@ -217,6 +220,7 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         self.webSocketClient = webSocketClient
         self.backoffConfig = backoffConfig
         self.pingConfig = pingConfig
+        self.rateLimiter = RateLimiter()
     }
 
     // MARK: - 接続・切断
@@ -272,6 +276,9 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         lastAccessToken = nil
         lastUserLogin = nil
 
+        // 切断時にレートリミットカウントをリセットする
+        rateLimiter.reset()
+
         // 切断状態を通知
         connectionStateContinuation?.yield(.disconnected)
         // messageContinuation?.finish() を呼ばない → 再接続時に同じストリームを再利用できる
@@ -280,7 +287,8 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// 接続中チャンネルに PRIVMSG を送信する
     ///
     /// - Parameter text: 送信する本文（呼び出し元でサニタイズ済みである前提）
-    /// - Throws: `.notConnected`（未接続）、`.notAuthenticated`（匿名接続中）
+    /// - Throws: `.notConnected`（未接続）、`.notAuthenticated`（匿名接続中）、
+    ///           `.rateLimited(retryAfter:)`（クライアント側レートリミット超過）
     func sendPrivmsg(_ text: String) async throws {
         guard let channel = joinedChannel else {
             throw TwitchIRCClientError.notConnected
@@ -288,7 +296,15 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         guard isAuthenticated else {
             throw TwitchIRCClientError.notAuthenticated
         }
-        try await webSocketClient.send("PRIVMSG #\(channel) :\(text)")
+        // クライアント側レートリミット事前チェック（30秒あたり30メッセージ）
+        try rateLimiter.checkAndRecord()
+        do {
+            try await webSocketClient.send("PRIVMSG #\(channel) :\(text)")
+        } catch {
+            // 送信失敗時はレートリミットスロットを返却する（実際には送られていないため）
+            rateLimiter.rollbackLast()
+            throw error
+        }
     }
 
     // MARK: - プライベートメソッド
@@ -513,6 +529,11 @@ enum TwitchIRCClientError: Error, LocalizedError {
     /// 匿名接続中に PRIVMSG 送信しようとした場合（コメント投稿には認証接続が必要）
     case notAuthenticated
 
+    /// クライアント側レートリミット超過（30秒あたり30メッセージ超過）
+    ///
+    /// - Parameter retryAfter: 最古のタイムスタンプがウィンドウ外に出るまでの残り秒数
+    case rateLimited(retryAfter: TimeInterval)
+
     var errorDescription: String? {
         switch self {
         case .invalidAuthParameters:
@@ -521,6 +542,27 @@ enum TwitchIRCClientError: Error, LocalizedError {
             return "チャンネルに接続していません"
         case .notAuthenticated:
             return "コメントの投稿にはログインが必要です"
+        case .rateLimited(let retryAfter):
+            // retryAfter が 0 以下になる場合でも「あと 1 秒」と表示して混乱を防ぐ
+            let seconds = max(1, Int(ceil(retryAfter)))
+            return "送信頻度が上限に達しました。あと \(seconds) 秒後に再試行してください"
+        }
+    }
+}
+
+extension TwitchIRCClientError: Equatable {
+    /// カスタム等値比較
+    ///
+    /// `rateLimited(retryAfter:)` の `TimeInterval` は浮動小数点比較のため、
+    /// 1ms（0.001秒）の許容誤差を設けて比較する。
+    static func == (lhs: TwitchIRCClientError, rhs: TwitchIRCClientError) -> Bool {
+        switch (lhs, rhs) {
+        case (.invalidAuthParameters, .invalidAuthParameters): return true
+        case (.notConnected, .notConnected): return true
+        case (.notAuthenticated, .notAuthenticated): return true
+        case (.rateLimited(let l), .rateLimited(let r)):
+            return abs(l - r) < 0.001
+        default: return false
         }
     }
 }
