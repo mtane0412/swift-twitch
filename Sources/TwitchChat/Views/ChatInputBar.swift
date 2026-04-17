@@ -102,7 +102,7 @@ struct ChatInputBar: View {
                     .onSubmit(submit)
 
                 // 文字数カウンタ（450 文字超で警告）
-                if draft.count > 0 {
+                if !draft.isEmpty {
                     Text("\(draft.count)/500")
                         .font(.caption2)
                         .foregroundStyle(counterColor)

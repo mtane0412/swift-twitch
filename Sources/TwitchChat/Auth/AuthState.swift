@@ -2,8 +2,8 @@
 // 認証状態を管理する Observable クラス
 // アプリ全体で共有し、ログイン/ログアウト・トークン自動更新を提供する
 
-import Foundation
 import AppKit
+import Foundation
 import Observation
 
 // MARK: - 認証状態 enum
