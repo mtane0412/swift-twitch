@@ -77,18 +77,22 @@ struct ChatMessage: Sendable, Identifiable {
     ///   - displayName: 表示名（省略時は username と同じ値を使用）
     ///   - text: 送信したメッセージ本文
     ///   - roomId: 接続中チャンネルの room-id（既知の場合は渡す、省略可）
+    ///   - colorHex: チャット文字色（#RRGGBB 形式、USERSTATE から取得した場合に指定）
+    ///   - badges: バッジ一覧（USERSTATE から取得した場合に指定）
     init(
         localUsername username: String,
         displayName: String? = nil,
         text: String,
-        roomId: String? = nil
+        roomId: String? = nil,
+        colorHex: String? = nil,
+        badges: [Badge] = []
     ) {
         self.id = UUID().uuidString
         self.username = username
         self.displayName = displayName ?? username
         self.text = text
-        self.colorHex = nil
-        self.badges = []
+        self.colorHex = colorHex
+        self.badges = badges
         self.emotes = []
         self.segments = MessageSegment.segments(from: text, emotePositions: [])
         self.roomId = roomId

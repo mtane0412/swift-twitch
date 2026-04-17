@@ -86,6 +86,15 @@ final class ChatViewModel {
     /// IRC クライアントの接続状態変化を購読するタスク（切断時にキャンセル）
     private var connectionStateReceiveTask: Task<Void, Never>?
 
+    /// USERSTATE 受信ループタスク（切断時にキャンセル）
+    private var userStateReceiveTask: Task<Void, Never>?
+
+    /// USERSTATE から取得した自分のユーザー状態（楽観的 UI 生成に使用）
+    ///
+    /// JOIN 後とメッセージ送信後に更新される。nil の場合は login 名にフォールバックする。
+    /// テストからポーリング条件として参照できるよう `private(set)` で公開する。
+    private(set) var currentUserState: TwitchUserState?
+
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false
 
@@ -142,35 +151,7 @@ final class ChatViewModel {
         // グローバルバッジ定義を並行フェッチ（切断時にキャンセルできるよう保持）
         globalBadgeFetchTask = Task { await badgeStore.fetchGlobalBadges() }
 
-        receiveTask = Task { [weak self] in
-            // メッセージ受信ループを別タスクで開始
-            // weak self で循環参照を回避する
-            guard let self else { return }
-            let stream = await self.ircClient.messageStream
-            for await message in stream {
-                guard !Task.isCancelled else { break }
-                self.appendMessage(message)
-            }
-        }
-
-        noticeReceiveTask = Task { [weak self] in
-            guard let self else { return }
-            let stream = await self.ircClient.noticeStream
-            for await notice in stream {
-                guard !Task.isCancelled else { break }
-                self.handleIncomingNotice(notice)
-            }
-        }
-
-        // IRC クライアントの接続状態変化（再接続 / 再接続成功）を ViewModel の状態に反映する
-        connectionStateReceiveTask = Task { [weak self] in
-            guard let self else { return }
-            let stream = await self.ircClient.connectionStateStream
-            for await state in stream {
-                guard !Task.isCancelled else { break }
-                self.applyClientConnectionState(state)
-            }
-        }
+        startStreamTasks()
 
         do {
             // ログイン済みなら認証接続、ログアウト中なら匿名接続にフォールバック
@@ -188,7 +169,50 @@ final class ChatViewModel {
             receiveTask?.cancel()
             noticeReceiveTask?.cancel()
             connectionStateReceiveTask?.cancel()
+            userStateReceiveTask?.cancel()
             globalBadgeFetchTask?.cancel()
+        }
+    }
+
+    /// メッセージ・NOTICE・接続状態・USERSTATE の受信ループタスクをすべて開始する
+    ///
+    /// connect() の本体長を抑えるために切り出したヘルパーメソッド。
+    /// 各タスクは weak self で循環参照を防ぎ、disconnect() でキャンセルされる。
+    private func startStreamTasks() {
+        receiveTask = Task { [weak self] in
+            // メッセージ受信ループ（weak self で循環参照を回避する）
+            guard let self else { return }
+            let stream = await self.ircClient.messageStream
+            for await message in stream {
+                guard !Task.isCancelled else { break }
+                self.appendMessage(message)
+            }
+        }
+        noticeReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.noticeStream
+            for await notice in stream {
+                guard !Task.isCancelled else { break }
+                self.handleIncomingNotice(notice)
+            }
+        }
+        // IRC クライアントの接続状態変化（再接続 / 再接続成功）を ViewModel の状態に反映する
+        connectionStateReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.connectionStateStream
+            for await state in stream {
+                guard !Task.isCancelled else { break }
+                self.applyClientConnectionState(state)
+            }
+        }
+        // USERSTATE を購読して自分のユーザー情報を更新する（楽観的 UI の精度向上）
+        userStateReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.userStateStream
+            for await userState in stream {
+                guard !Task.isCancelled else { break }
+                self.currentUserState = userState
+            }
         }
     }
 
@@ -197,6 +221,7 @@ final class ChatViewModel {
         receiveTask?.cancel()
         noticeReceiveTask?.cancel()
         connectionStateReceiveTask?.cancel()
+        userStateReceiveTask?.cancel()
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
         // BadgeStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
@@ -204,6 +229,7 @@ final class ChatViewModel {
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil
+        currentUserState = nil
         optimisticPendingMessages.removeAll()
     }
 
@@ -279,11 +305,14 @@ final class ChatViewModel {
             try await ircClient.sendPrivmsg(sanitized)
             // 楽観的 UI: 自分の PRIVMSG はサーバーからエコーバックされないのでローカルで追加する
             if case .loggedIn(let login) = authState.status {
+                // USERSTATE 受信済みなら displayName / colorHex / badges に反映する
                 let localMessage = ChatMessage(
                     localUsername: login,
-                    displayName: login,
+                    displayName: currentUserState?.displayName ?? login,
                     text: sanitized,
-                    roomId: currentRoomId
+                    roomId: currentRoomId,
+                    colorHex: currentUserState?.colorHex,
+                    badges: currentUserState?.badges ?? []
                 )
                 appendMessage(localMessage)
                 // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
