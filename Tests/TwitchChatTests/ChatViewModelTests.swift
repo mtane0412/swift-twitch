@@ -20,6 +20,8 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     let noticeStream: AsyncStream<TwitchNotice>
     private var connectionStateContinuation: AsyncStream<ClientConnectionState>.Continuation?
     let connectionStateStream: AsyncStream<ClientConnectionState>
+    private var userStateContinuation: AsyncStream<TwitchUserState>.Continuation?
+    let userStateStream: AsyncStream<TwitchUserState>
 
     /// sendPrivmsg() で送信されたメッセージのログ（テスト検証用）
     private(set) var sentPrivmsgs: [String] = []
@@ -44,6 +46,10 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         var stateContinuation: AsyncStream<ClientConnectionState>.Continuation?
         self.connectionStateStream = AsyncStream { stateContinuation = $0 }
         self.connectionStateContinuation = stateContinuation
+
+        var usContinuation: AsyncStream<TwitchUserState>.Continuation?
+        self.userStateStream = AsyncStream { usContinuation = $0 }
+        self.userStateContinuation = usContinuation
     }
 
     func connect(to channel: String, accessToken: String?, userLogin: String?) async throws {
@@ -59,6 +65,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         messageContinuation?.finish()
         noticeContinuation?.finish()
         connectionStateContinuation?.finish()
+        userStateContinuation?.finish()
     }
 
     func sendPrivmsg(_ text: String) async throws {
@@ -84,6 +91,11 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     /// テスト用に接続状態を流し込む（再接続シミュレーション用）
     func sendConnectionState(_ state: ClientConnectionState) {
         connectionStateContinuation?.yield(state)
+    }
+
+    /// テスト用に USERSTATE を流し込む
+    func sendUserState(_ userState: TwitchUserState) {
+        userStateContinuation?.yield(userState)
     }
 }
 
@@ -550,5 +562,78 @@ struct ChatViewModelTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         return (viewModel, mockClient)
+    }
+
+    // MARK: - USERSTATE 購読と楽観的 UI
+
+    @Test("USERSTATE 未受信の場合は楽観的 UI に login 名・nil・空バッジが使われる")
+    func USERSTATE未受信の場合は楽観的UIにlogin名nilと空バッジが使われる() async throws {
+        // 前提: USERSTATE を受信していない状態で接続済み
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 実行: メッセージ送信
+        try await viewModel.sendMessage("こんにちは！")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: 楽観的 UI メッセージが login 名を displayName に使い、color は nil、badges は空
+        let optimisticMessage = viewModel.messages.first
+        #expect(optimisticMessage?.username == "yamadataro")
+        #expect(optimisticMessage?.displayName == "yamadataro")
+        #expect(optimisticMessage?.colorHex == nil)
+        #expect(optimisticMessage?.badges.isEmpty == true)
+    }
+
+    @Test("USERSTATE 受信後の楽観的 UI に displayName / color / badges が反映される")
+    func USERSTATE受信後の楽観的UIにdisplayNameとcolorとbadgesが反映される() async throws {
+        // 前提: USERSTATE を受信済みの状態で接続
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // USERSTATE を流し込む（表示名・色・バッジを持つ）
+        let userState = TwitchUserState(from: IRCMessageParser.parse(
+            "@badges=moderator/1;color=#1E90FF;display-name=山田太郎;emote-sets=0;mod=1;subscriber=0;user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
+        )!)!
+        await mockClient.sendUserState(userState)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 実行: USERSTATE 受信後にメッセージ送信
+        try await viewModel.sendMessage("こんにちは！")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: 楽観的 UI メッセージに USERSTATE の情報が反映されている
+        let optimisticMessage = viewModel.messages.first
+        #expect(optimisticMessage?.username == "yamadataro")
+        #expect(optimisticMessage?.displayName == "山田太郎")
+        #expect(optimisticMessage?.colorHex == "#1E90FF")
+        #expect(optimisticMessage?.badges == [Badge(name: "moderator", version: "1")])
+    }
+
+    @Test("USERSTATE を複数回受信した場合は最新の情報が楽観的 UI に使われる")
+    func USERSTATE複数回受信した場合は最新の情報が楽観的UIに使われる() async throws {
+        // 前提: 接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "testuser")
+
+        // 1回目の USERSTATE（古い情報）
+        let firstUserState = TwitchUserState(from: IRCMessageParser.parse(
+            "@badges=;color=#FF0000;display-name=古い表示名;emote-sets=0;mod=0;subscriber=0;user-type= :tmi.twitch.tv USERSTATE #testchannel"
+        )!)!
+        await mockClient.sendUserState(firstUserState)
+        try await Task.sleep(nanoseconds: 30_000_000)
+
+        // 2回目の USERSTATE（最新の情報）
+        let secondUserState = TwitchUserState(from: IRCMessageParser.parse(
+            "@badges=subscriber/6;color=#00FF7F;display-name=新しい表示名;emote-sets=0;mod=0;subscriber=1;user-type= :tmi.twitch.tv USERSTATE #testchannel"
+        )!)!
+        await mockClient.sendUserState(secondUserState)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 実行: 最新 USERSTATE 受信後にメッセージ送信
+        try await viewModel.sendMessage("テストメッセージ")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: 最新の USERSTATE 情報が使われる
+        let optimisticMessage = viewModel.messages.first
+        #expect(optimisticMessage?.displayName == "新しい表示名")
+        #expect(optimisticMessage?.colorHex == "#00FF7F")
+        #expect(optimisticMessage?.badges == [Badge(name: "subscriber", version: "6")])
     }
 }

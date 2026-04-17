@@ -614,6 +614,44 @@ struct TwitchIRCClientTests {
         connectTask.cancel()
     }
 
+    // MARK: - USERSTATE ハンドリング
+
+    @Test("USERSTATE を受信すると userStateStream に TwitchUserState が流れる")
+    func USERSTATEを受信するとuserStateStreamにTwitchUserStateが流れる() async {
+        // 前提: USERSTATE メッセージを事前にキューに投入
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        let userstateMessage = "@badges=moderator/1,subscriber/12;color=#1E90FF;display-name=テストユーザー;emote-sets=0;mod=1;subscriber=1;user-type=mod :tmi.twitch.tv USERSTATE #testchannel"
+        await mockWS.enqueueMessage(userstateMessage)
+
+        // userStateStream を取得してから接続開始
+        var receivedUserStates: [TwitchUserState] = []
+        let userStateStream = await client.userStateStream
+
+        let connectTask = Task {
+            try await client.connect(to: "testchannel", accessToken: "テスト用トークン", userLogin: "testuser")
+        }
+
+        // 最初の USERSTATE を受信する
+        for await userState in userStateStream {
+            receivedUserStates.append(userState)
+            break
+        }
+
+        await client.disconnect()
+        connectTask.cancel()
+
+        // 検証: TwitchUserState が正しいプロパティで届く
+        #expect(receivedUserStates.count == 1)
+        #expect(receivedUserStates[0].displayName == "テストユーザー")
+        #expect(receivedUserStates[0].colorHex == "#1E90FF")
+        #expect(receivedUserStates[0].badges == [
+            Badge(name: "moderator", version: "1"),
+            Badge(name: "subscriber", version: "12")
+        ])
+    }
+
     // MARK: - テストヘルパー
 
     /// 条件が満たされるまで最大 `timeout` 秒ポーリングする（10ms 間隔）

@@ -87,6 +87,12 @@ protocol TwitchIRCClientProtocol: Actor {
     /// ViewModel はこれを購読して UI の接続インジケータを更新する。
     var connectionStateStream: AsyncStream<ClientConnectionState> { get }
 
+    /// 認証接続時に受信する USERSTATE を配信する AsyncStream
+    ///
+    /// チャンネル JOIN 後およびメッセージ送信後に、自分の display-name / color / badges が届く。
+    /// ViewModel はこれを購読して楽観的 UI の表示情報を更新する。
+    var userStateStream: AsyncStream<TwitchUserState> { get }
+
     /// 指定チャンネルに接続する
     ///
     /// - Parameters:
@@ -141,12 +147,16 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// 接続状態の変化を配信する AsyncStream
     let connectionStateStream: AsyncStream<ClientConnectionState>
 
+    /// 認証接続時に受信する USERSTATE を配信する AsyncStream
+    let userStateStream: AsyncStream<TwitchUserState>
+
     // MARK: - プライベートプロパティ
 
     private let webSocketClient: any WebSocketClientProtocol
     private var messageContinuation: AsyncStream<ChatMessage>.Continuation?
     private var noticeContinuation: AsyncStream<TwitchNotice>.Continuation?
     private var connectionStateContinuation: AsyncStream<ClientConnectionState>.Continuation?
+    private var userStateContinuation: AsyncStream<TwitchUserState>.Continuation?
 
     /// 受信ループのタスク（disconnect() でキャンセルするために保持）
     private var receiveLoopTask: Task<Void, Never>?
@@ -216,6 +226,10 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         var stateContinuation: AsyncStream<ClientConnectionState>.Continuation?
         self.connectionStateStream = AsyncStream { stateContinuation = $0 }
         self.connectionStateContinuation = stateContinuation
+
+        var usContinuation: AsyncStream<TwitchUserState>.Continuation?
+        self.userStateStream = AsyncStream { usContinuation = $0 }
+        self.userStateContinuation = usContinuation
 
         self.webSocketClient = webSocketClient
         self.backoffConfig = backoffConfig
@@ -398,6 +412,13 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
                 message: ircMessage.trailing ?? ""
             )
             noticeContinuation?.yield(notice)
+
+        case "USERSTATE":
+            // 認証接続後に届く自分のユーザー状態（表示名・色・バッジ）を配信
+            // JOIN 直後とメッセージ送信後に届き、楽観的 UI の精度向上に使用する
+            if let userState = TwitchUserState(from: ircMessage) {
+                userStateContinuation?.yield(userState)
+            }
 
         case "RECONNECT":
             // Twitch サーバーがメンテナンス等で再接続を要求してきた場合

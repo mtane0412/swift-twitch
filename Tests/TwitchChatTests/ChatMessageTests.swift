@@ -246,4 +246,36 @@ struct ChatMessageTests {
         #expect(message1.id != message2.id)
         #expect(!message1.id.isEmpty)
     }
+
+    @Test("楽観的 UI 用イニシャライザで colorHex と badges を渡した場合にセットされる")
+    func 楽観的UI用イニシャライザでcolorHexとbadgesを渡した場合にセットされる() {
+        // 前提: USERSTATE から取得した color と badges を指定して生成
+        let badges = [Badge(name: "moderator", version: "1"), Badge(name: "subscriber", version: "12")]
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            displayName: "山田太郎",
+            text: "こんにちは！",
+            roomId: "12345678",
+            colorHex: "#1E90FF",
+            badges: badges
+        )
+
+        // 検証: colorHex と badges が正しくセットされる
+        #expect(chatMessage.colorHex == "#1E90FF")
+        #expect(chatMessage.badges == badges)
+    }
+
+    @Test("楽観的 UI 用イニシャライザで colorHex と badges を省略した場合はデフォルト値になる")
+    func 楽観的UI用イニシャライザでcolorHexとbadgesを省略した場合はデフォルト値になる() {
+        // 前提: colorHex / badges を省略して生成（従来の呼び出し方）
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            displayName: "山田太郎",
+            text: "こんにちは！"
+        )
+
+        // 検証: colorHex は nil、badges は空配列（後方互換）
+        #expect(chatMessage.colorHex == nil)
+        #expect(chatMessage.badges.isEmpty)
+    }
 }

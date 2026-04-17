@@ -86,6 +86,14 @@ final class ChatViewModel {
     /// IRC クライアントの接続状態変化を購読するタスク（切断時にキャンセル）
     private var connectionStateReceiveTask: Task<Void, Never>?
 
+    /// USERSTATE 受信ループタスク（切断時にキャンセル）
+    private var userStateReceiveTask: Task<Void, Never>?
+
+    /// USERSTATE から取得した自分のユーザー状態（楽観的 UI 生成に使用）
+    ///
+    /// JOIN 後とメッセージ送信後に更新される。nil の場合は login 名にフォールバックする。
+    private var currentUserState: TwitchUserState?
+
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false
 
@@ -172,6 +180,16 @@ final class ChatViewModel {
             }
         }
 
+        // USERSTATE を購読して自分のユーザー情報を更新する（楽観的 UI の精度向上）
+        userStateReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.userStateStream
+            for await userState in stream {
+                guard !Task.isCancelled else { break }
+                self.currentUserState = userState
+            }
+        }
+
         do {
             // ログイン済みなら認証接続、ログアウト中なら匿名接続にフォールバック
             let token = await authState.validAccessToken()
@@ -188,6 +206,7 @@ final class ChatViewModel {
             receiveTask?.cancel()
             noticeReceiveTask?.cancel()
             connectionStateReceiveTask?.cancel()
+            userStateReceiveTask?.cancel()
             globalBadgeFetchTask?.cancel()
         }
     }
@@ -197,6 +216,7 @@ final class ChatViewModel {
         receiveTask?.cancel()
         noticeReceiveTask?.cancel()
         connectionStateReceiveTask?.cancel()
+        userStateReceiveTask?.cancel()
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
         // BadgeStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
@@ -204,6 +224,7 @@ final class ChatViewModel {
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil
+        currentUserState = nil
         optimisticPendingMessages.removeAll()
     }
 
@@ -279,11 +300,14 @@ final class ChatViewModel {
             try await ircClient.sendPrivmsg(sanitized)
             // 楽観的 UI: 自分の PRIVMSG はサーバーからエコーバックされないのでローカルで追加する
             if case .loggedIn(let login) = authState.status {
+                // USERSTATE 受信済みなら displayName / colorHex / badges に反映する
                 let localMessage = ChatMessage(
                     localUsername: login,
-                    displayName: login,
+                    displayName: currentUserState?.displayName ?? login,
                     text: sanitized,
-                    roomId: currentRoomId
+                    roomId: currentRoomId,
+                    colorHex: currentUserState?.colorHex,
+                    badges: currentUserState?.badges ?? []
                 )
                 appendMessage(localMessage)
                 // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
