@@ -92,7 +92,8 @@ final class ChatViewModel {
     /// USERSTATE から取得した自分のユーザー状態（楽観的 UI 生成に使用）
     ///
     /// JOIN 後とメッセージ送信後に更新される。nil の場合は login 名にフォールバックする。
-    private var currentUserState: TwitchUserState?
+    /// テストからポーリング条件として参照できるよう `private(set)` で公開する。
+    private(set) var currentUserState: TwitchUserState?
 
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false

@@ -617,7 +617,7 @@ struct TwitchIRCClientTests {
     // MARK: - USERSTATE ハンドリング
 
     @Test("USERSTATE を受信すると userStateStream に TwitchUserState が流れる")
-    func USERSTATEを受信するとuserStateStreamにTwitchUserStateが流れる() async {
+    func USERSTATEを受信するとuserStateStreamにTwitchUserStateが流れる() async throws {
         // 前提: USERSTATE メッセージを事前にキューに投入
         let mockWS = MockWebSocketClient()
         let client = TwitchIRCClient(webSocketClient: mockWS)
