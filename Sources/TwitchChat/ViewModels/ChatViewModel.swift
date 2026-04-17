@@ -264,8 +264,9 @@ final class ChatViewModel {
     /// サーバーから受信した NOTICE を処理する
     ///
     /// エラー系 msg-id に対応する ChatSendError を `sendError` に反映し、
-    /// rollback ウィンドウ内で最も古い楽観的 UI メッセージを `messages` から除去する。
-    /// 複数メッセージを連続送信した場合は各メッセージを個別に rollback する。
+    /// `optimisticPendingMessages` の rollback ウィンドウ内で最も新しい楽観的 UI メッセージを
+    /// `messages` から除去する。直前に送ったメッセージが拒否された可能性が最も高いため、
+    /// 送信時刻が最新のエントリを rollback 対象とする。
     private func handleIncomingNotice(_ notice: TwitchNotice) {
         guard let error = ChatSendError.from(notice: notice) else {
             // 情報系通知（host_on, host_off 等）は何もしない
