@@ -84,8 +84,10 @@ struct ChannelSearchView: View {
     // MARK: - ボディ
 
     var body: some View {
-        VStack(spacing: 12) {
-            // チャンネル名入力フィールド（大きめのフォントで中央に表示）
+        VStack(spacing: 0) {
+            Spacer()
+
+            // TextField（レイアウト上の固定アンカー：上下 Spacer で中央に固定）
             TextField("チャンネル名を入力", text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: Self.textFieldFontSize))
@@ -95,21 +97,18 @@ struct ChannelSearchView: View {
                     submitCurrentText()
                 }
 
-            // フォロー中チャンネルの候補リスト（文字入力時のみ表示）
-            if !filteredStreams.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(filteredStreams) { stream in
-                        candidateRow(stream: stream)
+            // 候補リストの表示領域
+            // Color.clear を底まで広げ overlay で候補を描画することで
+            // TextField のレイアウト位置に一切影響しない
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    if !filteredStreams.isEmpty {
+                        candidateList
+                            .frame(width: Self.formWidth)
+                            .padding(.top, 8)
                     }
                 }
-                .frame(width: Self.formWidth)
-                .background(Color(.controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(.separatorColor), lineWidth: 1)
-                )
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -123,7 +122,22 @@ struct ChannelSearchView: View {
         }
     }
 
-    // MARK: - サブビュー
+    // MARK: - サブビュー（候補リスト）
+
+    /// フォロー中ストリームの候補リスト
+    private var candidateList: some View {
+        VStack(spacing: 0) {
+            ForEach(filteredStreams) { stream in
+                candidateRow(stream: stream)
+            }
+        }
+        .background(Color(.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(.separatorColor), lineWidth: 1)
+        )
+    }
 
     /// フォロー中ストリームの候補行
     private func candidateRow(stream: FollowedStream) -> some View {
