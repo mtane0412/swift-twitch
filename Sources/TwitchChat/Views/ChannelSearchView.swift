@@ -14,11 +14,11 @@ enum ChannelSearchFilter {
     ///
     /// - Parameters:
     ///   - streams: フィルタ対象のストリーム一覧
-    ///   - query: 検索クエリ（空またはスペースのみの場合は全件返す）
+    ///   - query: 検索クエリ（空またはスペースのみの場合は空配列を返す）
     /// - Returns: `userLogin` または `userName` がクエリに前方一致するストリーム
     static func filter(streams: [FollowedStream], query: String) -> [FollowedStream] {
         let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !trimmed.isEmpty else { return streams }
+        guard !trimmed.isEmpty else { return [] }
         return streams.filter {
             $0.userLogin.lowercased().hasPrefix(trimmed) ||
             $0.userName.lowercased().hasPrefix(trimmed)
@@ -54,12 +54,14 @@ struct ChannelSearchView: View {
 
     // MARK: - 定数
 
-    /// TextField の幅
-    private static let textFieldWidth: CGFloat = 320
+    /// TextField / 候補リストの幅
+    private static let formWidth: CGFloat = 480
+    /// TextField のフォントサイズ
+    private static let textFieldFontSize: CGFloat = 20
     /// 候補リストの最大表示件数
     private static let maxCandidates: Int = 8
     /// 候補行のアイコンサイズ
-    private static let iconSize: CGFloat = 28
+    private static let iconSize: CGFloat = 32
     /// ライブ中縁取りの太さ
     private static let liveBorderWidth: CGFloat = 2
 
@@ -82,24 +84,25 @@ struct ChannelSearchView: View {
     // MARK: - ボディ
 
     var body: some View {
-        VStack(spacing: 16) {
-            // チャンネル名入力フィールド
+        VStack(spacing: 12) {
+            // チャンネル名入力フィールド（大きめのフォントで中央に表示）
             TextField("チャンネル名を入力", text: $searchText)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: Self.textFieldWidth)
+                .font(.system(size: Self.textFieldFontSize))
+                .frame(width: Self.formWidth)
                 .focused($isTextFieldFocused)
                 .onSubmit {
                     submitCurrentText()
                 }
 
-            // フォロー中チャンネルの候補リスト
+            // フォロー中チャンネルの候補リスト（文字入力時のみ表示）
             if !filteredStreams.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(filteredStreams) { stream in
                         candidateRow(stream: stream)
                     }
                 }
-                .frame(width: Self.textFieldWidth)
+                .frame(width: Self.formWidth)
                 .background(Color(.controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(

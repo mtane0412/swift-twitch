@@ -37,8 +37,8 @@ struct ChannelSearchFilterTests {
 
     // MARK: - 空クエリ
 
-    @Test("空文字列の場合、全ストリームを返す")
-    func emptyQueryReturnsAllStreams() {
+    @Test("空文字列の場合、空配列を返す（未入力時は何も表示しない）")
+    func emptyQueryReturnsEmpty() {
         // 前提: 3件のストリームがある
         let streams = [
             makeStream(id: "1", userLogin: "ninja", userName: "Ninja"),
@@ -49,19 +49,19 @@ struct ChannelSearchFilterTests {
         // 操作: 空文字列でフィルタ
         let result = ChannelSearchFilter.filter(streams: streams, query: "")
 
-        // 検証: 全件返る
-        #expect(result.count == 3)
+        // 検証: 空配列が返る（入力なし = 候補を表示しない）
+        #expect(result.isEmpty)
     }
 
-    @Test("スペースのみの場合、全ストリームを返す")
-    func whitespaceOnlyQueryReturnsAllStreams() {
+    @Test("スペースのみの場合、空配列を返す（未入力時は何も表示しない）")
+    func whitespaceOnlyQueryReturnsEmpty() {
         let streams = [
             makeStream(id: "1", userLogin: "ninja", userName: "Ninja"),
         ]
 
         let result = ChannelSearchFilter.filter(streams: streams, query: "   ")
 
-        #expect(result.count == 1)
+        #expect(result.isEmpty)
     }
 
     // MARK: - userLogin による前方一致
