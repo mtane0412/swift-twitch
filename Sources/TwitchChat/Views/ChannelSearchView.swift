@@ -64,7 +64,9 @@ struct ChannelSearchView: View {
     /// TextField のフォントサイズ
     private static let textFieldFontSize: CGFloat = 20
     /// 候補リストの最大表示件数
-    private static let maxCandidates: Int = 8
+    private static let maxCandidates: Int = 6
+    /// 候補リストの最大高さ（ウィンドウからはみ出ないよう制限する）
+    private static let candidateListMaxHeight: CGFloat = 280
     /// 候補行のアイコンサイズ
     private static let iconSize: CGFloat = 32
     /// ライブ中縁取りの太さ
@@ -92,9 +94,11 @@ struct ChannelSearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // 上下均等の Spacer で TextField を中央に固定する
+            // Color.clear や frame(maxHeight:.infinity) は Spacer() と競合して
+            // スペースを独占するため使用しない
             Spacer()
 
-            // TextField（レイアウト上の固定アンカー：上下 Spacer で中央に固定）
             TextField("チャンネル名を入力", text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: Self.textFieldFontSize))
@@ -104,11 +108,9 @@ struct ChannelSearchView: View {
                     submitCurrentText()
                 }
 
-            // 候補リストの表示領域
-            // Color.clear を底まで広げ overlay で候補を描画することで
-            // TextField のレイアウト位置に一切影響しない
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 下 Spacer への overlay で候補を表示する
+            // overlay はレイアウトサイズに影響しないため TextField の位置が変わらない
+            Spacer()
                 .overlay(alignment: .top) {
                     if shouldShowCandidates {
                         candidateList
@@ -172,36 +174,47 @@ struct ChannelSearchView: View {
     // MARK: - 候補リスト
 
     /// フォロー中チャンネルまたは検索結果の候補リスト
+    ///
+    /// `candidateListMaxHeight` で高さを制限し、超えた場合はスクロール可能にする
     private var candidateList: some View {
-        VStack(spacing: 0) {
-            if !filteredChannels.isEmpty {
-                // フォロー中チャンネルの候補
-                ForEach(filteredChannels) { channel in
-                    followedChannelRow(channel)
-                }
-            } else if isSearching {
-                // 検索 API 取得中
-                ProgressView()
-                    .padding(16)
-            } else if !searchResults.isEmpty {
-                // 検索 API のフォールバック結果
-                Text("チャンネル検索結果")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                ForEach(searchResults) { result in
-                    searchResultRow(result)
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                if !filteredChannels.isEmpty {
+                    // フォロー中チャンネルの候補
+                    ForEach(filteredChannels) { channel in
+                        followedChannelRow(channel)
+                    }
+                } else if isSearching {
+                    // 検索 API 取得中
+                    ProgressView()
+                        .padding(16)
+                } else if !searchResults.isEmpty {
+                    // 検索 API のフォールバック結果
+                    Text("チャンネル検索結果")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+                    ForEach(searchResults) { result in
+                        searchResultRow(result)
+                    }
                 }
             }
         }
+        .scrollDisabled(!needsScroll)
+        .frame(maxHeight: Self.candidateListMaxHeight)
         .background(Color(.controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(.separatorColor), lineWidth: 1)
         )
+    }
+
+    /// スクロールが必要かどうか（候補が少なければ無効化してスクロールバーを出さない）
+    private var needsScroll: Bool {
+        filteredChannels.count > Self.maxCandidates || searchResults.count > Self.maxCandidates
     }
 
     // MARK: - 候補行: フォロー中チャンネル
