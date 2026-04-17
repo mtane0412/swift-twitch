@@ -1,8 +1,8 @@
 // RateLimiterTests.swift
 // クライアント側レートリミッター（スライディングウィンドウ方式）のテスト
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 @Suite("RateLimiterTests")

@@ -614,7 +614,30 @@ struct TwitchIRCClientTests {
         connectTask.cancel()
     }
 
-    // MARK: - クライアント側レートリミット
+    // MARK: - テストヘルパー
+
+    /// 条件が満たされるまで最大 `timeout` 秒ポーリングする（10ms 間隔）
+    ///
+    /// - Parameters:
+    ///   - timeout: 最大待機秒数（デフォルト 1.0 秒）
+    ///   - condition: 満たされるべき非同期条件
+    /// - Returns: 条件が満たされた場合は `true`、タイムアウトした場合は `false`
+    @discardableResult
+    private func waitFor(timeout: TimeInterval = 1.0, condition: () async -> Bool) async -> Bool {
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if await condition() { return true }
+            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms ポーリング
+        }
+        return false
+    }
+}
+
+// MARK: - クライアント側レートリミットテスト
+
+/// TwitchIRCClient のクライアント側レートリミット統合テスト
+@Suite("TwitchIRCClient レートリミットテスト")
+struct TwitchIRCClientRateLimitTests {
 
     @Test("30回連続sendPrivmsgは成功し31回目はrateLimitedをthrowする")
     func 連続三十回sendPrivmsgは成功し三十一回目はrateLimitedをthrowする() async throws {
@@ -675,23 +698,5 @@ struct TwitchIRCClientTests {
 
         await client.disconnect()
         reconnectTask.cancel()
-    }
-
-    // MARK: - テストヘルパー
-
-    /// 条件が満たされるまで最大 `timeout` 秒ポーリングする（10ms 間隔）
-    ///
-    /// - Parameters:
-    ///   - timeout: 最大待機秒数（デフォルト 1.0 秒）
-    ///   - condition: 満たされるべき非同期条件
-    /// - Returns: 条件が満たされた場合は `true`、タイムアウトした場合は `false`
-    @discardableResult
-    private func waitFor(timeout: TimeInterval = 1.0, condition: () async -> Bool) async -> Bool {
-        let start = Date()
-        while Date().timeIntervalSince(start) < timeout {
-            if await condition() { return true }
-            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms ポーリング
-        }
-        return false
     }
 }
