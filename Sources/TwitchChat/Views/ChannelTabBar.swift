@@ -47,7 +47,9 @@ struct ChannelTabBar: View {
                 ForEach(channelManager.channelOrder, id: \.self) { channel in
                     if channelManager.channels[channel] != nil {
                         let stream = followedStreamStore.stream(forUserLogin: channel)
-                        let userId = stream?.userId
+                        // ライブ中でない / フォロー外チャンネルは stream が nil のため
+                        // profileImageStore の loginToUserId マッピングをフォールバックとして使用する
+                        let userId = stream?.userId ?? profileImageStore.userId(forLogin: channel)
                         let name = stream?.userName ?? channel
                         let isDragging = draggingChannel == channel
                         let thisIdx = indexMap[channel] ?? 0
@@ -142,6 +144,16 @@ struct ChannelTabBar: View {
         .frame(height: Self.height)
         // タブバー背景: チャット欄（controlBackgroundColor）より明示的に少し暗くする
         .background(Color(.controlBackgroundColor).brightness(-0.05))
+        // チャンネルが追加されたとき、followedStreamStore に userId がないチャンネルを
+        // ログイン名で非同期フェッチし、プロフィール画像を取得する
+        .task(id: channelManager.channelOrder) {
+            let unknownLogins = channelManager.channelOrder.filter { login in
+                followedStreamStore.stream(forUserLogin: login)?.userId == nil
+                && profileImageStore.userId(forLogin: login) == nil
+            }
+            guard !unknownLogins.isEmpty else { return }
+            await profileImageStore.fetchUsers(logins: unknownLogins)
+        }
     }
 
     // MARK: - ドラッグ計算

@@ -33,15 +33,24 @@ final class ProfileImageStore {
     /// userId → profileImageUrl のキャッシュ
     private var profileImageUrls: [String: URL] = [:]
 
+    /// login → userId のマッピング（userId フェッチ時にもログイン名から参照できるよう記録する）
+    private var loginToUserId: [String: String] = [:]
+
     /// API レスポンスを受信済みの userId セット
     ///
     /// `profileImageUrl` が nil（空URL）のユーザーも含めて追跡し、繰り返しの API 呼び出しを防ぐ
     private var fetchedUserIds: Set<String> = []
 
+    /// API レスポンスを受信済みの login セット
+    private var fetchedLogins: Set<String> = []
+
     /// 現在フェッチ中の userId セット
     ///
     /// `@MainActor` の await サスペンション中に別タスクが同じ userId を重複リクエストするのを防ぐ
     private var inFlightUserIds: Set<String> = []
+
+    /// 現在フェッチ中の login セット
+    private var inFlightLogins: Set<String> = []
 
     private let apiClient: any HelixAPIClientProtocol
 
@@ -64,6 +73,23 @@ final class ProfileImageStore {
     /// - Returns: プロフィール画像URL（未取得またはユーザーが存在しない場合は `nil`）
     func profileImageUrl(for userId: String) -> URL? {
         profileImageUrls[userId]
+    }
+
+    /// 指定ログイン名のプロフィール画像URLを取得する
+    ///
+    /// - Parameter login: Twitch ログイン名（英数字小文字）
+    /// - Returns: プロフィール画像URL（未取得またはユーザーが存在しない場合は `nil`）
+    func profileImageUrl(forLogin login: String) -> URL? {
+        guard let userId = loginToUserId[login] else { return nil }
+        return profileImageUrls[userId]
+    }
+
+    /// 指定ログイン名のユーザーIDを取得する
+    ///
+    /// - Parameter login: Twitch ログイン名（英数字小文字）
+    /// - Returns: Twitch ユーザーID（未取得の場合は `nil`）
+    func userId(forLogin login: String) -> String? {
+        loginToUserId[login]
     }
 
     /// 複数ユーザーのプロフィール画像URLを一括取得する
@@ -89,13 +115,34 @@ final class ProfileImageStore {
         }
     }
 
+    /// ログイン名で複数ユーザーのプロフィール画像URLを一括取得する
+    ///
+    /// - Parameter logins: 取得対象の Twitch ログイン名一覧
+    /// - Note: 取得済みログインは API を呼ばない。100件超の場合は自動チャンク分割。
+    ///         認証エラーはサイレントスキップ（プロフィール画像は必須ではないため）。
+    func fetchUsers(logins: [String]) async {
+        let newLogins = logins.filter { !fetchedLogins.contains($0) && !inFlightLogins.contains($0) }
+        guard !newLogins.isEmpty else { return }
+
+        inFlightLogins.formUnion(newLogins)
+        defer { inFlightLogins.subtract(newLogins) }
+
+        let chunks = newLogins.chunked(into: Self.maxIdsPerRequest)
+        for chunk in chunks {
+            await fetchChunkByLogin(logins: chunk)
+        }
+    }
+
     /// プロフィール画像URLキャッシュをクリアする
     ///
     /// ログアウト時など、データを消去したい場合に使用する
     func clear() {
         profileImageUrls = [:]
+        loginToUserId = [:]
         fetchedUserIds = []
+        fetchedLogins = []
         inFlightUserIds = []
+        inFlightLogins = []
     }
 
     // MARK: - プライベートメソッド
@@ -103,35 +150,60 @@ final class ProfileImageStore {
     /// ユーザーIDのチャンク（100件以下）に対してAPIを呼び出す
     private func fetchChunk(userIds: [String]) async {
         let queryItems = userIds.map { URLQueryItem(name: "id", value: $0) }
+        await fetchAndStore(queryItems: queryItems, fallbackIds: userIds, mode: .userId)
+    }
 
+    /// ログイン名のチャンク（100件以下）に対してAPIを呼び出す
+    private func fetchChunkByLogin(logins: [String]) async {
+        let queryItems = logins.map { URLQueryItem(name: "login", value: $0) }
+        await fetchAndStore(queryItems: queryItems, fallbackIds: logins, mode: .login)
+    }
+
+    /// Helix API を呼び出してレスポンスをキャッシュに保存する共通処理
+    ///
+    /// - Parameters:
+    ///   - queryItems: API リクエストのクエリパラメータ
+    ///   - fallbackIds: レスポンスに含まれなかったIDをフェッチ済みとしてマークするためのリスト
+    ///   - mode: フェッチモード（userId / login）
+    private enum FetchMode { case userId, login }
+    private func fetchAndStore(queryItems: [URLQueryItem], fallbackIds: [String], mode: FetchMode) async {
         do {
             let response: HelixUsersResponse = try await apiClient.get(
                 url: Self.usersURL,
                 queryItems: queryItems
             )
             // キャッシュ上限超過時は全消去してメモリ増大を防ぐ
-            // fetchedUserIds も同時にクリアしないと上限超過後に再取得されなくなるため一緒にリセットする
             if profileImageUrls.count + response.data.count > Self.maxCacheEntries {
                 profileImageUrls.removeAll()
                 fetchedUserIds.removeAll()
+                fetchedLogins.removeAll()
+                loginToUserId.removeAll()
             }
             for userData in response.data {
-                // レスポンスを受信したユーザーはフェッチ済みとしてマーク（URL が nil でも再取得しない）
                 fetchedUserIds.insert(userData.id)
-                // profileImageUrl が nil（空文字列・不正URL）のユーザーはURLキャッシュに追加しない
+                fetchedLogins.insert(userData.login)
+                // userId → login の逆引きも記録してログイン名からもURL参照できるようにする
+                loginToUserId[userData.login] = userData.id
                 if let url = userData.profileImageUrl {
                     profileImageUrls[userData.id] = url
                 }
             }
+            // レスポンスに含まれなかったIDもフェッチ済みとしてマーク（再取得防止）
+            switch mode {
+            case .userId:
+                let returnedIds = Set(response.data.map(\.id))
+                fallbackIds.forEach { if !returnedIds.contains($0) { fetchedUserIds.insert($0) } }
+            case .login:
+                let returnedLogins = Set(response.data.map(\.login))
+                fallbackIds.forEach { if !returnedLogins.contains($0) { fetchedLogins.insert($0) } }
+            }
         } catch let error as URLError where error.code == .userAuthenticationRequired {
-            // 未ログイン時はサイレントスキップ
             #if DEBUG
-            logger.debug("プロフィール画像取得スキップ: 未認証 userIds=\(userIds)")
+            logger.debug("プロフィール画像取得スキップ: 未認証 queryItems=\(queryItems)")
             #endif
         } catch {
-            // その他のエラーもサイレントスキップ（プロフィール画像は必須ではないため）
             #if DEBUG
-            logger.debug("プロフィール画像取得失敗: \(error.localizedDescription) userIds=\(userIds)")
+            logger.debug("プロフィール画像取得失敗: \(error.localizedDescription)")
             #endif
         }
     }
