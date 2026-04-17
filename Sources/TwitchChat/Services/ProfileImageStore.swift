@@ -183,7 +183,7 @@ final class ProfileImageStore {
             for userData in response.data {
                 fetchedUserIds.insert(userData.id)
                 fetchedLogins.insert(userData.login.lowercased())
-                // userId → login の逆引きも記録してログイン名からもURL参照できるようにする
+                // login → userId の対応を記録してログイン名から参照できるようにする
                 loginToUserId[userData.login.lowercased()] = userData.id
                 if let url = userData.profileImageUrl {
                     profileImageUrls[userData.id] = url

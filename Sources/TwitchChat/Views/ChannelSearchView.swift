@@ -49,9 +49,12 @@ enum CandidateNavigator {
     ///   - current: 現在の選択インデックス
     ///   - count: 候補の総件数
     /// - Returns: 先頭を下回らない前のインデックス（先頭ではクランプ）
+    ///
+    /// - Note: 候補数が減少して `current` が `count-1` を超えた場合も正しく末尾にクランプする
     static func previousIndex(current: Int, count: Int) -> Int {
         guard count > 0 else { return 0 }
-        return max(current - 1, 0)
+        let clamped = min(current, count - 1)
+        return max(clamped - 1, 0)
     }
 }
 
@@ -200,7 +203,8 @@ struct ChannelSearchView: View {
         .task(id: searchText) {
             let query = searchText.trimmingCharacters(in: .whitespaces)
 
-            // 空文字列、またはフォロー中チャンネルに一致あり → 検索 API を使わない
+            // 空文字列、またはフォロー中チャンネルにクエリが一致した → 検索 API を使わない
+            // フォロー中チャンネルに一致がない場合のみ /helix/search/channels にフォールバックする
             guard !query.isEmpty, filteredChannels.isEmpty else {
                 searchResults = []
                 isSearching = false
