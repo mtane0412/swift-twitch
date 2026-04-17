@@ -561,10 +561,11 @@ struct TwitchIRCClientTests {
         }
 
         // PING が 2 回以上送信されるまで待機（最大 2 秒、並行テスト実行時の遅延を許容）
-        await waitFor(timeout: 2.0) {
+        let waitSucceeded = await waitFor(timeout: 2.0) {
             let sent = await mockWS.sentMessages
             return sent.filter { $0 == "PING :tmi.twitch.tv" }.count >= 2
         }
+        #expect(waitSucceeded, "タイムアウト前に PING が 2 回送信されなかった")
 
         // 検証: keepalive PING が少なくとも 2 回送信されている
         let sent = await mockWS.sentMessages
