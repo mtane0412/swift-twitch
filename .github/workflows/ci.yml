@@ -42,17 +42,29 @@ jobs:
 
       - name: コードカバレッジレポートを生成
         run: |
-          # テストバイナリを動的に検索する（パスはビルド構成によって変わる場合がある）
-          TEST_BIN=$(find .build/debug -name "TwitchChatPackageTests" -type f | head -1)
+          # テストバイナリを動的に検索する
+          # macOS ARM 環境では .build/debug は .build/arm64-apple-macosx/debug への
+          # シンボリックリンクであるため -L フラグでリンクを追跡する
+          TEST_BIN=$(find -L .build -name "TwitchChatPackageTests" -type f | head -1)
           if [ -z "$TEST_BIN" ]; then
             echo "エラー: テストバイナリが見つかりません"
+            echo "--- .build 配下のファイル一覧（デバッグ用） ---"
+            find .build -maxdepth 3 -name "*Tests*" 2>/dev/null || true
             exit 1
           fi
           echo "テストバイナリ: $TEST_BIN"
 
+          # profdata も -L で実パスを解決する
+          PROFDATA=$(find -L .build -name "default.profdata" | head -1)
+          if [ -z "$PROFDATA" ]; then
+            echo "エラー: profdata が見つかりません"
+            exit 1
+          fi
+          echo "profdata: $PROFDATA"
+
           xcrun llvm-cov export \
             "$TEST_BIN" \
-            -instr-profile .build/debug/codecov/default.profdata \
+            -instr-profile "$PROFDATA" \
             -format=lcov \
             -ignore-filename-regex=".build|Tests" \
             > coverage.lcov
@@ -72,15 +84,8 @@ jobs:
       - name: ソースコードをチェックアウト
         uses: actions/checkout@v4
 
-      - name: SwiftLint をキャッシュから復元
-        id: cache-swiftlint
-        uses: actions/cache@v4
-        with:
-          path: /opt/homebrew/Cellar/swiftlint
-          key: ${{ runner.os }}-swiftlint-0.58.2
-
       - name: SwiftLint をインストール
-        if: steps.cache-swiftlint.outputs.cache-hit != 'true'
+        # brew install はべき等: Cellar にあれば再ダウンロードせず bin シンボリックリンクのみ作成する
         run: brew install swiftlint
 
       - name: SwiftLint を実行
