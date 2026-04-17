@@ -41,6 +41,7 @@ struct IRCMessageParserTests {
 
     @Test("タグ付き PRIVMSG をパースできる")
     func タグ付きPRIVMSGをパースできる() {
+        // swiftlint:disable:next line_length
         let rawMessage = "@badge-info=subscriber/6;badges=subscriber/6;color=#FF0000;display-name=テストユーザー;emotes=;id=abc-123;mod=0;subscriber=1;tmi-sent-ts=1700000000000;user-id=12345 :testuser!testuser@testuser.tmi.twitch.tv PRIVMSG #テストチャンネル :これはテストメッセージです"
         let result = IRCMessageParser.parse(rawMessage)
 
@@ -141,6 +142,7 @@ struct IRCMessageParserTests {
 
     @Test("重複メッセージの NOTICE をパースできる")
     func 重複メッセージのNOTICEをパースできる() {
+        // swiftlint:disable:next line_length
         let rawMessage = "@msg-id=msg_duplicate :tmi.twitch.tv NOTICE #haishinsha :Your message was not sent because it is identical to the previous one you sent, less than 30 seconds ago."
         let result = IRCMessageParser.parse(rawMessage)
 

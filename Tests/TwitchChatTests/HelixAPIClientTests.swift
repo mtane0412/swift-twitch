@@ -2,8 +2,8 @@
 // HelixAPIClient の単体テスト
 // トークン未設定時のエラー送出など、認証関連の振る舞いを検証する
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 // MARK: - テスト用モック

@@ -1,8 +1,8 @@
 // BadgeStoreTests.swift
 // BadgeStore の URL解決ロジックテスト
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 // MARK: - テスト用モック

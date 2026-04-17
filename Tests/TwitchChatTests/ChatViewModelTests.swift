@@ -457,6 +457,7 @@ struct ChatViewModelTests {
 
     /// テスト用の ChatMessage を生成する
     private func makeTestChatMessage(displayName: String, text: String) -> ChatMessage {
+        // swiftlint:disable:next line_length
         let rawMessage = "@badges=;color=#FF0000;display-name=\(displayName);emotes=;id=\(UUID().uuidString);user-id=12345 :testuser!testuser@testuser.tmi.twitch.tv PRIVMSG #testchannel :\(text)"
         let ircMessage = IRCMessageParser.parse(rawMessage)!
         return ChatMessage(from: ircMessage)!

@@ -33,6 +33,8 @@ disabled_rules:
   - implicit_return
   # タプル3要素は一部の内部処理で使用しているため
   - large_tuple
+  # テストコードでの .data(using: .utf8)! は許容（force-unwrap は意図的）
+  - non_optional_string_data_conversion
 
 # 行の長さ（初回導入のため緩めに設定）
 line_length:
