@@ -1,0 +1,87 @@
+# ci.yml
+# TwitchChat GitHub Actions CI ワークフロー
+# build-and-test（ビルド + テスト + カバレッジ）/ lint の2ジョブを実行する
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一ブランチへの新しいプッシュがあった場合、実行中の古いジョブをキャンセルする
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ビルド＋テスト実行ジョブ（コードカバレッジ付き）
+  # 同一ランナー上でビルドとテストを順番に実行することで
+  # アーティファクト転送なしにビルド成果物をそのまま利用できる
+  build-and-test:
+    name: Build and Test
+    runs-on: macos-15
+    steps:
+      - name: ソースコードをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: SPM 依存キャッシュを復元
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: ビルド
+        run: swift build -v
+
+      - name: テスト実行（コードカバレッジ有効）
+        run: swift test --enable-code-coverage -v
+
+      - name: コードカバレッジレポートを生成
+        run: |
+          # テストバイナリを動的に検索する（パスはビルド構成によって変わる場合がある）
+          TEST_BIN=$(find .build/debug -name "TwitchChatPackageTests" -type f | head -1)
+          if [ -z "$TEST_BIN" ]; then
+            echo "エラー: テストバイナリが見つかりません"
+            exit 1
+          fi
+          echo "テストバイナリ: $TEST_BIN"
+
+          xcrun llvm-cov export \
+            "$TEST_BIN" \
+            -instr-profile .build/debug/codecov/default.profdata \
+            -format=lcov \
+            -ignore-filename-regex=".build|Tests" \
+            > coverage.lcov
+
+      - name: カバレッジレポートをアーティファクトとしてアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.lcov
+          retention-days: 14
+
+  # SwiftLint によるコードスタイル検査ジョブ
+  lint:
+    name: Lint
+    runs-on: macos-15
+    steps:
+      - name: ソースコードをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: SwiftLint をキャッシュから復元
+        id: cache-swiftlint
+        uses: actions/cache@v4
+        with:
+          path: /opt/homebrew/Cellar/swiftlint
+          key: ${{ runner.os }}-swiftlint-0.58.2
+
+      - name: SwiftLint をインストール
+        if: steps.cache-swiftlint.outputs.cache-hit != 'true'
+        run: brew install swiftlint
+
+      - name: SwiftLint を実行
+        run: swiftlint lint --strict

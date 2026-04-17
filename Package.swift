@@ -4,6 +4,13 @@
 // Twitch IRC チャットを表示する macOS 15+ ネイティブアプリ
 
 import PackageDescription
+import Foundation
+
+// GitHub Actions は CI=true を自動設定する。
+// CI 環境（Xcode 16 / Swift 6.0.3）では CommandLineTools 専用のリンカフラグが不要。
+// ローカル環境（CommandLineTools のみ）では isCI = false となり既存の動作を維持する。
+// 外部 swift-testing パッケージは CI でも引き続き使用する（Xcode 16 と互換）。
+let isCI = ProcessInfo.processInfo.environment["CI"] != nil
 
 let package = Package(
     name: "TwitchChat",
@@ -12,6 +19,8 @@ let package = Package(
     ],
     dependencies: [
         // Swift Testing フレームワーク（CommandLineTools 環境でのテスト実行に使用）
+        // swift-testing は安定リリースタグが存在しない開発パッケージのため branch 指定が必須。
+        // Package.resolved にリビジョンが固定されているため再現性は保たれている。
         .package(url: "https://github.com/swiftlang/swift-testing.git", branch: "main")
     ],
     targets: [
@@ -38,7 +47,7 @@ let package = Package(
                 .product(name: "Testing", package: "swift-testing")
             ],
             path: "Tests/TwitchChatTests",
-            linkerSettings: [
+            linkerSettings: isCI ? [] : [
                 // CommandLineTools 環境で lib_TestingInterop を見つけるためのパス設定
                 .unsafeFlags([
                     "-L",

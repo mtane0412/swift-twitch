@@ -33,6 +33,29 @@ Xcode 未インストール（CommandLineTools のみ）のため、`Package.swi
 testTarget に unsafeFlags で Testing フレームワークのパスと rpath を設定済み。
 この設定は変更しないこと。
 
+### CI 環境（GitHub Actions）との違い
+
+`Package.swift` は `ProcessInfo.processInfo.environment["CI"]` で環境を判定する。
+
+| 設定 | ローカル (CommandLineTools) | CI (Xcode 16 / Swift 6.0.3) |
+|------|----------------------------|------------------------------|
+| swift-testing 外部依存 | 使用 | 使用（Xcode 16 と互換） |
+| CommandLineTools unsafeFlags | 適用 | 除外 |
+
+- GitHub Actions は `CI=true` を自動設定するため追加設定不要
+- ローカルで CI 挙動をエミュレートする `CI=true swift test` はローカルの Swift 6.3 と
+  外部パッケージの API 非互換により動作しない（想定内）
+
+## CI
+
+`.github/workflows/ci.yml` に3つのジョブを定義:
+
+1. **build** - `swift build` でコンパイル確認
+2. **test** - `swift test --enable-code-coverage` でテスト実行、カバレッジレポートを Artifacts に保存
+3. **lint** - SwiftLint でコードスタイル検査
+
+**実行タイミング**: main ブランチへの push および PR 時
+
 ## テスト方針（TDD）
 
 1. テストファイルを先に作成（RED）
