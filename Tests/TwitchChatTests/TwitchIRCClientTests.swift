@@ -56,11 +56,18 @@ actor MockWebSocketClient: WebSocketClientProtocol {
 
     func disconnect() async {
         isConnected = false
-        // 待機中の継続をすべてキャンセル
-        for continuation in pendingReceiveContinuations {
-            continuation.resume(throwing: CancellationError())
+        if pendingReceiveContinuations.isEmpty {
+            // receive() が待機中でない（メッセージ処理中に disconnect が呼ばれた）場合、
+            // 次の receive() で切断エラーを返すよう予約する。
+            // RECONNECT コマンド処理からの disconnect() で再接続ループを正しく起動するために必要。
+            scheduledErrors.insert(CancellationError(), at: 0)
+        } else {
+            // 待機中の継続をすべてキャンセル
+            for continuation in pendingReceiveContinuations {
+                continuation.resume(throwing: CancellationError())
+            }
+            pendingReceiveContinuations.removeAll()
         }
-        pendingReceiveContinuations.removeAll()
     }
 
     /// 受信メッセージをモックに追加する（テスト用）
