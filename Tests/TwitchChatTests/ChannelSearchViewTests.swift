@@ -8,25 +8,16 @@ import Testing
 
 // MARK: - テストデータファクトリ
 
-/// テスト用 FollowedStream を生成するヘルパー
-private func makeStream(
-    id: String = "1",
-    userId: String = "111",
-    userLogin: String = "testchannel",
-    userName: String = "テストチャンネル",
-    gameName: String = "マインクラフト",
-    viewerCount: Int = 100
-) -> FollowedStream {
-    FollowedStream(
-        id: id,
-        userId: userId,
-        userLogin: userLogin,
-        userName: userName,
-        gameName: gameName,
-        title: "テスト配信",
-        viewerCount: viewerCount,
-        thumbnailUrl: "https://example.com/thumb.jpg",
-        startedAt: Date()
+/// テスト用 FollowedChannel を生成するヘルパー
+private func makeChannel(
+    broadcasterId: String = "1",
+    broadcasterLogin: String = "testchannel",
+    broadcasterName: String = "テストチャンネル"
+) -> FollowedChannel {
+    FollowedChannel(
+        broadcasterId: broadcasterId,
+        broadcasterLogin: broadcasterLogin,
+        broadcasterName: broadcasterName
     )
 }
 
@@ -39,15 +30,13 @@ struct ChannelSearchFilterTests {
 
     @Test("空文字列の場合、空配列を返す（未入力時は何も表示しない）")
     func emptyQueryReturnsEmpty() {
-        // 前提: 3件のストリームがある
-        let streams = [
-            makeStream(id: "1", userLogin: "ninja", userName: "Ninja"),
-            makeStream(id: "2", userLogin: "shroud", userName: "shroud"),
-            makeStream(id: "3", userLogin: "pokimane", userName: "Pokimane"),
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "shroud", broadcasterName: "shroud"),
+            makeChannel(broadcasterId: "3", broadcasterLogin: "pokimane", broadcasterName: "Pokimane"),
         ]
 
-        // 操作: 空文字列でフィルタ
-        let result = ChannelSearchFilter.filter(streams: streams, query: "")
+        let result = ChannelSearchFilter.filter(channels: channels, query: "")
 
         // 検証: 空配列が返る（入力なし = 候補を表示しない）
         #expect(result.isEmpty)
@@ -55,74 +44,72 @@ struct ChannelSearchFilterTests {
 
     @Test("スペースのみの場合、空配列を返す（未入力時は何も表示しない）")
     func whitespaceOnlyQueryReturnsEmpty() {
-        let streams = [
-            makeStream(id: "1", userLogin: "ninja", userName: "Ninja"),
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
         ]
 
-        let result = ChannelSearchFilter.filter(streams: streams, query: "   ")
+        let result = ChannelSearchFilter.filter(channels: channels, query: "   ")
 
         #expect(result.isEmpty)
     }
 
-    // MARK: - userLogin による前方一致
+    // MARK: - broadcasterLogin による前方一致
 
-    @Test("userLogin の前方一致でフィルタできる")
-    func filterByUserLoginPrefix() {
+    @Test("broadcasterLogin の前方一致でフィルタできる")
+    func filterByLoginPrefix() {
         // 前提: "poki" で始まるチャンネルが1件ある
-        let streams = [
-            makeStream(id: "1", userLogin: "pokimane", userName: "Pokimane"),
-            makeStream(id: "2", userLogin: "ninja", userName: "Ninja"),
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "pokimane", broadcasterName: "Pokimane"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
         ]
 
-        // 操作: "poki" で検索
-        let result = ChannelSearchFilter.filter(streams: streams, query: "poki")
+        let result = ChannelSearchFilter.filter(channels: channels, query: "poki")
 
         // 検証: pokimane のみが返る
         #expect(result.count == 1)
-        #expect(result[0].userLogin == "pokimane")
+        #expect(result[0].broadcasterLogin == "pokimane")
     }
 
-    // MARK: - userName による前方一致
+    // MARK: - broadcasterName による前方一致
 
-    @Test("userName（表示名）の前方一致でフィルタできる")
-    func filterByUserNamePrefix() {
+    @Test("broadcasterName（表示名）の前方一致でフィルタできる")
+    func filterByNamePrefix() {
         // 前提: 日本語表示名 "ゲーム実況者A" のチャンネルがある
-        let streams = [
-            makeStream(id: "1", userLogin: "gameaaa", userName: "ゲーム実況者A"),
-            makeStream(id: "2", userLogin: "ninja", userName: "Ninja"),
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "gameaaa", broadcasterName: "ゲーム実況者A"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
         ]
 
-        // 操作: 日本語で "ゲーム" と検索
-        let result = ChannelSearchFilter.filter(streams: streams, query: "ゲーム")
+        let result = ChannelSearchFilter.filter(channels: channels, query: "ゲーム")
 
         // 検証: "ゲーム実況者A" のチャンネルが返る
         #expect(result.count == 1)
-        #expect(result[0].userLogin == "gameaaa")
+        #expect(result[0].broadcasterLogin == "gameaaa")
     }
 
     // MARK: - 大文字小文字の区別なし
 
-    @Test("検索クエリは大文字小文字を区別しない（userLogin）")
-    func caseInsensitiveUserLogin() {
-        let streams = [
-            makeStream(id: "1", userLogin: "shroud", userName: "shroud"),
+    @Test("検索クエリは大文字小文字を区別しない（broadcasterLogin）")
+    func caseInsensitiveLogin() {
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "shroud", broadcasterName: "shroud"),
         ]
 
         // 操作: 大文字で "SHR" と入力
-        let result = ChannelSearchFilter.filter(streams: streams, query: "SHR")
+        let result = ChannelSearchFilter.filter(channels: channels, query: "SHR")
 
         // 検証: shroud が見つかる
         #expect(result.count == 1)
     }
 
-    @Test("検索クエリは大文字小文字を区別しない（userName）")
-    func caseInsensitiveUserName() {
-        let streams = [
-            makeStream(id: "1", userLogin: "ninja", userName: "Ninja"),
+    @Test("検索クエリは大文字小文字を区別しない（broadcasterName）")
+    func caseInsensitiveName() {
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
         ]
 
-        // 操作: 小文字で "ninja" と入力（userName は "Ninja"）
-        let result = ChannelSearchFilter.filter(streams: streams, query: "ninja")
+        // 操作: 小文字で "ninja" と入力（broadcasterName は "Ninja"）
+        let result = ChannelSearchFilter.filter(channels: channels, query: "ninja")
 
         // 検証: Ninja が見つかる
         #expect(result.count == 1)
@@ -132,15 +119,13 @@ struct ChannelSearchFilterTests {
 
     @Test("どちらにも前方一致しない場合、空配列を返す")
     func noMatchReturnsEmpty() {
-        let streams = [
-            makeStream(id: "1", userLogin: "ninja", userName: "Ninja"),
-            makeStream(id: "2", userLogin: "shroud", userName: "shroud"),
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "shroud", broadcasterName: "shroud"),
         ]
 
-        // 操作: 存在しない "zzz" で検索
-        let result = ChannelSearchFilter.filter(streams: streams, query: "zzz")
+        let result = ChannelSearchFilter.filter(channels: channels, query: "zzz")
 
-        // 検証: 空配列が返る
         #expect(result.isEmpty)
     }
 
@@ -148,34 +133,34 @@ struct ChannelSearchFilterTests {
 
     @Test("複数チャンネルが前方一致する場合、全て返す")
     func multipleMatchesReturned() {
-        // 前提: "shr" で始まる userLogin が2件ある
-        let streams = [
-            makeStream(id: "1", userLogin: "shroud", userName: "shroud"),
-            makeStream(id: "2", userLogin: "shrew", userName: "shrew"),
-            makeStream(id: "3", userLogin: "ninja", userName: "Ninja"),
+        // 前提: "shr" で始まる broadcasterLogin が2件ある
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "shroud", broadcasterName: "shroud"),
+            makeChannel(broadcasterId: "2", broadcasterLogin: "shrew", broadcasterName: "shrew"),
+            makeChannel(broadcasterId: "3", broadcasterLogin: "ninja", broadcasterName: "Ninja"),
         ]
 
-        let result = ChannelSearchFilter.filter(streams: streams, query: "shr")
+        let result = ChannelSearchFilter.filter(channels: channels, query: "shr")
 
         // 検証: shroud と shrew の2件が返る
         #expect(result.count == 2)
     }
 
-    // MARK: - userLogin と userName の OR 一致
+    // MARK: - broadcasterLogin と broadcasterName の OR 一致
 
-    @Test("userLogin と userName のどちらかが前方一致すればヒットする")
+    @Test("broadcasterLogin と broadcasterName のどちらかが前方一致すればヒットする")
     func matchEitherLoginOrName() {
-        // 前提: userLogin は "abc123" だが userName は "日本語チャンネル"
-        let streams = [
-            makeStream(id: "1", userLogin: "abc123", userName: "日本語チャンネル"),
+        // 前提: broadcasterLogin は "abc123" だが broadcasterName は "日本語チャンネル"
+        let channels = [
+            makeChannel(broadcasterId: "1", broadcasterLogin: "abc123", broadcasterName: "日本語チャンネル"),
         ]
 
-        // "日本語" で検索 → userLogin は不一致だが userName が一致
-        let resultByName = ChannelSearchFilter.filter(streams: streams, query: "日本語")
+        // "日本語" で検索 → broadcasterLogin は不一致だが broadcasterName が一致
+        let resultByName = ChannelSearchFilter.filter(channels: channels, query: "日本語")
         #expect(resultByName.count == 1)
 
-        // "abc" で検索 → userLogin が一致
-        let resultByLogin = ChannelSearchFilter.filter(streams: streams, query: "abc")
+        // "abc" で検索 → broadcasterLogin が一致
+        let resultByLogin = ChannelSearchFilter.filter(channels: channels, query: "abc")
         #expect(resultByLogin.count == 1)
     }
 }

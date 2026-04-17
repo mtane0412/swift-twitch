@@ -1,6 +1,6 @@
 // ChannelSearchView.swift
 // blank tab のコンテンツ領域に表示するチャンネル検索フォーム
-// フォロー中ライブチャンネルのインクリメンタルサーチ + 任意チャンネル名の直接入力に対応する
+// フォロー中チャンネルのインクリメンタルサーチ + 0件時は /helix/search/channels にフォールバックする
 
 import SwiftUI
 
@@ -10,18 +10,18 @@ import SwiftUI
 ///
 /// ビューから独立した純粋関数として定義し、テスト可能にする
 enum ChannelSearchFilter {
-    /// クエリ文字列でストリーム一覧をフィルタする
+    /// クエリ文字列でフォロー済みチャンネル一覧をフィルタする
     ///
     /// - Parameters:
-    ///   - streams: フィルタ対象のストリーム一覧
+    ///   - channels: フィルタ対象のチャンネル一覧
     ///   - query: 検索クエリ（空またはスペースのみの場合は空配列を返す）
-    /// - Returns: `userLogin` または `userName` がクエリに前方一致するストリーム
-    static func filter(streams: [FollowedStream], query: String) -> [FollowedStream] {
+    /// - Returns: `broadcasterLogin` または `broadcasterName` がクエリに前方一致するチャンネル
+    static func filter(channels: [FollowedChannel], query: String) -> [FollowedChannel] {
         let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !trimmed.isEmpty else { return [] }
-        return streams.filter {
-            $0.userLogin.lowercased().hasPrefix(trimmed) ||
-            $0.userName.lowercased().hasPrefix(trimmed)
+        return channels.filter {
+            $0.broadcasterLogin.lowercased().hasPrefix(trimmed) ||
+            $0.broadcasterName.lowercased().hasPrefix(trimmed)
         }
     }
 }
@@ -34,13 +34,16 @@ enum ChannelSearchFilter {
 /// - blank tab（タブバーの「+」ボタン押下後）のコンテンツ領域
 /// - アプリ起動時にタブが0個の初期状態
 ///
-/// 機能:
-/// - フォロー中ライブチャンネルのインクリメンタルサーチ
-/// - 入力確定（Enter）でフォロー外チャンネルにも直接接続可能
-/// - Escape で blank tab を閉じる（`onCancel` が nil の場合は閉じない）
+/// 候補表示の優先順位:
+/// 1. フォロー中チャンネル（`FollowedChannelStore.channels` を前方一致でフィルタ）
+/// 2. フォロー中0件かつ入力あり → `/helix/search/channels` の検索結果（300ms デバウンス）
+///
+/// ライブ状態は `FollowedStreamStore` との cross-reference で判定し、赤い縁取りで表示する
 struct ChannelSearchView: View {
 
-    /// フォロー中ストリーム一覧（インクリメンタルサーチのデータソース）
+    /// フォロー中チャンネル一覧（候補フィルタのデータソース + 検索 API フォールバック）
+    let followedChannelStore: FollowedChannelStore
+    /// フォロー中ライブストリーム一覧（ライブ状態の判定に使用）
     let followedStreamStore: FollowedStreamStore
     /// プロフィール画像ストア（候補行のアイコン表示に使用）
     let profileImageStore: ProfileImageStore
@@ -50,6 +53,8 @@ struct ChannelSearchView: View {
     let onCancel: (() -> Void)?
 
     @State private var searchText: String = ""
+    @State private var searchResults: [ChannelSearchResult] = []
+    @State private var isSearching: Bool = false
     @FocusState private var isTextFieldFocused: Bool
 
     // MARK: - 定数
@@ -67,18 +72,20 @@ struct ChannelSearchView: View {
 
     // MARK: - 算出プロパティ
 
-    /// 検索クエリに一致するストリームの候補リスト（最大 maxCandidates 件）
-    private var filteredStreams: [FollowedStream] {
+    /// クエリにマッチするフォロー中チャンネル（最大 maxCandidates 件）
+    private var filteredChannels: [FollowedChannel] {
         let filtered = ChannelSearchFilter.filter(
-            streams: followedStreamStore.streams,
+            channels: followedChannelStore.channels,
             query: searchText
         )
         return Array(filtered.prefix(Self.maxCandidates))
     }
 
-    /// Enter キーで確定できるかどうか（空文字列以外）
-    private var canSubmit: Bool {
-        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    /// 候補リストを表示するかどうか
+    private var shouldShowCandidates: Bool {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return false }
+        return !filteredChannels.isEmpty || isSearching || !searchResults.isEmpty
     }
 
     // MARK: - ボディ
@@ -103,7 +110,7 @@ struct ChannelSearchView: View {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .top) {
-                    if !filteredStreams.isEmpty {
+                    if shouldShowCandidates {
                         candidateList
                             .frame(width: Self.formWidth)
                             .padding(.top, 8)
@@ -113,6 +120,46 @@ struct ChannelSearchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             isTextFieldFocused = true
+            // フォロー中チャンネルのプロフィール画像を事前取得する
+            let userIds = followedChannelStore.channels.map(\.broadcasterId)
+            if !userIds.isEmpty {
+                Task { await profileImageStore.fetchUsers(userIds: userIds) }
+            }
+        }
+        // フォロー中チャンネルが更新されたらプロフィール画像を取得する
+        .onChange(of: followedChannelStore.channels) { _, channels in
+            let userIds = channels.map(\.broadcasterId)
+            if !userIds.isEmpty {
+                Task { await profileImageStore.fetchUsers(userIds: userIds) }
+            }
+        }
+        // 検索テキスト変化時: フォロー中0件なら検索 API にフォールバックする（300ms デバウンス）
+        .task(id: searchText) {
+            let query = searchText.trimmingCharacters(in: .whitespaces)
+
+            // 空文字列、またはフォロー中チャンネルに一致あり → 検索 API を使わない
+            guard !query.isEmpty, filteredChannels.isEmpty else {
+                searchResults = []
+                isSearching = false
+                return
+            }
+
+            // 300ms デバウンス（タイピング途中の API リクエストを防ぐ）
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+
+            // 検索 API を呼び出す
+            isSearching = true
+            let results = await followedChannelStore.searchChannels(query: query)
+            guard !Task.isCancelled else { return }
+
+            // 取得した検索結果のプロフィール画像を非同期で取得する
+            let userIds = results.map(\.id)
+            if !userIds.isEmpty {
+                await profileImageStore.fetchUsers(userIds: userIds)
+            }
+            searchResults = results
+            isSearching = false
         }
         // Escape キーで blank tab を閉じる
         .onKeyPress(.escape) {
@@ -122,13 +169,31 @@ struct ChannelSearchView: View {
         }
     }
 
-    // MARK: - サブビュー（候補リスト）
+    // MARK: - 候補リスト
 
-    /// フォロー中ストリームの候補リスト
+    /// フォロー中チャンネルまたは検索結果の候補リスト
     private var candidateList: some View {
         VStack(spacing: 0) {
-            ForEach(filteredStreams) { stream in
-                candidateRow(stream: stream)
+            if !filteredChannels.isEmpty {
+                // フォロー中チャンネルの候補
+                ForEach(filteredChannels) { channel in
+                    followedChannelRow(channel)
+                }
+            } else if isSearching {
+                // 検索 API 取得中
+                ProgressView()
+                    .padding(16)
+            } else if !searchResults.isEmpty {
+                // 検索 API のフォールバック結果
+                Text("チャンネル検索結果")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                ForEach(searchResults) { result in
+                    searchResultRow(result)
+                }
             }
         }
         .background(Color(.controlBackgroundColor))
@@ -139,47 +204,100 @@ struct ChannelSearchView: View {
         )
     }
 
-    /// フォロー中ストリームの候補行
-    private func candidateRow(stream: FollowedStream) -> some View {
-        Button {
-            onChannelSelected(stream.userLogin)
+    // MARK: - 候補行: フォロー中チャンネル
+
+    /// フォロー中チャンネルの候補行
+    ///
+    /// ライブ中かどうかは `followedStreamStore` との cross-reference で判定する
+    private func followedChannelRow(_ channel: FollowedChannel) -> some View {
+        let liveStream = followedStreamStore.stream(forUserLogin: channel.broadcasterLogin)
+        let isLive = liveStream != nil
+
+        return Button {
+            onChannelSelected(channel.broadcasterLogin)
         } label: {
             HStack(spacing: 10) {
                 // プロフィールアイコン（ライブ中は赤い縁取り）
                 ProfileImageView(
-                    userId: stream.userId,
-                    imageUrl: profileImageStore.profileImageUrl(for: stream.userId),
+                    userId: channel.broadcasterId,
+                    imageUrl: profileImageStore.profileImageUrl(for: channel.broadcasterId),
                     size: Self.iconSize
                 )
-                .overlay(
-                    Circle()
-                        .stroke(Color.red, lineWidth: Self.liveBorderWidth)
-                )
+                .overlay {
+                    if isLive {
+                        Circle().stroke(Color.red, lineWidth: Self.liveBorderWidth)
+                    }
+                }
 
                 // チャンネル情報
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(stream.userName)
+                    Text(channel.broadcasterName)
                         .font(.body)
                         .lineLimit(1)
-                    Text(stream.gameName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let gameName = liveStream?.gameName, !gameName.isEmpty {
+                        Text(gameName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
 
                 Spacer()
 
-                // 視聴者数
-                Text(formatViewerCount(stream.viewerCount))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // 視聴者数（ライブ中のみ表示）
+                if let viewerCount = liveStream?.viewerCount {
+                    Text(formatViewerCount(viewerCount))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(Color.clear)
+    }
+
+    // MARK: - 候補行: チャンネル検索結果
+
+    /// チャンネル検索結果（検索 API フォールバック）の候補行
+    private func searchResultRow(_ result: ChannelSearchResult) -> some View {
+        Button {
+            onChannelSelected(result.broadcasterLogin)
+        } label: {
+            HStack(spacing: 10) {
+                // プロフィールアイコン（ライブ中は赤い縁取り）
+                ProfileImageView(
+                    userId: result.id,
+                    imageUrl: profileImageStore.profileImageUrl(for: result.id),
+                    size: Self.iconSize
+                )
+                .overlay {
+                    if result.isLive {
+                        Circle().stroke(Color.red, lineWidth: Self.liveBorderWidth)
+                    }
+                }
+
+                // チャンネル情報
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(result.displayName)
+                        .font(.body)
+                        .lineLimit(1)
+                    if !result.gameName.isEmpty {
+                        Text(result.gameName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - プライベートメソッド

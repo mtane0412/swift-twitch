@@ -19,6 +19,7 @@ struct ContentView: View {
     var authState: AuthState
     var channelManager: ChannelManager
     var followedStreamStore: FollowedStreamStore
+    var followedChannelStore: FollowedChannelStore
     var profileImageStore: ProfileImageStore
 
     /// blank tab（チャンネル名入力フォーム）が開いているかどうか
@@ -50,6 +51,7 @@ struct ContentView: View {
                 if isBlankTabOpen {
                     // blank tab: チャンネル名入力フォーム
                     ChannelSearchView(
+                        followedChannelStore: followedChannelStore,
                         followedStreamStore: followedStreamStore,
                         profileImageStore: profileImageStore,
                         onChannelSelected: { channelLogin in
@@ -66,6 +68,7 @@ struct ContentView: View {
                 } else {
                     // タブ0個の初期状態: チャンネル名入力フォームを直接表示
                     ChannelSearchView(
+                        followedChannelStore: followedChannelStore,
                         followedStreamStore: followedStreamStore,
                         profileImageStore: profileImageStore,
                         onChannelSelected: { channelLogin in
