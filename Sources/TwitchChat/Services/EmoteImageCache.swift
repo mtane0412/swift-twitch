@@ -37,6 +37,12 @@ final class EmoteImageCache: @unchecked Sendable {
     /// `GIFFrameSequence` の初期化に必要な生データを保持する。
     /// `NSImage(data:)` で変換済みの NSImage からは GIF バイナリを確実に復元できないため、
     /// ダウンロード時の生 `Data` を別途キャッシュする。
+    ///
+    /// - Note: `imageCache` と `gifDataCache` は独立した `NSCache` インスタンスのため、
+    ///   メモリプレッシャー時に片方のみが解放される場合がある。
+    ///   `EmoteAnimationDriver.register` は `gifData(for:)` が nil のとき登録をスキップするため
+    ///   `imageCache` のみ残存しても動作上の問題は生じないが、
+    ///   `gifDataCache` のみ残存するケースでは無駄なデータが残る点に注意する。
     private let gifDataCache: NSCache<NSString, NSData> = {
         let c = NSCache<NSString, NSData>()
         c.countLimit = 500
@@ -194,9 +200,10 @@ final class EmoteImageCache: @unchecked Sendable {
         }
     }
 
+    // MARK: - テスト用メソッド
+
+#if DEBUG
     /// テスト用: GIF 生データをキャッシュに直接登録する
-    ///
-    /// - Note: `#if DEBUG` でも良いが、テスト対象の `@testable import` から呼べるようにアクセス修飾子は internal のまま
     ///
     /// - Parameters:
     ///   - gifData: 登録する GIF バイナリデータ
@@ -204,4 +211,14 @@ final class EmoteImageCache: @unchecked Sendable {
     func storeForTesting(gifData: Data, for emoteId: String) {
         gifDataCache.setObject(gifData as NSData, forKey: emoteId as NSString)
     }
+
+    /// テスト用: 全キャッシュをクリアする
+    ///
+    /// テスト間の状態汚染を防ぐため、テスト終了時に呼び出す。
+    func clearForTesting() {
+        imageCache.removeAllObjects()
+        gifDataCache.removeAllObjects()
+        lock.withLock { animatedEmoteIds.removeAll() }
+    }
+#endif
 }

@@ -11,8 +11,8 @@ import ImageIO
 /// `EmoteAnimationDriver` がタイマー駆動でフレームを切り替えるために使用する。
 ///
 /// - Note: 静止画（フレーム数 1 以下）の場合は `init` が nil を返す
-/// - Note: `Sendable` 準拠により Swift Concurrency 環境で安全に共有できる
-struct GIFFrameSequence: Sendable {
+/// - Note: `NSImage` は `Sendable` 非準拠のため、このクラスは `@MainActor` 内でのみ使用する
+struct GIFFrameSequence {
 
     /// 各フレームの NSImage（`EmoteImageCache.emoteDisplaySize` にリサイズ済み）
     let frames: [NSImage]
@@ -47,11 +47,9 @@ struct GIFFrameSequence: Sendable {
             let duration = Self.frameDuration(source: source, index: index)
 
             // NSImage として格納し、表示サイズを設定する
-            let rep = NSBitmapImageRep(cgImage: cgImage)
-            let image = NSImage(size: NSSize(width: displaySize, height: displaySize))
-            image.addRepresentation(rep)
             // NSImage.size を emoteDisplaySize に設定してテキスト行高に揃える
-            image.size = NSSize(width: displaySize, height: displaySize)
+            let image = NSImage(size: NSSize(width: displaySize, height: displaySize))
+            image.addRepresentation(NSBitmapImageRep(cgImage: cgImage))
 
             extractedFrames.append(image)
             extractedDurations.append(duration)

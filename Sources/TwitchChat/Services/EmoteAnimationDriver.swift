@@ -14,6 +14,7 @@ import AppKit
 /// - 50ms（20fps）間隔の共有 Timer でアクティブな全アタッチメントのフレームを更新する
 /// - 同一 emoteId のアタッチメントはフレーム計算を共有して CPU コストを最小化する
 /// - フレームインデックスが変わらない場合は `image` 更新をスキップする
+/// - フレームが実際に変化した場合のみ `emoteFrameDidUpdate` 通知を post する
 /// - 全アタッチメント解除時にタイマーを自動停止する
 @MainActor
 final class EmoteAnimationDriver {
@@ -27,9 +28,9 @@ final class EmoteAnimationDriver {
     /// 実行中のタイマー（nil の場合はタイマー停止中）
     private var timer: Timer?
 
-    /// 登録中のアタッチメント（emoteId をキーとして、同一エモートの全アタッチメントを管理）
+    /// 登録中のアタッチメント（emoteId をキーとして、同一エモートの全アタッチメントを弱参照で管理）
     ///
-    /// 値の配列には弱参照は使わず、deinit / unregister で明示的に削除する。
+    /// 弱参照（`Weak` ラッパー）で保持し、デアロケート済みエントリは `tick()` の先頭でクリーンアップする。
     private var registrations: [String: [Weak<EmoteTextAttachment>]] = [:]
 
     /// emoteId ごとのフレームシーケンスキャッシュ（GIF データから生成、解放は registrations と連動）
@@ -47,6 +48,7 @@ final class EmoteAnimationDriver {
     /// アニメーションエモートのアタッチメントを登録する
     ///
     /// - 同一 emoteId の初回登録時に `GIFFrameSequence` を構築する
+    /// - 同じアタッチメントの二重登録を防ぐため、登録前に重複チェックを行う
     /// - アクティブなアタッチメントが 1 件以上になった時点でタイマーを起動する
     ///
     /// - Parameter attachment: 登録する `EmoteTextAttachment`
@@ -63,8 +65,10 @@ final class EmoteAnimationDriver {
             frameSequences[emoteId] = sequence
         }
 
-        // 弱参照リストに追加
-        var list = registrations[emoteId] ?? []
+        // 解放済みエントリを除去しつつ重複チェックを行う
+        var list = (registrations[emoteId] ?? []).filter { $0.value != nil }
+        let id = ObjectIdentifier(attachment)
+        guard !list.contains(where: { $0.objectIdentifier == id }) else { return }
         list.append(Weak(attachment))
         registrations[emoteId] = list
 
@@ -80,7 +84,6 @@ final class EmoteAnimationDriver {
         guard let emoteId = attachment.emoteId else { return }
 
         guard var list = registrations[emoteId] else { return }
-        // 対象の弱参照エントリを削除する
         let id = ObjectIdentifier(attachment)
         list.removeAll { $0.objectIdentifier == id || $0.value == nil }
 
@@ -112,16 +115,21 @@ final class EmoteAnimationDriver {
     // MARK: - プライベートメソッド
 
     /// タイマーを開始する（既に動作中の場合は何もしない）
+    ///
+    /// - Note: `.common` モードで登録することでスクロール中もタイマーが停止しない。
     private func startTimerIfNeeded() {
         guard timer == nil else { return }
         elapsed = 0
-        timer = Timer.scheduledTimer(withTimeInterval: Self.timerInterval, repeats: true) { [weak self] _ in
+        let newTimer = Timer(timeInterval: Self.timerInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
             MainActor.assumeIsolated {
                 self.elapsed += Self.timerInterval
                 self.tick()
             }
         }
+        // .common モードで追加してスクロール中もタイマーが動作するようにする
+        RunLoop.main.add(newTimer, forMode: .common)
+        timer = newTimer
     }
 
     /// 登録アタッチメントが空の場合にタイマーを停止する
@@ -138,8 +146,9 @@ final class EmoteAnimationDriver {
 
     /// 全登録アタッチメントのフレームを現在の経過時間に基づいて更新する
     private func tick() {
-        // 解放済みの弱参照を一括クリーンアップする
         var emoteIdsToRemove: [String] = []
+        // フレームが実際に変化したかどうかを追跡する（変化がない場合は通知しない）
+        var anyFrameChanged = false
 
         for (emoteId, list) in registrations {
             let alive = list.filter { $0.value != nil }
@@ -164,6 +173,7 @@ final class EmoteAnimationDriver {
                 if attachment.currentFrameIndex == frameIndex { continue }
                 attachment.currentFrameIndex = frameIndex
                 attachment.image = frameImage
+                anyFrameChanged = true
             }
         }
 
@@ -175,9 +185,9 @@ final class EmoteAnimationDriver {
 
         stopTimerIfEmpty()
 
-        // NSTextView に再描画を要求する
-        if !registrations.isEmpty {
-            NotificationCenter.default.post(name: .emoteFrameDidUpdate, object: nil)
+        // フレームが実際に変化した場合のみ NSTextView に再描画を要求する
+        if anyFrameChanged {
+            NotificationCenter.default.post(name: .emoteFrameDidUpdate, object: self)
         }
     }
 
@@ -205,7 +215,8 @@ final class EmoteAnimationDriver {
 extension Notification.Name {
     /// EmoteAnimationDriver がフレームを更新した際に post する通知
     ///
-    /// `EmoteRichTextView.Coordinator` が受信し `textView.needsDisplay = true` を呼ぶ。
+    /// post 時の `object` は `EmoteAnimationDriver` インスタンス。
+    /// `EmoteRichTextView.Coordinator` は `object: EmoteAnimationDriver.shared` で購読する。
     static let emoteFrameDidUpdate = Notification.Name("emoteFrameDidUpdate")
 }
 

@@ -28,7 +28,7 @@ struct GIFFrameSequenceTests {
             frameCount,
             nil
         ) else {
-            return Data()
+            preconditionFailure("CGImageDestinationCreateWithData の作成に失敗した")
         }
 
         // ループ設定（0 = 無限ループ）
@@ -39,20 +39,20 @@ struct GIFFrameSequenceTests {
         for index in 0..<frameCount {
             // フレームごとに色相を変えた 1x1px の単色ビットマップを生成する
             let hue = CGFloat(index) / CGFloat(max(frameCount, 1))
-            guard let cgImage = makeSolidColorCGImage(hue: hue, size: CGSize(width: 1, height: 1)) else {
-                continue
-            }
+            let cgImage = makeSolidColorCGImage(hue: hue, size: CGSize(width: 1, height: 1))
             CGImageDestinationAddImage(destination, cgImage, [
                 kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delaySeconds]
             ] as CFDictionary)
         }
 
-        CGImageDestinationFinalize(destination)
+        guard CGImageDestinationFinalize(destination) else {
+            preconditionFailure("CGImageDestinationFinalize に失敗した")
+        }
         return mutableData as Data
     }
 
     /// 指定した色相の 1x1px ビットマップ CGImage を生成するヘルパー
-    private static func makeSolidColorCGImage(hue: CGFloat, size: CGSize) -> CGImage? {
+    private static func makeSolidColorCGImage(hue: CGFloat, size: CGSize) -> CGImage {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
@@ -62,11 +62,16 @@ struct GIFFrameSequenceTests {
             bytesPerRow: 0,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        ) else {
+            preconditionFailure("CGContext の作成に失敗した")
+        }
         let color = NSColor(hue: hue, saturation: 0.8, brightness: 0.9, alpha: 1.0)
         context.setFillColor(color.cgColor)
         context.fill(CGRect(origin: .zero, size: size))
-        return context.makeImage()
+        guard let image = context.makeImage() else {
+            preconditionFailure("CGContext.makeImage に失敗した")
+        }
+        return image
     }
 
     // MARK: - フレーム数抽出
@@ -87,36 +92,28 @@ struct GIFFrameSequenceTests {
     // MARK: - デュレーション抽出
 
     @Test("GIF の各フレームのデュレーション配列が抽出される")
-    func GIFフレームのデュレーション配列が抽出される() {
+    func GIFフレームのデュレーション配列が抽出される() throws {
         // 前提: フレームデュレーション 0.2 秒の 2フレーム GIF を生成する
         let data = Self.makeAnimatedGIFData(frameCount: 2, delaySeconds: 0.2)
 
         // 実行: GIFFrameSequence を生成する
-        let sequence = GIFFrameSequence(from: data)
+        let seq = try #require(GIFFrameSequence(from: data), "GIFFrameSequence の生成に失敗した")
 
         // 検証: デュレーション配列の要素数が 2 で、各要素が 0.2 秒に近い
-        guard let seq = sequence else {
-            Issue.record("GIFFrameSequence の生成に失敗した")
-            return
-        }
         #expect(seq.durations.count == 2)
         #expect(seq.durations[0] >= 0.19 && seq.durations[0] <= 0.21)
         #expect(seq.durations[1] >= 0.19 && seq.durations[1] <= 0.21)
     }
 
     @Test("全フレームのデュレーション合計が totalDuration に格納される")
-    func 全フレームの合計表示時間が正しく計算される() {
+    func 全フレームの合計表示時間が正しく計算される() throws {
         // 前提: デュレーション 0.1 秒の 4フレーム GIF を生成する（合計 0.4 秒）
         let data = Self.makeAnimatedGIFData(frameCount: 4, delaySeconds: 0.1)
 
         // 実行: GIFFrameSequence を生成する
-        let sequence = GIFFrameSequence(from: data)
+        let seq = try #require(GIFFrameSequence(from: data), "GIFFrameSequence の生成に失敗した")
 
         // 検証: totalDuration が各フレームのデュレーション合計と一致する
-        guard let seq = sequence else {
-            Issue.record("GIFFrameSequence の生成に失敗した")
-            return
-        }
         let expectedTotal = seq.durations.reduce(0, +)
         #expect(abs(seq.totalDuration - expectedTotal) < 0.001)
     }
@@ -151,13 +148,10 @@ struct GIFFrameSequenceTests {
 
     @Test("PNG データ（GIF でない）は nil を返す")
     func PNGデータはnilを返す() {
-        // 前提: 1x1px の PNG データを生成する
-        let image = NSImage(size: NSSize(width: 1, height: 1))
-        image.lockFocus()
-        NSColor.red.drawSwatch(in: NSRect(x: 0, y: 0, width: 1, height: 1))
-        image.unlockFocus()
-        let rep = image.representations.first as? NSBitmapImageRep
-        let data = rep?.representation(using: .png, properties: [:]) ?? Data()
+        // 前提: 1x1px の PNG データを CGContext で生成する（lockFocus は描画コンテキストが必要なため使用しない）
+        let cgImage = Self.makeSolidColorCGImage(hue: 0.0, size: CGSize(width: 1, height: 1))
+        let rep = NSBitmapImageRep(cgImage: cgImage)
+        let data = rep.representation(using: .png, properties: [:]) ?? Data()
 
         // 実行: GIFFrameSequence を生成する
         let sequence = GIFFrameSequence(from: data)
@@ -169,18 +163,14 @@ struct GIFFrameSequenceTests {
     // MARK: - フレーム画像サイズ
 
     @Test("抽出されたフレーム画像の NSImage.size が emoteDisplaySize に設定される")
-    func フレーム画像のサイズがemoteDisplaySizeに設定される() {
+    func フレーム画像のサイズがemoteDisplaySizeに設定される() throws {
         // 前提: 3フレームの GIF データを生成する
         let data = Self.makeAnimatedGIFData(frameCount: 3)
 
         // 実行: GIFFrameSequence を生成する
-        let sequence = GIFFrameSequence(from: data)
+        let seq = try #require(GIFFrameSequence(from: data), "GIFFrameSequence の生成に失敗した")
 
         // 検証: 各フレームの NSImage.size が emoteDisplaySize × emoteDisplaySize
-        guard let seq = sequence else {
-            Issue.record("GIFFrameSequence の生成に失敗した")
-            return
-        }
         let expectedSize = EmoteImageCache.emoteDisplaySize
         for (index, frame) in seq.frames.enumerated() {
             #expect(frame.size.width == expectedSize, "フレーム \(index) の幅が一致しない")

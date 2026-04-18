@@ -152,7 +152,11 @@ struct EmoteRichTextView: NSViewRepresentable {
 
         deinit {
             if let observer = frameUpdateObserver {
-                NotificationCenter.default.removeObserver(observer)
+                // deinit は非 MainActor コンテキストから呼ばれる場合があるため
+                // NotificationCenter の解除処理をメインスレッドで非同期実行する
+                DispatchQueue.main.async {
+                    NotificationCenter.default.removeObserver(observer)
+                }
             }
         }
 
@@ -163,7 +167,7 @@ struct EmoteRichTextView: NSViewRepresentable {
         func subscribeToFrameUpdates(textView: NSTextView) {
             frameUpdateObserver = NotificationCenter.default.addObserver(
                 forName: .emoteFrameDidUpdate,
-                object: nil,
+                object: EmoteAnimationDriver.shared,
                 queue: .main
             ) { [weak textView] _ in
                 guard let textView,

@@ -38,7 +38,9 @@ struct EmoteAnimationDriverTests {
             ] as CFDictionary)
         }
 
-        CGImageDestinationFinalize(destination)
+        guard CGImageDestinationFinalize(destination) else {
+            preconditionFailure("CGImageDestinationFinalize に失敗した")
+        }
         return mutableData as Data
     }
 
@@ -57,13 +59,6 @@ struct EmoteAnimationDriverTests {
         context.setFillColor(color.cgColor)
         context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
         return context.makeImage()
-    }
-
-    /// テスト用のダミー EmoteTextAttachment を生成する（アニメーション版・ドライバー未登録）
-    @MainActor
-    private static func makeTestAttachment(emoteId: String = "テストエモートID_\(UUID())") -> EmoteTextAttachment {
-        // ドライバーへの自動登録を避けるため、gifData キャッシュは空のまま使用する
-        return EmoteTextAttachment(image: NSImage(), emoteName: "テストエモート", emoteId: emoteId)
     }
 
     // MARK: - タイマー開始/停止
@@ -89,6 +84,7 @@ struct EmoteAnimationDriverTests {
 
         // クリーンアップ
         driver.unregister(attachment)
+        EmoteImageCache.shared.clearForTesting()
     }
 
     @Test("全アタッチメントを解除するとタイマーが停止する")
@@ -108,6 +104,9 @@ struct EmoteAnimationDriverTests {
 
         // 検証: タイマーが停止している
         #expect(!driver.isTimerActive)
+
+        // クリーンアップ
+        EmoteImageCache.shared.clearForTesting()
     }
 
     @Test("gifData がないアタッチメントを登録してもタイマーは起動しない")
@@ -118,11 +117,14 @@ struct EmoteAnimationDriverTests {
         let emoteId = "gifDataなしエモート_\(UUID())"
         let attachment = EmoteTextAttachment(image: NSImage(), emoteName: "テストエモート", emoteId: emoteId)
 
-        // 実行: 登録する
+        // 実行: 登録する（GIF データなしのため内部的には登録されない）
         driver.register(attachment)
 
         // 検証: GIF データがないためフレームシーケンスを構築できず、タイマーは起動しない
         #expect(!driver.isTimerActive)
+
+        // クリーンアップ（登録失敗しているが念のため解除を試みる）
+        driver.unregister(attachment)
     }
 
     // MARK: - フレーム更新
@@ -138,18 +140,18 @@ struct EmoteAnimationDriverTests {
 
         let attachment = EmoteTextAttachment(image: NSImage(), emoteName: "テストエモート", emoteId: emoteId)
         driver.register(attachment)
-        let initialImage = attachment.image
 
-        // 実行: totalDuration 以上の時間を進めて全フレームを一周させる
-        driver.tickForTesting(elapsed: 0.16)
+        // 実行: フレーム 1 に切り替わる経過時間（0.05s 以上 0.10s 未満）で tick を呼ぶ
+        driver.tickForTesting(elapsed: 0.06)
 
-        // 検証: image が更新されている（フレームが切り替わっている）
-        // 3フレーム * 0.05s = 0.15s で一周するため、0.16s 進めると最初のフレームに戻る
-        // いずれかのフレームに更新されていれば十分
-        #expect(driver.isTimerActive)
+        // 検証: フレームインデックスが 1 に更新されている
+        #expect(attachment.currentFrameIndex == 1)
+        // 検証: image がフレームシーケンスのフレーム画像に更新されている（初期の NSImage() から変わっている）
+        #expect(attachment.image != nil)
 
         // クリーンアップ
         driver.unregister(attachment)
+        EmoteImageCache.shared.clearForTesting()
     }
 
     @Test("フレームインデックスが変わらない場合は image を更新しない")
@@ -176,6 +178,7 @@ struct EmoteAnimationDriverTests {
         #expect(imageAfterFirstTick === imageAfterSecondTick)
 
         driver.unregister(attachment)
+        EmoteImageCache.shared.clearForTesting()
     }
 
     // MARK: - 同一エモートのフレーム共有
@@ -202,5 +205,6 @@ struct EmoteAnimationDriverTests {
 
         driver.unregister(attachment1)
         driver.unregister(attachment2)
+        EmoteImageCache.shared.clearForTesting()
     }
 }
