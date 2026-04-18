@@ -107,9 +107,17 @@ struct EmoteRichTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        // 縦方向のみ拡張
-        textView.isVerticallyResizable = true
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        // 縦方向は固定（1行固定高さ）、テキストコンテナの高さをビュー高さに追従させる
+        textView.isVerticallyResizable = false
+        textView.textContainer?.heightTracksTextView = true
+        // TextKit の標準行高とインライン emote の高さを考慮してインセットを計算し縦方向に中央揃えにする
+        // ChatInputBar.inputFieldHeight（contentHeight + 6）と連動しているため、この計算式を変更する場合は両方を更新すること
+        let font = textView.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let defaultLineHeight = textView.layoutManager?.defaultLineHeight(for: font) ?? font.boundingRectForFont.height
+        let contentHeight = ceil(max(defaultLineHeight, EmoteImageCache.emoteDisplaySize))
+        let fieldHeight = contentHeight + 6  // 上下インセット各 3pt（inputFieldHeight と一致）
+        let verticalInset = max(0, floor((fieldHeight - contentHeight) / 2))
+        textView.textContainerInset = NSSize(width: 0, height: verticalInset)
     }
 
     // MARK: - プレーンテキスト変換
@@ -231,16 +239,13 @@ struct EmoteRichTextView: NSViewRepresentable {
             }
         }
 
-        /// Enter キーで送信、Shift+Enter で改行
+        /// Enter / Shift+Enter で送信
+        ///
+        /// - Note: 入力欄は1行固定高さのため、Shift+Enter による改行挿入は無効化している。
+        ///   改行を挿入しても表示領域外にクリップされるだけで混乱を招くため、両キーで送信する。
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                let shiftPressed = NSEvent.modifierFlags.contains(.shift)
-                if shiftPressed {
-                    // Shift+Enter は改行を挿入
-                    textView.insertNewlineIgnoringFieldEditor(nil)
-                    return true
-                }
-                // Enter のみで送信
+                // Enter / Shift+Enter いずれも送信（1行固定のため改行を許可しない）
                 onSubmit()
                 return true
             }

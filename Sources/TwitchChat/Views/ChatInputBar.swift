@@ -2,6 +2,7 @@
 // コメント投稿用入力バー
 // テキスト入力・文字数カウント・送信ボタン・認証状態に応じた UI 切り替えを担当する
 
+import AppKit
 import SwiftUI
 
 /// コメント投稿用入力バー
@@ -117,13 +118,15 @@ struct ChatInputBar: View {
 
     /// テキスト入力フォーム
     private var inputForm: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            // エモートピッカーボタン
+        HStack(alignment: .bottom, spacing: 6) {
+            // エモートピッカーボタン（丸い円形ボタン）
             Button {
                 showEmotePicker.toggle()
             } label: {
                 Image(systemName: "face.smiling")
-                    .frame(width: 16, height: 16)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .modifier(CircularIconBackground(backgroundColor: Color(.controlBackgroundColor)))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("エモートピッカーを開く")
@@ -135,51 +138,66 @@ struct ChatInputBar: View {
             }
             .disabled(!viewModel.canSendMessage)
 
-            VStack(alignment: .trailing, spacing: 2) {
-                // リッチテキスト入力欄（エモートをインライン画像で表示）
-                EmoteRichTextView(
-                    draft: $draft,
-                    emoteStore: viewModel.emoteStore,
-                    onSubmit: submit,
-                    isDisabled: !viewModel.canSendMessage
-                )
-                .frame(minHeight: 28, maxHeight: 100)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(.textBackgroundColor))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color(.separatorColor), lineWidth: 0.5)
-                        )
-                )
-
-                // 文字数カウンタ（450 文字超で警告）
+            // リッチテキスト入力欄（カプセル型）
+            EmoteRichTextView(
+                draft: $draft,
+                emoteStore: viewModel.emoteStore,
+                onSubmit: submit,
+                isDisabled: !viewModel.canSendMessage
+            )
+            .frame(height: Self.inputFieldHeight)
+            .padding(.leading, 14)
+            // 文字数カウンタ（幅 約 50pt）が表示中は trailing に余白を確保して重なりを防ぐ
+            .padding(.trailing, draft.isEmpty ? 14 : 60)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Color(.textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(Color(.separatorColor), lineWidth: 0.5)
+                    )
+            )
+            // 文字数カウンタ（450 文字超で警告、入力フィールド内右下に表示）
+            .overlay(alignment: .bottomTrailing) {
                 if !draft.isEmpty {
                     Text("\(draft.count)/500")
                         .font(.caption2)
                         .foregroundStyle(counterColor)
                         .monospacedDigit()
+                        .padding(.trailing, 10)
+                        .padding(.bottom, 4)
                 }
             }
 
-            // 送信ボタン
+            // 送信ボタン（丸い円形ボタン）
             Button(action: submit) {
                 if viewModel.isSending {
                     ProgressView()
                         .controlSize(.small)
-                        .frame(width: 16, height: 16)
+                        .modifier(CircularIconBackground(backgroundColor: Color(.controlBackgroundColor)))
                 } else {
                     Image(systemName: "paperplane.fill")
-                        .frame(width: 16, height: 16)
+                        .font(.system(size: 13))
+                        .foregroundStyle(canSubmit ? .white : .secondary)
+                        .modifier(CircularIconBackground(
+                            backgroundColor: canSubmit ? Color.accentColor : Color(.controlBackgroundColor),
+                            showBorder: !canSubmit
+                        ))
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
             .disabled(!canSubmit)
+            .accessibilityLabel("送信")
+            .accessibilityValue(viewModel.isSending ? "送信中" : (canSubmit ? "" : "無効"))
+            .accessibilityHint(
+                viewModel.isSending
+                    ? "コメントを送信しています"
+                    : (canSubmit ? "コメントを送信します" : "コメントを送信できません。入力内容または接続状態を確認してください")
+            )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
         // 送信エラー表示
         .overlay(alignment: .topLeading) {
             if let error = viewModel.sendError {
@@ -199,6 +217,19 @@ struct ChatInputBar: View {
     }
 
     // MARK: - ヘルパー
+
+    /// TextKit のデフォルト行高とインライン emote の高さを考慮した1行分の入力フィールド高さを計算する
+    ///
+    /// - `NSLayoutManager.defaultLineHeight` を使用して leading を含む実際の行高を取得する
+    /// - インライン emote（`EmoteImageCache.emoteDisplaySize` = 20pt）がテキスト行高を超える場合は emote 高さを優先する
+    /// - 上下インセット各 3pt を加算した値。EmoteRichTextView の textContainerInset（verticalInset）と連動する
+    private static let inputFieldHeight: CGFloat = {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let layoutManager = NSLayoutManager()
+        let lineHeight = ceil(layoutManager.defaultLineHeight(for: font))
+        let contentHeight = max(lineHeight, EmoteImageCache.emoteDisplaySize)
+        return contentHeight + 6  // 上下インセット各 3pt
+    }()
 
     /// 接続中かどうか（入力フォームの表示判定用）
     private var isConnected: Bool {
@@ -242,5 +273,28 @@ struct ChatInputBar: View {
         Task {
             try? await viewModel.sendMessage(text)
         }
+    }
+}
+
+// MARK: - CircularIconBackground
+
+/// 円形背景付きアイコンのスタイルを適用する ViewModifier
+///
+/// エモートピッカーボタン・送信ボタンに共通して使用する 28×28pt の円形スタイルを提供する。
+private struct CircularIconBackground: ViewModifier {
+    /// 背景の塗りつぶし色
+    var backgroundColor: Color
+    /// 境界線を表示するかどうか
+    var showBorder: Bool = true
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(backgroundColor))
+            .overlay {
+                if showBorder {
+                    Circle().stroke(Color(.separatorColor), lineWidth: 0.5)
+                }
+            }
     }
 }
