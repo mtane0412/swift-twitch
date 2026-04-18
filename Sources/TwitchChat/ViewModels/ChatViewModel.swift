@@ -351,7 +351,7 @@ final class ChatViewModel {
 
         let parsed = try ChatCommandParser.parse(sanitized)
 
-        // 未知のコマンドは早期エラー（IRC 送信しない）
+        // 未知のコマンドは送信処理に入らず即エラー
         if case .unknownCommand(let name) = parsed {
             let error = ChatSendError.unknownCommand(name)
             sendError = error.errorDescription
@@ -404,7 +404,7 @@ final class ChatViewModel {
             }
 
         case .unknownCommand:
-            // このケースは上で早期リターン済みのため到達しない
+            // guard で事前に弾いているが exhaustive のために保持する
             break
         }
     }

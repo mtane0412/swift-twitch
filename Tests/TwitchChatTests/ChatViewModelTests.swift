@@ -582,11 +582,18 @@ struct ChatViewModelTests {
         return ChatMessage(from: ircMessage)!
     }
 
-    /// chat:edit スコープ付きでログイン済みの AuthState を生成するヘルパー
+    /// 指定スコープ付きでログイン済みの AuthState を生成するヘルパー
     ///
     /// MockTwitchAuthClient を使って Device Code Flow をシミュレートし、
-    /// authState.login() でログイン済み状態（grantedScopes に chat:edit あり）にする
-    private func makeLoggedInAuthState(userLogin: String) async throws -> AuthState {
+    /// authState.login() でログイン済み状態にする
+    ///
+    /// - Parameters:
+    ///   - userLogin: ログインユーザー名
+    ///   - scopes: 付与する OAuth スコープ（デフォルト: chat:read, chat:edit）
+    private func makeLoggedInAuthState(
+        userLogin: String,
+        scopes: [String] = ["chat:read", "chat:edit"]
+    ) async throws -> AuthState {
         let store = KeychainStore(service: "test.\(UUID().uuidString)")
         let mockAuthClient = MockTwitchAuthClient(
             deviceCodeResponse: TwitchDeviceCodeResponse(
@@ -601,13 +608,13 @@ struct ChatViewModelTests {
                 refreshToken: "テスト用リフレッシュトークン",
                 expiresIn: 14400,
                 tokenType: "bearer",
-                scope: ["chat:read", "chat:edit"]
+                scope: scopes
             ),
             validateResponse: TwitchValidateResponse(
                 clientId: "testclientid",
                 login: userLogin,
                 userId: "12345",
-                scopes: ["chat:read", "chat:edit"],
+                scopes: scopes,
                 expiresIn: 14400
             )
         )
@@ -1010,38 +1017,15 @@ struct ChatViewModelTests {
     }
 
     /// channel:moderate スコープ付きでログイン済み・接続済みの ChatViewModel を返すヘルパー
+    /// channel:moderate スコープ付きでログイン済み・接続済みの ChatViewModel を返すヘルパー
+    ///
+    /// makeLoggedInAuthState を channel:moderate スコープ付きで呼び出して AuthState を生成する。
     private func makeConnectedViewModelWithModerationScope(userLogin: String) async throws -> (ChatViewModel, MockTwitchIRCClient) {
         let mockClient = MockTwitchIRCClient()
-        let store = KeychainStore(service: "test.\(UUID().uuidString)")
-        let mockAuthClient = MockTwitchAuthClient(
-            deviceCodeResponse: TwitchDeviceCodeResponse(
-                deviceCode: "モデレーターテスト用デバイスコード",
-                userCode: "MOD-1234",
-                verificationUri: "https://www.twitch.tv/activate",
-                expiresIn: 1800,
-                interval: 0
-            ),
-            tokenResponse: TwitchTokenResponse(
-                accessToken: "モデレーターテスト用アクセストークン",
-                refreshToken: "モデレーターテスト用リフレッシュトークン",
-                expiresIn: 14400,
-                tokenType: "bearer",
-                scope: ["chat:read", "chat:edit", "channel:moderate"]
-            ),
-            validateResponse: TwitchValidateResponse(
-                clientId: "testclientid",
-                login: userLogin,
-                userId: "67890",
-                scopes: ["chat:read", "chat:edit", "channel:moderate"],
-                expiresIn: 14400
-            )
+        let authState = try await makeLoggedInAuthState(
+            userLogin: userLogin,
+            scopes: ["chat:read", "chat:edit", "channel:moderate"]
         )
-        let authState = AuthState(
-            authClient: mockAuthClient,
-            keychainStore: store,
-            openURL: { _ in }
-        )
-        await authState.login()
         let viewModel = ChatViewModel(ircClient: mockClient, authState: authState)
         await viewModel.connect(to: "テストチャンネル")
         try await Task.sleep(nanoseconds: 50_000_000)

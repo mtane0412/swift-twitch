@@ -91,12 +91,21 @@ enum ChatCommandParser {
         // 先頭のスラッシュを除いた文字列でスペース分割する
         let withoutSlash = String(sanitized.dropFirst())
         let parts = withoutSlash.split(separator: " ", omittingEmptySubsequences: true)
-        let commandName = parts.first.map { String($0).lowercased() } ?? ""
+
+        // "/" のみの入力（コマンド名なし）は通常メッセージとして扱う
+        guard let firstPart = parts.first else {
+            return .message(sanitized)
+        }
+
+        let commandName = String(firstPart).lowercased()
         let args = parts.dropFirst()
 
         // /me コマンド
         if commandName == "me" {
-            let body = args.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            // args.joined() ではなく withoutSlash からコマンド部分を除去して
+            // ユーザーが入力した内部スペースを保持する
+            let afterCommand = String(withoutSlash.dropFirst(commandName.count))
+            let body = afterCommand.trimmingCharacters(in: .whitespaces)
             guard !body.isEmpty else { throw ChatSendError.empty }
             return .me(body: body)
         }

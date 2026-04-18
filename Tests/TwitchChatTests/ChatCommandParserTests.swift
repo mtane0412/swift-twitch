@@ -23,10 +23,24 @@ struct ChatCommandParserTests {
         #expect(result == .message("hello world"))
     }
 
+    @Test("空文字列は .message として解析される（空チェックは呼び出し元の責務）")
+    func emptyStringReturnsMessage() throws {
+        // 空文字列はコマンドとして解釈されない（呼び出し元の ChatViewModel が空チェックする）
+        let result = try ChatCommandParser.parse("")
+        #expect(result == .message(""))
+    }
+
     @Test("空白のみの入力は .message として解析される（空チェックは呼び出し元の責務）")
     func whitespaceTextReturnsMessage() throws {
         let result = try ChatCommandParser.parse("  ")
         #expect(result == .message("  "))
+    }
+
+    @Test("スラッシュのみの入力は .message として解析される")
+    func singleSlashReturnsMessage() throws {
+        // コマンド名がない "/" は通常メッセージとして扱う
+        let result = try ChatCommandParser.parse("/")
+        #expect(result == .message("/"))
     }
 
     // MARK: - /me コマンド
@@ -120,6 +134,13 @@ struct ChatCommandParserTests {
     func untimeoutCommandReturnsModerationCommand() throws {
         let result = try ChatCommandParser.parse("/untimeout 解除ユーザー")
         #expect(result == .moderationCommand(name: "untimeout", ircText: "/untimeout 解除ユーザー"))
+    }
+
+    @Test("/untimeout 引数なしは ChatSendError.missingArguments を throw する")
+    func untimeoutCommandWithoutArgumentsThrows() {
+        #expect(throws: ChatSendError.missingArguments(command: "untimeout", expected: "/untimeout <ユーザー名>")) {
+            try ChatCommandParser.parse("/untimeout")
+        }
     }
 
     @Test("/delete メッセージID は .moderationCommand として解析される")
