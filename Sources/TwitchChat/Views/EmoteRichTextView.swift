@@ -30,6 +30,9 @@ struct EmoteRichTextView: NSViewRepresentable {
     /// @メンション補完の状態管理 ViewModel
     var mentionCompletionViewModel: MentionCompletionViewModel
 
+    /// / スラッシュコマンド補完の状態管理 ViewModel
+    var slashCommandCompletionViewModel: SlashCommandCompletionViewModel
+
     // MARK: - NSViewRepresentable
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -81,7 +84,13 @@ struct EmoteRichTextView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit, mentionCompletionViewModel: mentionCompletionViewModel)
+        Coordinator(
+            draft: $draft,
+            emoteStore: emoteStore,
+            onSubmit: onSubmit,
+            mentionCompletionViewModel: mentionCompletionViewModel,
+            slashCommandCompletionViewModel: slashCommandCompletionViewModel
+        )
     }
 
     /// ビュー破棄前に呼ばれるクリーンアップ（@MainActor 上で実行される）
@@ -267,6 +276,7 @@ struct EmoteRichTextView: NSViewRepresentable {
         let emoteStore: EmoteStore
         let onSubmit: () -> Void
         let mentionCompletionViewModel: MentionCompletionViewModel
+        let slashCommandCompletionViewModel: SlashCommandCompletionViewModel
 
         /// binding 側からのリセット中フラグ（無限ループ防止）
         var isUpdatingFromBinding = false
@@ -277,11 +287,12 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// `nonisolated(unsafe)` は不要。プロパティは常に MainActor 上でアクセスされる。
         private var frameUpdateObserver: NSObjectProtocol?
 
-        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void, mentionCompletionViewModel: MentionCompletionViewModel) {
+        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void, mentionCompletionViewModel: MentionCompletionViewModel, slashCommandCompletionViewModel: SlashCommandCompletionViewModel) {
             self._draft = draft
             self.emoteStore = emoteStore
             self.onSubmit = onSubmit
             self.mentionCompletionViewModel = mentionCompletionViewModel
+            self.slashCommandCompletionViewModel = slashCommandCompletionViewModel
         }
 
         /// アニメーションフレーム更新通知を購読し、textView に再描画を要求する
@@ -356,14 +367,22 @@ struct EmoteRichTextView: NSViewRepresentable {
                 draft = plain
             }
 
-            // @メンション補完の候補を更新する
             // NSTextView の UTF-16 カーソル位置を plainText の文字数インデックスに変換して渡す
             let nsViewOffset = textView.selectedRange().location
             let plainCursorPosition = EmoteRichTextView.plainTextCursorPosition(
                 from: nsViewOffset,
                 in: textView.attributedString()
             )
-            mentionCompletionViewModel.updateFromText(plain, cursorPosition: plainCursorPosition)
+
+            // スラッシュコマンド補完を先に更新する（テキスト先頭 / の場合のみアクティブ化）
+            slashCommandCompletionViewModel.updateFromText(plain, cursorPosition: plainCursorPosition)
+
+            // スラッシュ補完がアクティブな場合はメンション補完をスキップする（排他制御）
+            if !slashCommandCompletionViewModel.isActive {
+                mentionCompletionViewModel.updateFromText(plain, cursorPosition: plainCursorPosition)
+            } else {
+                mentionCompletionViewModel.cancel()
+            }
         }
 
         /// Enter / Shift+Enter で送信、補完アクティブ時は上下キー・Esc も処理する
@@ -371,7 +390,37 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// - Note: 入力欄は1行固定高さのため、Shift+Enter による改行挿入は無効化している。
         ///   改行を挿入しても表示領域外にクリップされるだけで混乱を招くため、両キーで送信する。
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            // 補完アクティブ中のキーハンドリング
+            // スラッシュコマンド補完アクティブ中のキーハンドリング（優先度: メンション補完より高い）
+            if slashCommandCompletionViewModel.isActive {
+                if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                    slashCommandCompletionViewModel.moveSelection(by: -1)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                    slashCommandCompletionViewModel.moveSelection(by: 1)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                    slashCommandCompletionViewModel.cancel()
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.insertNewline(_:))
+                    || commandSelector == #selector(NSResponder.insertTab(_:)) {
+                    // Enter / Tab: 候補確定
+                    // confirmSelection() は内部で commandRange を nil にリセットするため、先に取得しておく
+                    let range = slashCommandCompletionViewModel.commandRange
+                    let insertion = slashCommandCompletionViewModel.confirmSelection()
+                    if let insertion, let range {
+                        replaceSlashCommandToken(with: insertion, range: range, in: textView)
+                    } else {
+                        slashCommandCompletionViewModel.cancel()
+                        onSubmit()
+                    }
+                    return true
+                }
+            }
+
+            // @メンション補完アクティブ中のキーハンドリング
             if mentionCompletionViewModel.isActive {
                 if commandSelector == #selector(NSResponder.moveUp(_:)) {
                     // 上キー: 前の候補に移動
@@ -412,6 +461,27 @@ struct EmoteRichTextView: NSViewRepresentable {
                 return true
             }
             return false
+        }
+
+        /// / スラッシュコマンドトークンを補完候補で置換し draft を更新する
+        ///
+        /// - Parameters:
+        ///   - insertion: 挿入する文字列（`/command ` 形式）
+        ///   - range: テキスト内の置換対象範囲（/ から現在クエリ末尾まで）
+        ///   - textView: 対象の NSTextView
+        private func replaceSlashCommandToken(with insertion: String, range: NSRange, in textView: NSTextView) {
+            let nsRange = EmoteRichTextView.nsViewRange(from: range, in: textView.attributedString())
+            let nsString = textView.string as NSString
+            guard nsRange.location <= nsString.length,
+                  nsRange.location + nsRange.length <= nsString.length else { return }
+
+            isUpdatingFromBinding = true
+            textView.insertText(insertion, replacementRange: nsRange)
+
+            let plain = EmoteRichTextView.plainText(from: textView.attributedString())
+            if draft != plain {
+                draft = plain
+            }
         }
 
         /// @メンショントークンを補完候補で置換し draft を更新する

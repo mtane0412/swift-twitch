@@ -26,11 +26,17 @@ struct ChatInputBar: View {
     /// `@State` プロパティは init 引数で初期値を設定することで不要な再作成を防ぐ。
     @State private var mentionCompletionVM: MentionCompletionViewModel
 
+    /// / スラッシュコマンド補完の状態管理 ViewModel
+    @State private var slashCommandCompletionVM: SlashCommandCompletionViewModel
+
     init(viewModel: ChatViewModel, authState: AuthState) {
         self.viewModel = viewModel
         self.authState = authState
         self._mentionCompletionVM = State(
             initialValue: MentionCompletionViewModel(mentionStore: viewModel.mentionStore)
+        )
+        self._slashCommandCompletionVM = State(
+            initialValue: SlashCommandCompletionViewModel()
         )
     }
 
@@ -158,7 +164,8 @@ struct ChatInputBar: View {
                 emoteStore: viewModel.emoteStore,
                 onSubmit: submit,
                 isDisabled: !viewModel.canSendMessage,
-                mentionCompletionViewModel: mentionCompletionVM
+                mentionCompletionViewModel: mentionCompletionVM,
+                slashCommandCompletionViewModel: slashCommandCompletionVM
             )
             .frame(height: Self.inputFieldHeight)
             .padding(.leading, 14)
@@ -227,6 +234,22 @@ struct ChatInputBar: View {
                         viewModel.clearSendError()
                     }
                     .id(error)
+            }
+        }
+        // / スラッシュコマンド補完ドロップダウン（入力バーの上に表示、@メンション補完と排他的）
+        .overlay(alignment: .top) {
+            if slashCommandCompletionVM.isActive && !slashCommandCompletionVM.candidates.isEmpty {
+                SlashCommandCompletionView(
+                    candidates: slashCommandCompletionVM.candidates,
+                    selectedIndex: slashCommandCompletionVM.selectedIndex
+                ) { index in
+                    confirmSlashCommandCandidate(at: index)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .offset(y: -min(
+                    CGFloat(slashCommandCompletionVM.candidates.count),
+                    CGFloat(SlashCommandCompletionView.maxVisibleRows)
+                ) * SlashCommandCompletionView.rowHeight)
             }
         }
         // @メンション補完ドロップダウン（入力バーの上に表示）
@@ -303,6 +326,24 @@ struct ChatInputBar: View {
         draft = ""
         Task {
             try? await viewModel.sendMessage(text)
+        }
+    }
+
+    /// クリックで / スラッシュコマンド候補を選択確定する
+    ///
+    /// - Parameter index: 選択した候補のインデックス
+    private func confirmSlashCommandCandidate(at index: Int) {
+        slashCommandCompletionVM.setSelection(to: index)
+        // commandRange は confirmSelection() の前に取得する（確定後に nil になるため）
+        let range = slashCommandCompletionVM.commandRange
+        guard let insertion = slashCommandCompletionVM.confirmSelection() else { return }
+
+        // draft の / トークン部分を挿入文字列で置換する
+        if let range {
+            let nsString = draft as NSString
+            draft = nsString.replacingCharacters(in: range, with: insertion)
+        } else {
+            draft += insertion
         }
     }
 
