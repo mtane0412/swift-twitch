@@ -117,6 +117,52 @@ actor EmoteStore {
         (channelEmotes + globalEmotes).first(where: { $0.name == name })
     }
 
+    /// テキスト内のエモート名を検索し、EmotePosition 配列を返す
+    ///
+    /// テキストをスペース区切りのトークンに分割し、既知のエモート名と一致するものを
+    /// `EmotePosition` に変換して返す。楽観的 UI メッセージのエモート表示に使用する。
+    ///
+    /// - Note: 位置は UTF-16 コードユニットベースのオフセット（Twitch IRC の emotes タグと同形式）
+    /// - Parameter text: 検索対象のメッセージテキスト
+    /// - Returns: 検出されたエモートの位置情報（startIndex 昇順）
+    func emotePositions(in text: String) -> [EmotePosition] {
+        guard !text.isEmpty else { return [] }
+        let allEmotes = channelEmotes + globalEmotes
+        guard !allEmotes.isEmpty else { return [] }
+
+        var positions: [EmotePosition] = []
+        var utf16Cursor = 0
+        var stringIndex = text.startIndex
+
+        while stringIndex < text.endIndex {
+            // 次のスペースまでのトークン範囲を取り出す
+            let spaceIndex = text[stringIndex...].firstIndex(of: " ")
+            let tokenEnd = spaceIndex ?? text.endIndex
+            let token = String(text[stringIndex..<tokenEnd])
+            let tokenUtf16Length = token.utf16.count
+
+            if !token.isEmpty, let emote = allEmotes.first(where: { $0.name == token }) {
+                positions.append(EmotePosition(
+                    emoteId: emote.id,
+                    startIndex: utf16Cursor,
+                    endIndex: utf16Cursor + tokenUtf16Length - 1
+                ))
+            }
+
+            utf16Cursor += tokenUtf16Length
+
+            if let spaceIdx = spaceIndex {
+                // スペース1文字分を加算して次のトークン先頭へ移動
+                utf16Cursor += 1
+                stringIndex = text.index(after: spaceIdx)
+            } else {
+                break
+            }
+        }
+
+        return positions.sorted { $0.startIndex < $1.startIndex }
+    }
+
     /// ピッカー用エモート一覧を返す
     ///
     /// チャンネルエモートを先頭に、グローバルエモートをその後に並べて返す。

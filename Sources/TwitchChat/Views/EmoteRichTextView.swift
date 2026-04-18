@@ -58,7 +58,6 @@ struct EmoteRichTextView: NSViewRepresentable {
 
     private func configureTextView(_ textView: NSTextView, coordinator: Coordinator) {
         textView.delegate = coordinator
-        textView.isRichText = false
         textView.isEditable = true
         textView.isSelectable = true
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)

@@ -204,4 +204,73 @@ struct EmoteStoreTests {
         let result = await store.emote(byName: "存在しないエモート")
         #expect(result == nil)
     }
+
+    // MARK: - テキスト内エモート位置解決
+
+    @Test("emotePositions(in:) でテキスト先頭のエモートを検出できる")
+    func testEmotePositionsAtStart() async {
+        // 前提: "LUL こんにちは" — LUL は先頭（UTF-16 オフセット 0〜2）
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートLUL])
+
+        let positions = await store.emotePositions(in: "LUL こんにちは")
+
+        #expect(positions.count == 1)
+        #expect(positions.first?.emoteId == "425618")
+        #expect(positions.first?.startIndex == 0)
+        #expect(positions.first?.endIndex == 2) // "LUL" は 3 文字 → 0〜2 (inclusive)
+    }
+
+    @Test("emotePositions(in:) でテキスト中間のエモートを検出できる")
+    func testEmotePositionsInMiddle() async {
+        // 前提: "Hello PogChamp World" — PogChamp は 6 文字目から（UTF-16 オフセット 6〜13）
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートPogChamp])
+
+        let positions = await store.emotePositions(in: "Hello PogChamp World")
+
+        #expect(positions.count == 1)
+        #expect(positions.first?.emoteId == "305954156")
+        #expect(positions.first?.startIndex == 6)
+        #expect(positions.first?.endIndex == 13) // "PogChamp" は 8 文字 → 6〜13 (inclusive)
+    }
+
+    @Test("emotePositions(in:) で複数エモートをすべて検出できる")
+    func testEmotePositionsMultiple() async {
+        // 前提: "LUL PogChamp" — LUL は 0〜2、PogChamp は 4〜11
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートLUL, .グローバルエモートPogChamp])
+
+        let positions = await store.emotePositions(in: "LUL PogChamp")
+
+        #expect(positions.count == 2)
+        #expect(positions[0].emoteId == "425618")
+        #expect(positions[0].startIndex == 0)
+        #expect(positions[0].endIndex == 2)
+        #expect(positions[1].emoteId == "305954156")
+        #expect(positions[1].startIndex == 4)
+        #expect(positions[1].endIndex == 11)
+    }
+
+    @Test("emotePositions(in:) でエモートが含まれないテキストは空配列を返す")
+    func testEmotePositionsNoEmotes() async {
+        // 前提: エモートが含まれない通常テキスト
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートLUL])
+
+        let positions = await store.emotePositions(in: "こんにちは、世界！")
+
+        #expect(positions.isEmpty)
+    }
+
+    @Test("emotePositions(in:) で空文字列は空配列を返す")
+    func testEmotePositionsEmptyString() async {
+        // 前提: 空文字列
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートLUL])
+
+        let positions = await store.emotePositions(in: "")
+
+        #expect(positions.isEmpty)
+    }
 }

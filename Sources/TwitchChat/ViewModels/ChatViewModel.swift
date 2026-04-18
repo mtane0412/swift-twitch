@@ -352,7 +352,7 @@ final class ChatViewModel {
         do {
             try await ircClient.sendPrivmsg(ircText, replyTo: parentMsgId)
             replyingTo = nil
-            appendOptimisticMessage(displayText: displayText, isAction: isAction, parentMsgId: parentMsgId)
+            await appendOptimisticMessage(displayText: displayText, isAction: isAction, parentMsgId: parentMsgId)
         } catch TwitchIRCClientError.rateLimited(let retryAfter) {
             // クライアント側レートリミットエラーを ChatSendError に変換して上位に伝える
             let sendError = ChatSendError.clientRateLimited(retryAfter: retryAfter)
@@ -391,8 +391,11 @@ final class ChatViewModel {
     /// 楽観的 UI メッセージを生成して追加する
     ///
     /// 送信直後に自分のメッセージをローカルで表示するために使用する。
-    private func appendOptimisticMessage(displayText: String, isAction: Bool, parentMsgId: String?) {
+    /// EmoteStore でエモート位置を解決し、エモート画像をインライン表示できるようにする。
+    private func appendOptimisticMessage(displayText: String, isAction: Bool, parentMsgId: String?) async {
         guard case .loggedIn(let login) = authState.status else { return }
+        // EmoteStore でテキスト内のエモート名を解決してエモート位置を取得する
+        let resolvedEmotePositions = await emoteStore.emotePositions(in: displayText)
         // USERSTATE 受信済みなら displayName / colorHex / badges に反映する
         let localMessage = ChatMessage(
             localUsername: login,
@@ -402,7 +405,8 @@ final class ChatViewModel {
             roomId: currentRoomId,
             colorHex: currentUserState?.colorHex,
             badges: currentUserState?.badges ?? [],
-            replyParentMsgId: parentMsgId
+            replyParentMsgId: parentMsgId,
+            emotePositions: resolvedEmotePositions
         )
         appendMessage(localMessage)
         // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
