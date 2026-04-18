@@ -93,6 +93,12 @@ protocol TwitchIRCClientProtocol: Actor {
     /// ViewModel はこれを購読して楽観的 UI の表示情報を更新する。
     var userStateStream: AsyncStream<TwitchUserState> { get }
 
+    /// チャンネル JOIN 後に受信する ROOMSTATE の room-id を配信する AsyncStream
+    ///
+    /// PRIVMSG より先に届くため、最初の PRIVMSG を待たずに broadcasterId を確定できる。
+    /// ViewModel はこれを購読して `currentRoomId` を早期設定する。
+    var roomStateStream: AsyncStream<String> { get }
+
     /// 指定チャンネルに接続する
     ///
     /// - Parameters:
@@ -152,6 +158,9 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     /// 認証接続時に受信する USERSTATE を配信する AsyncStream
     let userStateStream: AsyncStream<TwitchUserState>
 
+    /// チャンネル JOIN 後に受信する ROOMSTATE の room-id を配信する AsyncStream
+    let roomStateStream: AsyncStream<String>
+
     // MARK: - プライベートプロパティ
 
     private let webSocketClient: any WebSocketClientProtocol
@@ -159,6 +168,7 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
     private var noticeContinuation: AsyncStream<TwitchNotice>.Continuation?
     private var connectionStateContinuation: AsyncStream<ClientConnectionState>.Continuation?
     private var userStateContinuation: AsyncStream<TwitchUserState>.Continuation?
+    private var roomStateContinuation: AsyncStream<String>.Continuation?
 
     /// 受信ループのタスク（disconnect() でキャンセルするために保持）
     private var receiveLoopTask: Task<Void, Never>?
@@ -232,6 +242,10 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         var usContinuation: AsyncStream<TwitchUserState>.Continuation?
         self.userStateStream = AsyncStream { usContinuation = $0 }
         self.userStateContinuation = usContinuation
+
+        var rsContinuation: AsyncStream<String>.Continuation?
+        self.roomStateStream = AsyncStream { rsContinuation = $0 }
+        self.roomStateContinuation = rsContinuation
 
         self.webSocketClient = webSocketClient
         self.backoffConfig = backoffConfig
@@ -429,6 +443,13 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
             // JOIN 直後とメッセージ送信後に届き、楽観的 UI の精度向上に使用する
             if let userState = TwitchUserState(from: ircMessage) {
                 userStateContinuation?.yield(userState)
+            }
+
+        case "ROOMSTATE":
+            // チャンネル JOIN 直後に届くチャンネル状態通知から room-id を取得する
+            // room-id は PRIVMSG より先に取得できるため、モデレーションコマンドの早期利用が可能になる
+            if let roomId = ircMessage.tags["room-id"] {
+                roomStateContinuation?.yield(roomId)
             }
 
         case "RECONNECT":

@@ -33,7 +33,17 @@ enum AuthConfig {
     /// - `chat:read`: IRC チャット読み取り（認証接続に使用）
     /// - `chat:edit`: IRC チャット書き込み（コメント投稿に使用）
     /// - `user:read:follows`: フォロー中の配信中ストリーム一覧取得に使用
-    static let scopes: [String] = ["chat:read", "chat:edit", "user:read:follows"]
+    /// - `channel:moderate`: バン・タイムアウト等のモデレーション操作
+    /// - `moderator:manage:chat_settings`: エモートオンリー・スロー・サブスクライバーモード等
+    /// - `moderator:manage:chat_messages`: チャットクリア・メッセージ削除
+    static let scopes: [String] = [
+        "chat:read",
+        "chat:edit",
+        "user:read:follows",
+        "channel:moderate",
+        "moderator:manage:chat_settings",
+        "moderator:manage:chat_messages"
+    ]
 
     // MARK: - Client ID
 
