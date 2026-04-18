@@ -20,6 +20,20 @@ struct ChatInputBar: View {
     /// エモートピッカーの表示状態
     @State private var showEmotePicker = false
 
+    /// @メンション補完の状態管理 ViewModel
+    ///
+    /// `viewModel.mentionStore` を使って初期化する。
+    /// `@State` プロパティは init 引数で初期値を設定することで不要な再作成を防ぐ。
+    @State private var mentionCompletionVM: MentionCompletionViewModel
+
+    init(viewModel: ChatViewModel, authState: AuthState) {
+        self.viewModel = viewModel
+        self.authState = authState
+        self._mentionCompletionVM = State(
+            initialValue: MentionCompletionViewModel(mentionStore: viewModel.mentionStore)
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // 認証エラーバナー（chat:edit スコープ不足またはログアウト）
@@ -143,7 +157,8 @@ struct ChatInputBar: View {
                 draft: $draft,
                 emoteStore: viewModel.emoteStore,
                 onSubmit: submit,
-                isDisabled: !viewModel.canSendMessage
+                isDisabled: !viewModel.canSendMessage,
+                mentionCompletionViewModel: mentionCompletionVM
             )
             .frame(height: Self.inputFieldHeight)
             .padding(.leading, 14)
@@ -214,6 +229,22 @@ struct ChatInputBar: View {
                     .id(error)
             }
         }
+        // @メンション補完ドロップダウン（入力バーの上に表示）
+        .overlay(alignment: .top) {
+            if mentionCompletionVM.isActive && !mentionCompletionVM.candidates.isEmpty {
+                MentionCompletionView(
+                    candidates: mentionCompletionVM.candidates,
+                    selectedIndex: mentionCompletionVM.selectedIndex
+                ) { index in
+                    confirmMentionCandidate(at: index)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .offset(y: -min(
+                    CGFloat(mentionCompletionVM.candidates.count),
+                    CGFloat(MentionCompletionView.maxVisibleRows)
+                ) * MentionCompletionView.rowHeight)
+            }
+        }
     }
 
     // MARK: - ヘルパー
@@ -274,6 +305,26 @@ struct ChatInputBar: View {
             try? await viewModel.sendMessage(text)
         }
     }
+
+    /// クリックで @メンション候補を選択確定する
+    ///
+    /// - Parameter index: 選択した候補のインデックス
+    private func confirmMentionCandidate(at index: Int) {
+        mentionCompletionVM.setSelection(to: index)
+        // mentionRange は confirmSelection() の前に取得する（確定後に nil になるため）
+        let range = mentionCompletionVM.mentionRange
+        guard let insertion = mentionCompletionVM.confirmSelection() else { return }
+
+        // draft の @ トークン部分を挿入文字列で置換する
+        // draft はプレーンテキストなので NSString で直接置換できる
+        if let range {
+            let nsString = draft as NSString
+            draft = nsString.replacingCharacters(in: range, with: insertion)
+        } else {
+            draft += insertion
+        }
+    }
+
 }
 
 // MARK: - CircularIconBackground

@@ -27,6 +27,9 @@ struct EmoteRichTextView: NSViewRepresentable {
     /// 入力無効フラグ
     var isDisabled: Bool
 
+    /// @メンション補完の状態管理 ViewModel
+    var mentionCompletionViewModel: MentionCompletionViewModel
+
     // MARK: - NSViewRepresentable
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -78,7 +81,7 @@ struct EmoteRichTextView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit)
+        Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit, mentionCompletionViewModel: mentionCompletionViewModel)
     }
 
     /// ビュー破棄前に呼ばれるクリーンアップ（@MainActor 上で実行される）
@@ -141,6 +144,119 @@ struct EmoteRichTextView: NSViewRepresentable {
         return result
     }
 
+    /// NSTextView の UTF-16 カーソル位置を plainText 上の文字数インデックスに変換する
+    ///
+    /// エモートアタッチメントが存在する場合、NSTextView 上では1文字（U+FFFC）だが
+    /// plainText ではエモート名の文字数分になるためオフセットのずれが生じる。
+    /// この変換を行うことで `MentionCompletionViewModel.updateFromText` に正確な
+    /// カーソル位置を渡せる。
+    ///
+    /// - Parameters:
+    ///   - nsViewOffset: NSTextView の selectedRange().location（UTF-16 オフセット）
+    ///   - attributedString: NSTextView の現在の attributedString
+    /// - Returns: plainText 上の文字数インデックス
+    static func plainTextCursorPosition(from nsViewOffset: Int, in attributedString: NSAttributedString) -> Int {
+        var plainOffset = 0
+        var nsOffset = 0
+
+        attributedString.enumerateAttributes(
+            in: NSRange(location: 0, length: attributedString.length),
+            options: []
+        ) { attrs, range, stop in
+            guard nsOffset < nsViewOffset else {
+                stop.pointee = true
+                return
+            }
+
+            if let attachment = attrs[.attachment] as? EmoteTextAttachment {
+                // アタッチメントは NSTextView 上では range.length (通常1) 、plainText ではエモート名の長さ
+                let remaining = nsViewOffset - nsOffset
+                plainOffset += attachment.emoteName.count
+                nsOffset += range.length
+                if remaining < range.length {
+                    stop.pointee = true
+                }
+            } else {
+                let segmentNSLen = range.length
+                let remaining = nsViewOffset - nsOffset
+                let partRange = NSRange(location: range.location, length: min(remaining, segmentNSLen))
+                let partStr = (attributedString.string as NSString).substring(with: partRange)
+                plainOffset += partStr.count
+                nsOffset += partRange.length
+                if remaining < segmentNSLen {
+                    stop.pointee = true
+                }
+            }
+        }
+
+        return plainOffset
+    }
+
+    /// plainText 上の NSRange（Character 数基準）を NSTextView の NSRange（UTF-16 オフセット）に変換する
+    ///
+    /// `replaceMentionToken` で `NSTextView.insertText(_:replacementRange:)` に渡す範囲を
+    /// plainText 座標から NSTextView 座標に変換するために使用する。
+    ///
+    /// - Parameters:
+    ///   - plainRange: plainText 上の NSRange（Character 数基準）
+    ///   - attributedString: NSTextView の現在の attributedString
+    /// - Returns: NSTextView 座標の NSRange（UTF-16 オフセット）
+    static func nsViewRange(from plainRange: NSRange, in attributedString: NSAttributedString) -> NSRange {
+        let startNS = nsViewOffset(for: plainRange.location, in: attributedString)
+        let endNS = nsViewOffset(for: plainRange.location + plainRange.length, in: attributedString)
+        return NSRange(location: startNS, length: endNS - startNS)
+    }
+
+    /// plainText 上の Character インデックスを NSTextView の UTF-16 オフセットに変換する
+    ///
+    /// - Parameters:
+    ///   - plainCharIndex: plainText 上の Character 数インデックス
+    ///   - attributedString: NSTextView の現在の attributedString
+    /// - Returns: NSTextView の UTF-16 オフセット
+    private static func nsViewOffset(for plainCharIndex: Int, in attributedString: NSAttributedString) -> Int {
+        var nsOffset = 0
+        var plainOffset = 0
+
+        attributedString.enumerateAttributes(
+            in: NSRange(location: 0, length: attributedString.length),
+            options: []
+        ) { attrs, range, stop in
+            guard plainOffset < plainCharIndex else {
+                stop.pointee = true
+                return
+            }
+
+            if let attachment = attrs[.attachment] as? EmoteTextAttachment {
+                let emoteLen = attachment.emoteName.count
+                if plainOffset + emoteLen <= plainCharIndex {
+                    plainOffset += emoteLen
+                    nsOffset += range.length
+                } else {
+                    // インデックスがアタッチメント内 → アタッチメント末尾にスナップ
+                    nsOffset += range.length
+                    plainOffset = plainCharIndex
+                    stop.pointee = true
+                }
+            } else {
+                let segmentStr = (attributedString.string as NSString).substring(with: range)
+                let segmentCharLen = segmentStr.count
+                let remaining = plainCharIndex - plainOffset
+                if remaining >= segmentCharLen {
+                    plainOffset += segmentCharLen
+                    nsOffset += range.length
+                } else {
+                    // インデックスがこのテキストセグメント内
+                    let partStr = String(segmentStr.prefix(remaining))
+                    plainOffset = plainCharIndex
+                    nsOffset += partStr.utf16.count
+                    stop.pointee = true
+                }
+            }
+        }
+
+        return nsOffset
+    }
+
     // MARK: - Coordinator
 
     /// NSTextViewDelegate を実装し、エモート検出・置換・draft 更新を担当する
@@ -150,6 +266,7 @@ struct EmoteRichTextView: NSViewRepresentable {
         @Binding var draft: String
         let emoteStore: EmoteStore
         let onSubmit: () -> Void
+        let mentionCompletionViewModel: MentionCompletionViewModel
 
         /// binding 側からのリセット中フラグ（無限ループ防止）
         var isUpdatingFromBinding = false
@@ -160,10 +277,11 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// `nonisolated(unsafe)` は不要。プロパティは常に MainActor 上でアクセスされる。
         private var frameUpdateObserver: NSObjectProtocol?
 
-        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void) {
+        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void, mentionCompletionViewModel: MentionCompletionViewModel) {
             self._draft = draft
             self.emoteStore = emoteStore
             self.onSubmit = onSubmit
+            self.mentionCompletionViewModel = mentionCompletionViewModel
         }
 
         /// アニメーションフレーム更新通知を購読し、textView に再描画を要求する
@@ -237,19 +355,87 @@ struct EmoteRichTextView: NSViewRepresentable {
             if draft != plain {
                 draft = plain
             }
+
+            // @メンション補完の候補を更新する
+            // NSTextView の UTF-16 カーソル位置を plainText の文字数インデックスに変換して渡す
+            let nsViewOffset = textView.selectedRange().location
+            let plainCursorPosition = EmoteRichTextView.plainTextCursorPosition(
+                from: nsViewOffset,
+                in: textView.attributedString()
+            )
+            mentionCompletionViewModel.updateFromText(plain, cursorPosition: plainCursorPosition)
         }
 
-        /// Enter / Shift+Enter で送信
+        /// Enter / Shift+Enter で送信、補完アクティブ時は上下キー・Esc も処理する
         ///
         /// - Note: 入力欄は1行固定高さのため、Shift+Enter による改行挿入は無効化している。
         ///   改行を挿入しても表示領域外にクリップされるだけで混乱を招くため、両キーで送信する。
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // 補完アクティブ中のキーハンドリング
+            if mentionCompletionViewModel.isActive {
+                if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                    // 上キー: 前の候補に移動
+                    mentionCompletionViewModel.moveSelection(by: -1)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                    // 下キー: 次の候補に移動
+                    mentionCompletionViewModel.moveSelection(by: 1)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                    // Esc: 補完キャンセル
+                    mentionCompletionViewModel.cancel()
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.insertNewline(_:))
+                    || commandSelector == #selector(NSResponder.insertTab(_:)) {
+                    // Enter / Tab: 候補確定
+                    // confirmSelection() は内部で mentionRange を nil にリセットするため、先に取得しておく
+                    let range = mentionCompletionViewModel.mentionRange
+                    let insertion = mentionCompletionViewModel.confirmSelection()
+                    if let insertion, let range {
+                        // 候補が選択されていた場合: トークンを置換
+                        replaceMentionToken(with: insertion, range: range, in: textView)
+                    } else {
+                        // 候補が空または選択なしの場合: 補完をキャンセルして通常送信へ
+                        mentionCompletionViewModel.cancel()
+                        onSubmit()
+                    }
+                    return true
+                }
+            }
+
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 // Enter / Shift+Enter いずれも送信（1行固定のため改行を許可しない）
                 onSubmit()
                 return true
             }
             return false
+        }
+
+        /// @メンショントークンを補完候補で置換し draft を更新する
+        ///
+        /// - Parameters:
+        ///   - insertion: 挿入する文字列（`@username ` 形式）
+        ///   - range: テキスト内の置換対象範囲（@ から現在クエリ末尾まで）
+        ///   - textView: 対象の NSTextView
+        private func replaceMentionToken(with insertion: String, range: NSRange, in textView: NSTextView) {
+            // mentionRange は plainText 座標（Character 数）で保持されているため
+            // NSTextView.insertText の replacementRange に渡す前に UTF-16 座標に変換する
+            let nsRange = EmoteRichTextView.nsViewRange(from: range, in: textView.attributedString())
+            let nsString = textView.string as NSString
+            guard nsRange.location <= nsString.length,
+                  nsRange.location + nsRange.length <= nsString.length else { return }
+
+            isUpdatingFromBinding = true
+            textView.insertText(insertion, replacementRange: nsRange)
+
+            // draft を更新
+            let plain = EmoteRichTextView.plainText(from: textView.attributedString())
+            if draft != plain {
+                draft = plain
+            }
         }
 
         // MARK: - エモート検出・置換

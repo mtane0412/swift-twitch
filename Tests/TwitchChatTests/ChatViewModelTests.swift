@@ -839,4 +839,46 @@ struct ChatViewModelTests {
         let replyToIds = await mockClient.sentReplyToIds
         #expect(replyToIds.last == .some(nil))
     }
+
+    // MARK: - mentionStore 連携
+
+    @Test("メッセージ受信後に mentionStore の候補にユーザーが追加される")
+    func メッセージ受信後にmentionStoreの候補にユーザーが追加される() async throws {
+        // 前提: チャンネルに接続する
+        let mockClient = MockTwitchIRCClient()
+        let viewModel = ChatViewModel(ircClient: mockClient)
+        await viewModel.connect(to: "テストチャンネル")
+        await waitFor { viewModel.connectionState == .connected }
+
+        // 実行: チャットメッセージを受信する
+        let message = makeTestChatMessage(displayName: "配信者テスト", text: "こんにちは")
+        await mockClient.sendMessage(message)
+        await waitFor { viewModel.messages.count >= 1 }
+
+        // 検証: mentionStore に発言者が登録されている
+        let candidates = viewModel.mentionStore.candidates(matching: "")
+        #expect(candidates.isEmpty == false)
+        #expect(candidates.contains { $0.displayName == "配信者テスト" })
+    }
+
+    @Test("複数のメッセージを受信すると最新発言者が先頭になる")
+    func 複数のメッセージを受信すると最新発言者が先頭になる() async throws {
+        // 前提: チャンネルに接続する
+        let mockClient = MockTwitchIRCClient()
+        let viewModel = ChatViewModel(ircClient: mockClient)
+        await viewModel.connect(to: "テストチャンネル")
+        await waitFor { viewModel.connectionState == .connected }
+
+        // 実行: 異なるユーザーのメッセージを順番に受信する
+        let msg1 = makeTestChatMessage(displayName: "ユーザーA", text: "最初のメッセージ")
+        let msg2 = makeTestChatMessage(displayName: "ユーザーB", text: "2番目のメッセージ")
+        await mockClient.sendMessage(msg1)
+        await waitFor { viewModel.messages.count >= 1 }
+        await mockClient.sendMessage(msg2)
+        await waitFor { viewModel.messages.count >= 2 }
+
+        // 検証: 最後に発言した ユーザーB が先頭に来る
+        let candidates = viewModel.mentionStore.candidates(matching: "")
+        #expect(candidates.first?.displayName == "ユーザーB")
+    }
 }
