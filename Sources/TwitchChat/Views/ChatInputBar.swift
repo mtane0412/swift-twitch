@@ -146,7 +146,9 @@ struct ChatInputBar: View {
                 isDisabled: !viewModel.canSendMessage
             )
             .frame(height: Self.inputFieldHeight)
-            .padding(.horizontal, 14)
+            .padding(.leading, 14)
+            // 文字数カウンタ（幅 約 50pt）が表示中は trailing に余白を確保して重なりを防ぐ
+            .padding(.trailing, draft.isEmpty ? 14 : 60)
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 18)
@@ -186,6 +188,13 @@ struct ChatInputBar: View {
             }
             .buttonStyle(.plain)
             .disabled(!canSubmit)
+            .accessibilityLabel("送信")
+            .accessibilityValue(viewModel.isSending ? "送信中" : (canSubmit ? "" : "無効"))
+            .accessibilityHint(
+                viewModel.isSending
+                    ? "コメントを送信しています"
+                    : (canSubmit ? "コメントを送信します" : "コメントを送信できません。入力内容または接続状態を確認してください")
+            )
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
@@ -209,12 +218,17 @@ struct ChatInputBar: View {
 
     // MARK: - ヘルパー
 
-    /// システムフォントのラインハイトから1行分の入力フィールド高さを計算する
+    /// TextKit のデフォルト行高とインライン emote の高さを考慮した1行分の入力フィールド高さを計算する
     ///
-    /// 上下インセット各 3pt を加算した値。EmoteRichTextView の textContainerInset と連動する。
+    /// - `NSLayoutManager.defaultLineHeight` を使用して leading を含む実際の行高を取得する
+    /// - インライン emote（`EmoteImageCache.emoteDisplaySize` = 20pt）がテキスト行高を超える場合は emote 高さを優先する
+    /// - 上下インセット各 3pt を加算した値。EmoteRichTextView の textContainerInset（verticalInset）と連動する
     private static let inputFieldHeight: CGFloat = {
         let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        return ceil(font.ascender - font.descender) + 6
+        let layoutManager = NSLayoutManager()
+        let lineHeight = ceil(layoutManager.defaultLineHeight(for: font))
+        let contentHeight = max(lineHeight, EmoteImageCache.emoteDisplaySize)
+        return contentHeight + 6  // 上下インセット各 3pt
     }()
 
     /// 接続中かどうか（入力フォームの表示判定用）
