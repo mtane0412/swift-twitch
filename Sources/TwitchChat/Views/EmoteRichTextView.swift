@@ -67,6 +67,8 @@ struct EmoteRichTextView: NSViewRepresentable {
                 context.coordinator.detectAndReplaceEmote(in: textView)
             }
         }
+        // TextKit 2 のビューポートレイアウトを強制実行してアタッチメントビューを即座に描画する
+        textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -240,6 +242,11 @@ struct EmoteRichTextView: NSViewRepresentable {
                 // insertText は layout manager と表示更新を確実にトリガーする推奨 API
                 self.isUpdatingFromBinding = true
                 textView.insertText(mutable, replacementRange: range)
+
+                // TextKit 2 はビューポートレイアウトを遅延実行するため、アタッチメントビューが
+                // カーソルが近づくまで描画されない問題が発生する。
+                // insertText 後に layoutViewport() を呼ぶことで即座に描画をトリガーする。
+                textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
 
                 // draft を更新（textDidChange は isUpdatingFromBinding フラグでスキップ済み）
                 let plain = EmoteRichTextView.plainText(from: textView.attributedString())
