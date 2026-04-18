@@ -287,7 +287,13 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// `nonisolated(unsafe)` は不要。プロパティは常に MainActor 上でアクセスされる。
         private var frameUpdateObserver: NSObjectProtocol?
 
-        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void, mentionCompletionViewModel: MentionCompletionViewModel, slashCommandCompletionViewModel: SlashCommandCompletionViewModel) {
+        init(
+            draft: Binding<String>,
+            emoteStore: EmoteStore,
+            onSubmit: @escaping () -> Void,
+            mentionCompletionViewModel: MentionCompletionViewModel,
+            slashCommandCompletionViewModel: SlashCommandCompletionViewModel
+        ) {
             self._draft = draft
             self.emoteStore = emoteStore
             self.onSubmit = onSubmit
@@ -390,70 +396,35 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// - Note: 入力欄は1行固定高さのため、Shift+Enter による改行挿入は無効化している。
         ///   改行を挿入しても表示領域外にクリップされるだけで混乱を招くため、両キーで送信する。
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            // スラッシュコマンド補完アクティブ中のキーハンドリング（優先度: メンション補完より高い）
-            if slashCommandCompletionViewModel.isActive {
-                if commandSelector == #selector(NSResponder.moveUp(_:)) {
-                    slashCommandCompletionViewModel.moveSelection(by: -1)
-                    return true
-                }
-                if commandSelector == #selector(NSResponder.moveDown(_:)) {
-                    slashCommandCompletionViewModel.moveSelection(by: 1)
-                    return true
-                }
-                if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                    slashCommandCompletionViewModel.cancel()
-                    return true
-                }
-                if commandSelector == #selector(NSResponder.insertNewline(_:))
-                    || commandSelector == #selector(NSResponder.insertTab(_:)) {
-                    // Enter / Tab: 候補確定
-                    // confirmSelection() は内部で commandRange を nil にリセットするため、先に取得しておく
-                    let range = slashCommandCompletionViewModel.commandRange
-                    let insertion = slashCommandCompletionViewModel.confirmSelection()
-                    if let insertion, let range {
-                        replaceSlashCommandToken(with: insertion, range: range, in: textView)
-                    } else {
-                        slashCommandCompletionViewModel.cancel()
-                        onSubmit()
-                    }
-                    return true
-                }
-            }
+            // スラッシュコマンド補完が優先（テキスト先頭 / のケース）
+            if slashCommandCompletionViewModel.isActive,
+               let handled = handleCompletionCommand(
+                commandSelector,
+                confirm: {
+                    guard let range = slashCommandCompletionViewModel.commandRange,
+                          let insertion = slashCommandCompletionViewModel.confirmSelection()
+                    else { return nil }
+                    return (insertion, range)
+                },
+                cancel: { slashCommandCompletionViewModel.cancel() },
+                move: { slashCommandCompletionViewModel.moveSelection(by: $0) },
+                replace: { replaceSlashCommandToken(with: $0, range: $1, in: textView) }
+               ) { return handled }
 
-            // @メンション補完アクティブ中のキーハンドリング
-            if mentionCompletionViewModel.isActive {
-                if commandSelector == #selector(NSResponder.moveUp(_:)) {
-                    // 上キー: 前の候補に移動
-                    mentionCompletionViewModel.moveSelection(by: -1)
-                    return true
-                }
-                if commandSelector == #selector(NSResponder.moveDown(_:)) {
-                    // 下キー: 次の候補に移動
-                    mentionCompletionViewModel.moveSelection(by: 1)
-                    return true
-                }
-                if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                    // Esc: 補完キャンセル
-                    mentionCompletionViewModel.cancel()
-                    return true
-                }
-                if commandSelector == #selector(NSResponder.insertNewline(_:))
-                    || commandSelector == #selector(NSResponder.insertTab(_:)) {
-                    // Enter / Tab: 候補確定
-                    // confirmSelection() は内部で mentionRange を nil にリセットするため、先に取得しておく
-                    let range = mentionCompletionViewModel.mentionRange
-                    let insertion = mentionCompletionViewModel.confirmSelection()
-                    if let insertion, let range {
-                        // 候補が選択されていた場合: トークンを置換
-                        replaceMentionToken(with: insertion, range: range, in: textView)
-                    } else {
-                        // 候補が空または選択なしの場合: 補完をキャンセルして通常送信へ
-                        mentionCompletionViewModel.cancel()
-                        onSubmit()
-                    }
-                    return true
-                }
-            }
+            // @メンション補完
+            if mentionCompletionViewModel.isActive,
+               let handled = handleCompletionCommand(
+                commandSelector,
+                confirm: {
+                    guard let range = mentionCompletionViewModel.mentionRange,
+                          let insertion = mentionCompletionViewModel.confirmSelection()
+                    else { return nil }
+                    return (insertion, range)
+                },
+                cancel: { mentionCompletionViewModel.cancel() },
+                move: { mentionCompletionViewModel.moveSelection(by: $0) },
+                replace: { replaceMentionToken(with: $0, range: $1, in: textView) }
+               ) { return handled }
 
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 // Enter / Shift+Enter いずれも送信（1行固定のため改行を許可しない）
@@ -461,6 +432,46 @@ struct EmoteRichTextView: NSViewRepresentable {
                 return true
             }
             return false
+        }
+
+        /// 補完共通のキーボードコマンドを処理する
+        ///
+        /// 上下移動・Esc・Enter/Tab を処理して `Bool?` を返す。
+        /// 処理した場合は `true`/`false`、処理対象外のセレクタは `nil` を返す。
+        ///
+        /// - Parameters:
+        ///   - commandSelector: NSTextView から渡されるセレクタ
+        ///   - confirm: 候補を確定する処理（確定文字列と置換範囲のタプル、または nil を返す）
+        ///   - cancel: 補完をキャンセルする処理
+        ///   - move: 選択インデックスを移動する処理（引数は offset）
+        ///   - replace: テキストを置換する処理
+        private func handleCompletionCommand(
+            _ commandSelector: Selector,
+            confirm: () -> (String, NSRange)?,
+            cancel: () -> Void,
+            move: (Int) -> Void,
+            replace: (String, NSRange) -> Void
+        ) -> Bool? {
+            if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                move(-1); return true
+            }
+            if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                move(1); return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                cancel(); return true
+            }
+            if commandSelector == #selector(NSResponder.insertNewline(_:))
+                || commandSelector == #selector(NSResponder.insertTab(_:)) {
+                if let (insertion, range) = confirm() {
+                    replace(insertion, range)
+                } else {
+                    cancel()
+                    onSubmit()
+                }
+                return true
+            }
+            return nil
         }
 
         /// / スラッシュコマンドトークンを補完候補で置換し draft を更新する

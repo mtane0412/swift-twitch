@@ -113,6 +113,6 @@ struct SlashCommandDefinition: Identifiable {
             name: "delete",
             description: "特定のメッセージを削除する",
             usage: "/delete <メッセージID>"
-        ),
+        )
     ]
 }
