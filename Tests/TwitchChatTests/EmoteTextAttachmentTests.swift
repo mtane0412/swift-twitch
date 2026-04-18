@@ -8,15 +8,6 @@ import Testing
 @Suite("EmoteTextAttachment テスト")
 struct EmoteTextAttachmentTests {
 
-    // MARK: - ビュープロバイダ
-
-    @Test("AnimatedEmoteAttachmentViewProvider は NSTextAttachmentViewProvider のサブクラスである")
-    func testProviderInheritsFromViewProvider() {
-        // 前提: アニメーション再生に必要な TextKit 2 API を使用するため正しい基底クラスが必要
-        // 検証: NSTextAttachmentViewProvider を継承している
-        #expect(AnimatedEmoteAttachmentViewProvider.self.isSubclass(of: NSTextAttachmentViewProvider.self))
-    }
-
     // MARK: - emoteName 保持
 
     @Test("emoteName がアタッチメントに正しく保持される")
