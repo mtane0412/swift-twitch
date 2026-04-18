@@ -16,6 +16,9 @@ struct ChatInputBar: View {
     /// 入力テキスト（下書き）
     @State private var draft: String = ""
 
+    /// エモートピッカーの表示状態
+    @State private var showEmotePicker = false
+
     var body: some View {
         VStack(spacing: 0) {
             // 認証エラーバナー（chat:edit スコープ不足またはログアウト）
@@ -115,6 +118,23 @@ struct ChatInputBar: View {
     /// テキスト入力フォーム
     private var inputForm: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            // エモートピッカーボタン
+            Button {
+                showEmotePicker.toggle()
+            } label: {
+                Image(systemName: "face.smiling")
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("エモートピッカーを開く")
+            .popover(isPresented: $showEmotePicker) {
+                EmotePickerView(emoteStore: viewModel.emoteStore) { emoteName in
+                    insertEmote(emoteName)
+                    showEmotePicker = false
+                }
+            }
+            .disabled(!viewModel.canSendMessage)
+
             VStack(alignment: .trailing, spacing: 2) {
                 // テキストフィールド（複数行対応）
                 TextField("コメントを送信", text: $draft, axis: .vertical)
@@ -196,6 +216,20 @@ struct ChatInputBar: View {
         if draft.count > 500 { return .red }
         if draft.count > 450 { return .yellow }
         return .secondary
+    }
+
+    /// エモート名を draft に挿入する
+    ///
+    /// Twitch IRC ではエモートはスペース区切りで認識されるため、
+    /// 前後に空白を入れてエモート名を挿入する。
+    /// 空のエモート名は挿入しない。
+    private func insertEmote(_ emoteName: String) {
+        guard !emoteName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if draft.isEmpty || (draft.last?.isWhitespace == true) {
+            draft += emoteName + " "
+        } else {
+            draft += " " + emoteName + " "
+        }
     }
 
     /// メッセージを送信する

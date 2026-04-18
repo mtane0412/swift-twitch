@@ -77,11 +77,20 @@ final class ChatViewModel {
     /// バッジ定義ストア（View からバッジ画像URLの解決に使用）
     let badgeStore: BadgeStore
 
+    /// エモート定義ストア（エモートピッカーのデータソースに使用）
+    let emoteStore: EmoteStore
+
     /// グローバルバッジフェッチタスク（切断時にキャンセル）
     private var globalBadgeFetchTask: Task<Void, Never>?
 
     /// チャンネルバッジフェッチタスク（切断時にキャンセル）
     private var channelBadgeFetchTask: Task<Void, Never>?
+
+    /// グローバルエモートフェッチタスク（切断時にキャンセル）
+    private var globalEmoteFetchTask: Task<Void, Never>?
+
+    /// チャンネルエモートフェッチタスク（切断時にキャンセル）
+    private var channelEmoteFetchTask: Task<Void, Never>?
 
     /// NOTICE 受信ループタスク（切断時にキャンセル）
     private var noticeReceiveTask: Task<Void, Never>?
@@ -100,6 +109,9 @@ final class ChatViewModel {
 
     /// チャンネルバッジ取得済みフラグ
     private var channelBadgesFetched = false
+
+    /// チャンネルエモート取得済みフラグ
+    private var channelEmotesFetched = false
 
     /// 最初に受信したメッセージから抽出した room-id（楽観的 UI の ChatMessage 生成に使用）
     private var currentRoomId: String?
@@ -132,6 +144,7 @@ final class ChatViewModel {
         self.authState = authState
         let helixClient = apiClient ?? HelixAPIClient(tokenProvider: authState)
         self.badgeStore = BadgeStore(apiClient: helixClient)
+        self.emoteStore = EmoteStore(apiClient: helixClient)
     }
 
     // MARK: - 接続・切断
@@ -146,13 +159,16 @@ final class ChatViewModel {
         connectionState = .connecting
         messages = []
         channelBadgesFetched = false
+        channelEmotesFetched = false
         currentRoomId = nil
 
-        // チャンネル切替時に前チャンネルのバッジが誤解決されないようクリア
+        // チャンネル切替時に前チャンネルのバッジ・エモートが誤解決されないようクリア
         await badgeStore.resetChannelBadges()
+        await emoteStore.resetChannelEmotes()
 
-        // グローバルバッジ定義を並行フェッチ（切断時にキャンセルできるよう保持）
+        // グローバルバッジ・エモート定義を並行フェッチ（切断時にキャンセルできるよう保持）
         globalBadgeFetchTask = Task { await badgeStore.fetchGlobalBadges() }
+        globalEmoteFetchTask = Task { await emoteStore.fetchGlobalEmotes() }
 
         startStreamTasks()
 
@@ -174,6 +190,7 @@ final class ChatViewModel {
             connectionStateReceiveTask?.cancel()
             userStateReceiveTask?.cancel()
             globalBadgeFetchTask?.cancel()
+            globalEmoteFetchTask?.cancel()
         }
     }
 
@@ -227,8 +244,11 @@ final class ChatViewModel {
         userStateReceiveTask?.cancel()
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
-        // BadgeStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
+        globalEmoteFetchTask?.cancel()
+        channelEmoteFetchTask?.cancel()
+        // BadgeStore / EmoteStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
         await badgeStore.cancelGlobalFetch()
+        await emoteStore.cancelGlobalFetch()
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil
@@ -240,10 +260,16 @@ final class ChatViewModel {
 
     /// メッセージをリストに追加し、上限を超えた場合は古いものを削除する
     private func appendMessage(_ message: ChatMessage) {
-        // 最初の room-id 取得時にチャンネルバッジをフェッチ（切断時にキャンセルできるよう保持）
-        if !channelBadgesFetched, let roomId = message.roomId {
-            channelBadgesFetched = true
-            channelBadgeFetchTask = Task { await badgeStore.fetchChannelBadges(channelId: roomId) }
+        // 最初の room-id 取得時にチャンネルバッジ・エモートをフェッチ（切断時にキャンセルできるよう保持）
+        if let roomId = message.roomId {
+            if !channelBadgesFetched {
+                channelBadgesFetched = true
+                channelBadgeFetchTask = Task { await badgeStore.fetchChannelBadges(channelId: roomId) }
+            }
+            if !channelEmotesFetched {
+                channelEmotesFetched = true
+                channelEmoteFetchTask = Task { await emoteStore.fetchChannelEmotes(broadcasterId: roomId) }
+            }
         }
         // 楽観的 UI のために room-id を保持する（最初に取得できたものを使い続ける）
         if currentRoomId == nil {
