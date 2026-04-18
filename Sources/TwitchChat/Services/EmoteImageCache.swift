@@ -32,6 +32,23 @@ final class EmoteImageCache: @unchecked Sendable {
         return c
     }()
 
+    /// アニメーション GIF の生データキャッシュ（キー: エモートID）
+    ///
+    /// `GIFFrameSequence` の初期化に必要な生データを保持する。
+    /// `NSImage(data:)` で変換済みの NSImage からは GIF バイナリを確実に復元できないため、
+    /// ダウンロード時の生 `Data` を別途キャッシュする。
+    ///
+    /// - Note: `imageCache` と `gifDataCache` は独立した `NSCache` インスタンスのため、
+    ///   メモリプレッシャー時に片方のみが解放される場合がある。
+    ///   `EmoteAnimationDriver.register` は `gifData(for:)` が nil のとき登録をスキップするため
+    ///   `imageCache` のみ残存しても動作上の問題は生じないが、
+    ///   `gifDataCache` のみ残存するケースでは無駄なデータが残る点に注意する。
+    private let gifDataCache: NSCache<NSString, NSData> = {
+        let c = NSCache<NSString, NSData>()
+        c.countLimit = 500
+        return c
+    }()
+
     /// アニメーション版が存在するエモートIDの集合
     private var animatedEmoteIds: Set<String> = []
 
@@ -74,13 +91,13 @@ final class EmoteImageCache: @unchecked Sendable {
                 defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: emoteId) } }
 
                 // アニメーション版を先に試みる
-                if let image = await self.download(emoteId: emoteId, type: "animated") {
-                    self.store(image, for: emoteId, isAnimated: true)
+                if let (image, data) = await self.download(emoteId: emoteId, type: "animated") {
+                    self.store(image, gifData: data, for: emoteId, isAnimated: true)
                     return image
                 }
                 // スタティック版にフォールバック
-                if let image = await self.download(emoteId: emoteId, type: "default") {
-                    self.store(image, for: emoteId, isAnimated: false)
+                if let (image, _) = await self.download(emoteId: emoteId, type: "default") {
+                    self.store(image, gifData: nil, for: emoteId, isAnimated: false)
                     return image
                 }
                 return nil
@@ -98,6 +115,17 @@ final class EmoteImageCache: @unchecked Sendable {
     /// - Returns: アニメーション版が取得済みの場合 true
     func isAnimated(emoteId: String) -> Bool {
         lock.withLock { animatedEmoteIds.contains(emoteId) }
+    }
+
+    /// キャッシュ済みの GIF 生データを同期的に返す（ダウンロードは行わない）
+    ///
+    /// `GIFFrameSequence` の初期化など、非同期処理が使えない文脈で使用する。
+    /// スタティック PNG エモートや未キャッシュのエモートは nil を返す。
+    ///
+    /// - Parameter emoteId: Twitch エモートID
+    /// - Returns: キャッシュ済みの GIF バイナリデータ、未キャッシュまたはスタティック版の場合は nil
+    func gifData(for emoteId: String) -> Data? {
+        gifDataCache.object(forKey: emoteId as NSString) as Data?
     }
 
     /// キャッシュ済みのエモート画像を同期的に返す（ダウンロードは行わない）
@@ -140,30 +168,57 @@ final class EmoteImageCache: @unchecked Sendable {
     /// - Parameters:
     ///   - emoteId: Twitch エモートID
     ///   - type: 画像タイプ（`"default"` または `"animated"`）
-    /// - Returns: ダウンロード成功時は NSImage、HTTP 200 以外または解析失敗時は nil
-    private func download(emoteId: String, type: String) async -> NSImage? {
+    /// - Returns: ダウンロード成功時は `(NSImage, Data)` タプル、HTTP 200 以外または解析失敗時は nil
+    private func download(emoteId: String, type: String) async -> (NSImage, Data)? {
         let url = Self.emoteURL(emoteId: emoteId, type: type)
         guard let (data, response) = try? await URLSession.shared.data(from: url),
               let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200,
               let image = NSImage(data: data) else { return nil }
-        return image
+        return (image, data)
     }
 
     /// 画像をキャッシュに保存し、表示サイズを設定する
     ///
     /// NSImage.size を設定することで、`Text(Image(nsImage:))` でのインライン表示サイズを
     /// `emoteDisplaySize` に揃える。ビットマップデータは変更しない。
+    /// アニメーション版の場合は GIF 生データも `gifDataCache` に保存する。
     ///
     /// - Parameters:
     ///   - image: 保存する NSImage
+    ///   - gifData: GIF バイナリデータ（アニメーション版のみ。スタティック版は nil）
     ///   - emoteId: Twitch エモートID
     ///   - isAnimated: アニメーション版かどうか
-    private func store(_ image: NSImage, for emoteId: String, isAnimated: Bool) {
+    private func store(_ image: NSImage, gifData: Data?, for emoteId: String, isAnimated: Bool) {
         image.size = NSSize(width: Self.emoteDisplaySize, height: Self.emoteDisplaySize)
         imageCache.setObject(image, forKey: emoteId as NSString)
         if isAnimated {
             _ = lock.withLock { animatedEmoteIds.insert(emoteId) }
+            if let data = gifData {
+                gifDataCache.setObject(data as NSData, forKey: emoteId as NSString)
+            }
         }
     }
+
+    // MARK: - テスト用メソッド
+
+#if DEBUG
+    /// テスト用: GIF 生データをキャッシュに直接登録する
+    ///
+    /// - Parameters:
+    ///   - gifData: 登録する GIF バイナリデータ
+    ///   - emoteId: Twitch エモートID
+    func storeForTesting(gifData: Data, for emoteId: String) {
+        gifDataCache.setObject(gifData as NSData, forKey: emoteId as NSString)
+    }
+
+    /// テスト用: 全キャッシュをクリアする
+    ///
+    /// テスト間の状態汚染を防ぐため、テスト終了時に呼び出す。
+    func clearForTesting() {
+        imageCache.removeAllObjects()
+        gifDataCache.removeAllObjects()
+        lock.withLock { animatedEmoteIds.removeAll() }
+    }
+#endif
 }

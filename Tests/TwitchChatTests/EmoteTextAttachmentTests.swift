@@ -1,5 +1,6 @@
 // EmoteTextAttachmentTests.swift
-// EmoteTextAttachment および AnimatedEmoteAttachmentViewProvider のテスト
+// EmoteTextAttachment のテスト
+// emoteName・emoteId・bounds の保持と currentFrameIndex の初期値を検証する
 
 import AppKit
 import Testing
@@ -51,5 +52,48 @@ struct EmoteTextAttachmentTests {
         // 検証: 指定したサイズで bounds が設定されている
         #expect(attachment.bounds.width == 32)
         #expect(attachment.bounds.height == 32)
+    }
+
+    // MARK: - emoteId 保持
+
+    @Test("emoteId を渡さない場合は nil が保持される")
+    func emoteIdなしの場合はnilが保持される() {
+        // 前提: emoteId を省略してアタッチメントを作成する
+        let attachment = EmoteTextAttachment(image: NSImage(), emoteName: "Kappa")
+
+        // 検証: emoteId が nil である
+        #expect(attachment.emoteId == nil)
+    }
+
+    @Test("emoteId を渡した場合は正しく保持される")
+    func emoteIdが正しく保持される() {
+        // 前提: emoteId "25"（Kappa）を指定してアタッチメントを作成する
+        let attachment = EmoteTextAttachment(image: NSImage(), emoteName: "Kappa", emoteId: "25")
+
+        // 検証: emoteId が "25" である
+        #expect(attachment.emoteId == "25")
+    }
+
+    // MARK: - currentFrameIndex
+
+    @Test("currentFrameIndex の初期値は 0 である")
+    func currentFrameIndexの初期値は0である() {
+        // 前提: アタッチメントを作成する
+        let attachment = EmoteTextAttachment(image: NSImage(), emoteName: "Kappa", emoteId: "25")
+
+        // 検証: 初期フレームインデックスが 0 である
+        #expect(attachment.currentFrameIndex == 0)
+    }
+
+    @Test("currentFrameIndex は書き換え可能である")
+    func currentFrameIndexは書き換え可能である() {
+        // 前提: アタッチメントを作成する
+        let attachment = EmoteTextAttachment(image: NSImage(), emoteName: "Kappa", emoteId: "25")
+
+        // 実行: currentFrameIndex を 2 に設定する
+        attachment.currentFrameIndex = 2
+
+        // 検証: 書き換えた値が保持されている
+        #expect(attachment.currentFrameIndex == 2)
     }
 }

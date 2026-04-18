@@ -34,6 +34,8 @@ struct EmoteRichTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
 
         configureTextView(textView, coordinator: context.coordinator)
+        // アニメーションフレーム更新通知を購読して NSTextView を再描画する
+        context.coordinator.subscribeToFrameUpdates(textView: textView)
         return scrollView
     }
 
@@ -77,6 +79,14 @@ struct EmoteRichTextView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit)
+    }
+
+    /// ビュー破棄前に呼ばれるクリーンアップ（@MainActor 上で実行される）
+    ///
+    /// `Coordinator.deinit` は任意スレッドから呼ばれる可能性があるため、
+    /// 代わりにここで通知購読を解除する。これにより `nonisolated(unsafe)` を使わずに済む。
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.unsubscribeFromFrameUpdates()
     }
 
     // MARK: - NSTextView 設定
@@ -136,10 +146,67 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// binding 側からのリセット中フラグ（無限ループ防止）
         var isUpdatingFromBinding = false
 
+        /// アニメーションフレーム更新通知のオブザーバートークン
+        ///
+        /// `dismantleNSView`（MainActor）で `unsubscribeFromFrameUpdates()` を呼ぶため
+        /// `nonisolated(unsafe)` は不要。プロパティは常に MainActor 上でアクセスされる。
+        private var frameUpdateObserver: NSObjectProtocol?
+
         init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void) {
             self._draft = draft
             self.emoteStore = emoteStore
             self.onSubmit = onSubmit
+        }
+
+        /// アニメーションフレーム更新通知を購読し、textView に再描画を要求する
+        ///
+        /// `EmoteAnimationDriver` がフレームを更新した後に通知が届き、
+        /// `textStorage.edited(.editedAttributes)` で TextKit 2 に属性変更を通知して
+        /// レイアウトフラグメントを無効化し、attachment.image の再取得をトリガーする。
+        func subscribeToFrameUpdates(textView: NSTextView) {
+            frameUpdateObserver = NotificationCenter.default.addObserver(
+                forName: .emoteFrameDidUpdate,
+                object: EmoteAnimationDriver.shared,
+                queue: .main
+            ) { [weak textView] _ in
+                // queue: .main で呼ばれるため MainActor 上での実行を安全に前提できる
+                MainActor.assumeIsolated {
+                    guard let textView,
+                          let textStorage = textView.textStorage,
+                          textStorage.length > 0 else { return }
+                    // attachment.image を変更しても TextKit 2 はフラグメントを有効と判断し続ける。
+                    // textStorage.edited(.editedAttributes) でストレージレベルから「属性が変わった」と
+                    // 通知することで、layout manager が該当範囲を無効化→再レイアウト→attachment.image
+                    // を再取得する一連のパイプラインをトリガーする。
+                    // パフォーマンス最適化: EmoteTextAttachment を持つ range のみを無効化する
+                    var attachmentRanges: [NSRange] = []
+                    textStorage.enumerateAttribute(
+                        .attachment,
+                        in: NSRange(location: 0, length: textStorage.length),
+                        options: []
+                    ) { value, range, _ in
+                        if value is EmoteTextAttachment {
+                            attachmentRanges.append(range)
+                        }
+                    }
+                    guard !attachmentRanges.isEmpty else { return }
+                    textStorage.beginEditing()
+                    for range in attachmentRanges {
+                        textStorage.edited(.editedAttributes, range: range, changeInLength: 0)
+                    }
+                    textStorage.endEditing()
+                }
+            }
+        }
+
+        /// アニメーションフレーム更新通知の購読を解除する
+        ///
+        /// `dismantleNSView` から呼ばれる（MainActor 上）。
+        func unsubscribeFromFrameUpdates() {
+            if let observer = frameUpdateObserver {
+                NotificationCenter.default.removeObserver(observer)
+                frameUpdateObserver = nil
+            }
         }
 
         // MARK: - NSTextViewDelegate
@@ -234,7 +301,10 @@ struct EmoteRichTextView: NSViewRepresentable {
                 guard nsString.substring(with: range) == token else { return }
 
                 // NSAttributedString を変更
-                let attachment = EmoteTextAttachment(image: image, emoteName: token)
+                // emoteId を渡してアニメーション駆動に必要な情報を保持させる
+                let attachment = EmoteTextAttachment(image: image, emoteName: token, emoteId: emote.id)
+                // アニメーション版エモートの場合、EmoteAnimationDriver に登録してフレーム更新を開始する
+                EmoteAnimationDriver.shared.register(attachment)
                 let attachmentString = NSAttributedString(attachment: attachment)
 
                 // フォントを引き継ぐ
