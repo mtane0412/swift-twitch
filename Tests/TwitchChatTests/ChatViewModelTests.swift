@@ -23,6 +23,8 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     let connectionStateStream: AsyncStream<ClientConnectionState>
     private var userStateContinuation: AsyncStream<TwitchUserState>.Continuation?
     let userStateStream: AsyncStream<TwitchUserState>
+    private var roomStateContinuation: AsyncStream<String>.Continuation?
+    let roomStateStream: AsyncStream<String>
 
     /// sendPrivmsg() で送信されたメッセージのログ（テスト検証用）
     private(set) var sentPrivmsgs: [String] = []
@@ -54,6 +56,10 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         var usContinuation: AsyncStream<TwitchUserState>.Continuation?
         self.userStateStream = AsyncStream { usContinuation = $0 }
         self.userStateContinuation = usContinuation
+
+        var rsContinuation: AsyncStream<String>.Continuation?
+        self.roomStateStream = AsyncStream { rsContinuation = $0 }
+        self.roomStateContinuation = rsContinuation
     }
 
     func connect(to channel: String, accessToken: String?, userLogin: String?) async throws {
@@ -70,6 +76,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         noticeContinuation?.finish()
         connectionStateContinuation?.finish()
         userStateContinuation?.finish()
+        roomStateContinuation?.finish()
     }
 
     func sendPrivmsg(_ text: String, replyTo parentMsgId: String? = nil) async throws {
@@ -101,6 +108,11 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     /// テスト用に USERSTATE を流し込む
     func sendUserState(_ userState: TwitchUserState) {
         userStateContinuation?.yield(userState)
+    }
+
+    /// テスト用に ROOMSTATE の room-id を流し込む
+    func sendRoomState(roomId: String) {
+        roomStateContinuation?.yield(roomId)
     }
 }
 
@@ -890,6 +902,33 @@ struct ChatViewModelTests {
         let candidates = viewModel.mentionStore.candidates(matching: "")
         #expect(candidates.isEmpty == false)
         #expect(candidates.contains { $0.displayName == "配信者テスト" })
+    }
+
+    // MARK: - ROOMSTATE からの room-id 取得
+
+    @Test("ROOMSTATE 受信後すぐにモデレーションコマンドが使えること")
+    func ROOMSTATEからroomIdが設定されてモデレーションコマンドが使えること() async throws {
+        // 前提: ログイン済みでチャンネルに接続するが、PRIVMSG はまだ受信していない
+        let mockClient = MockTwitchIRCClient()
+        let mockModeration = MockModerationService()
+        let authState = try await makeLoggedInAuthState(userLogin: "モデレーター")
+        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
+        await viewModel.connect(to: "テストチャンネル")
+        await waitFor { viewModel.connectionState == .connected }
+
+        // ROOMSTATE を流し込む（PRIVMSG より先に room-id を取得できる）
+        await mockClient.sendRoomState(roomId: "チャンネルRoomId_12345")
+        // room-id が ViewModel に反映されるまで待つ
+        await waitFor { viewModel.currentRoomId != nil }
+
+        // 実行: PRIVMSG 未受信でも room-id 設定後はモデレーションコマンドが使えること
+        try await viewModel.sendMessage("/ban あらし太郎")
+
+        // 検証: ModerationService に .ban コマンドが渡される（roomIdNotAvailable エラーにならない）
+        let callCount = await mockModeration.executeCallCount
+        #expect(callCount == 1)
+        let lastCommand = await mockModeration.lastCommand
+        #expect(lastCommand == .ban(username: "あらし太郎", reason: nil))
     }
 
     @Test("複数のメッセージを受信すると最新発言者が先頭になる")

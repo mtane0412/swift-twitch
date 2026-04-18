@@ -104,6 +104,9 @@ final class ChatViewModel {
     /// USERSTATE 受信ループタスク（切断時にキャンセル）
     private var userStateReceiveTask: Task<Void, Never>?
 
+    /// ROOMSTATE 受信ループタスク（切断時にキャンセル）
+    private var roomStateReceiveTask: Task<Void, Never>?
+
     /// USERSTATE から取得した自分のユーザー状態（楽観的 UI 生成に使用）
     ///
     /// JOIN 後とメッセージ送信後に更新される。nil の場合は login 名にフォールバックする。
@@ -116,8 +119,10 @@ final class ChatViewModel {
     /// チャンネルエモート取得済みフラグ
     private var channelEmotesFetched = false
 
-    /// 最初に受信したメッセージから抽出した room-id（楽観的 UI の ChatMessage 生成に使用）
-    private var currentRoomId: String?
+    /// 最初に受信したメッセージまたは ROOMSTATE から取得した room-id
+    ///
+    /// ROOMSTATE 購読のポーリング条件として参照できるよう `private(set)` で公開する。
+    private(set) var currentRoomId: String?
 
     /// 楽観的 UI メッセージの送信時刻マップ（messageId → 送信時刻）
     ///
@@ -243,6 +248,15 @@ final class ChatViewModel {
                 self.currentUserState = userState
             }
         }
+        // ROOMSTATE を購読して room-id を早期設定する（PRIVMSG より先に取得可能）
+        roomStateReceiveTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await self.ircClient.roomStateStream
+            for await roomId in stream {
+                guard !Task.isCancelled else { break }
+                self.applyRoomState(roomId: roomId)
+            }
+        }
     }
 
     /// チャンネルから切断する
@@ -251,6 +265,7 @@ final class ChatViewModel {
         noticeReceiveTask?.cancel()
         connectionStateReceiveTask?.cancel()
         userStateReceiveTask?.cancel()
+        roomStateReceiveTask?.cancel()
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
         globalEmoteFetchTask?.cancel()
@@ -289,6 +304,17 @@ final class ChatViewModel {
         messages.append(message)
         if messages.count > Self.maxMessages {
             messages.removeFirst(messages.count - Self.maxMessages)
+        }
+    }
+
+    /// ROOMSTATE から取得した room-id を currentRoomId に設定する
+    ///
+    /// PRIVMSG より先に届くため、接続直後のモデレーションコマンドが使えるようになる。
+    /// room-id が既に設定済みの場合は上書きしない。
+    /// チャンネルバッジ・エモートのフェッチは appendMessage() で行う。
+    private func applyRoomState(roomId: String) {
+        if currentRoomId == nil {
+            currentRoomId = roomId
         }
     }
 
