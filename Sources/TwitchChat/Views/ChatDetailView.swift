@@ -44,6 +44,15 @@ struct ChatDetailView: View {
                     ForEach(viewModel.messages) { message in
                         ChatMessageView(message: message, badgeStore: viewModel.badgeStore)
                             .id(message.id)
+                            .contextMenu {
+                                if viewModel.canSendMessage {
+                                    Button {
+                                        viewModel.startReply(to: message)
+                                    } label: {
+                                        Label("返信", systemImage: "arrowshape.turn.up.left")
+                                    }
+                                }
+                            }
                     }
                 }
             }

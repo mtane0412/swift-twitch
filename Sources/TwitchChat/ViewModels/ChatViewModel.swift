@@ -63,6 +63,9 @@ final class ChatViewModel {
     /// 最後の送信エラーメッセージ（UI 表示用、成功時は nil にリセット）
     private(set) var sendError: String?
 
+    /// 現在返信対象として選択されているメッセージ（nil の場合は通常送信）
+    private(set) var replyingTo: ChatMessage?
+
     // MARK: - プライベートプロパティ
 
     private let ircClient: any TwitchIRCClientProtocol
@@ -271,6 +274,20 @@ final class ChatViewModel {
         }
     }
 
+    // MARK: - 返信
+
+    /// 指定メッセージへの返信モードを開始する
+    ///
+    /// - Parameter message: 返信先のメッセージ
+    func startReply(to message: ChatMessage) {
+        replyingTo = message
+    }
+
+    /// 返信モードをキャンセルし、通常送信モードに戻る
+    func cancelReply() {
+        replyingTo = nil
+    }
+
     // MARK: - 送信
 
     /// コメント投稿が可能かどうか
@@ -324,8 +341,13 @@ final class ChatViewModel {
         sendError = nil
         defer { isSending = false }
 
+        // 送信時点の返信先 ID を取得し、送信成功後にリセットするために保持する
+        let parentMsgId = replyingTo?.id
+
         do {
-            try await ircClient.sendPrivmsg(ircText)
+            try await ircClient.sendPrivmsg(ircText, replyTo: parentMsgId)
+            // 返信送信成功後は返信モードを解除する
+            replyingTo = nil
             // 楽観的 UI: 自分の PRIVMSG はサーバーからエコーバックされないのでローカルで追加する
             if case .loggedIn(let login) = authState.status {
                 // USERSTATE 受信済みなら displayName / colorHex / badges に反映する
@@ -337,7 +359,8 @@ final class ChatViewModel {
                     isAction: isAction,
                     roomId: currentRoomId,
                     colorHex: currentUserState?.colorHex,
-                    badges: currentUserState?.badges ?? []
+                    badges: currentUserState?.badges ?? [],
+                    replyParentMsgId: parentMsgId
                 )
                 appendMessage(localMessage)
                 // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する

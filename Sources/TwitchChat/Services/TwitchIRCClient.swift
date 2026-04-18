@@ -106,9 +106,11 @@ protocol TwitchIRCClientProtocol: Actor {
 
     /// 接続中チャンネルに PRIVMSG を送信する
     ///
-    /// - Parameter text: 送信する本文（呼び出し元でサニタイズ済みである前提）
+    /// - Parameters:
+    ///   - text: 送信する本文（呼び出し元でサニタイズ済みである前提）
+    ///   - replyTo: 返信先メッセージの ID（省略時は nil。指定時は `@reply-parent-msg-id` タグ付きで送信）
     /// - Throws: `.notConnected`（未接続）、`.notAuthenticated`（匿名接続中）
-    func sendPrivmsg(_ text: String) async throws
+    func sendPrivmsg(_ text: String, replyTo parentMsgId: String?) async throws
 }
 
 // MARK: - TwitchIRCClient
@@ -300,10 +302,12 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
 
     /// 接続中チャンネルに PRIVMSG を送信する
     ///
-    /// - Parameter text: 送信する本文（呼び出し元でサニタイズ済みである前提）
+    /// - Parameters:
+    ///   - text: 送信する本文（呼び出し元でサニタイズ済みである前提）
+    ///   - replyTo: 返信先メッセージの ID（省略時は nil。指定時は `@reply-parent-msg-id` タグ付きで送信）
     /// - Throws: `.notConnected`（未接続）、`.notAuthenticated`（匿名接続中）、
     ///           `.rateLimited(retryAfter:)`（クライアント側レートリミット超過）
-    func sendPrivmsg(_ text: String) async throws {
+    func sendPrivmsg(_ text: String, replyTo parentMsgId: String? = nil) async throws {
         guard let channel = joinedChannel else {
             throw TwitchIRCClientError.notConnected
         }
@@ -312,8 +316,15 @@ actor TwitchIRCClient: TwitchIRCClientProtocol {
         }
         // クライアント側レートリミット事前チェック（30秒あたり30メッセージ）
         try rateLimiter.checkAndRecord()
+        // 返信先 ID が指定されている場合は @reply-parent-msg-id タグをプレフィックスとして付加する
+        let command: String
+        if let parentMsgId {
+            command = "@reply-parent-msg-id=\(parentMsgId) PRIVMSG #\(channel) :\(text)"
+        } else {
+            command = "PRIVMSG #\(channel) :\(text)"
+        }
         do {
-            try await webSocketClient.send("PRIVMSG #\(channel) :\(text)")
+            try await webSocketClient.send(command)
         } catch {
             // 送信失敗時はレートリミットスロットを返却する（実際には送られていないため）
             rateLimiter.rollbackLast()
