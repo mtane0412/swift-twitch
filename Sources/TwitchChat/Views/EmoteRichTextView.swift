@@ -166,6 +166,10 @@ struct EmoteRichTextView: NSViewRepresentable {
                 object: nil,
                 queue: .main
             ) { [weak textView] _ in
+                // TextKit 2 はレイアウトフラグメントをキャッシュするため、
+                // needsDisplay = true だけでは attachment.image が再描画に反映されない。
+                // layoutViewport() で再レイアウトを強制してから再描画を要求する。
+                textView?.textLayoutManager?.textViewportLayoutController.layoutViewport()
                 textView?.needsDisplay = true
             }
         }
