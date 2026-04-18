@@ -7,7 +7,7 @@
 // 閉鎖アニメーション中に viewport が再計算されて NSImageView が誤配置される問題のため）。
 // 現在このクラスは直接使用されていない。将来の animation 実装の参考として残している。
 
-import AppKit
+@preconcurrency import AppKit
 
 /// 入力欄のアニメーションエモート表示用テキストアタッチメントビュープロバイダ
 ///
@@ -17,7 +17,6 @@ import AppKit
 /// - Note: TextKit 1（NSLayoutManager）環境では呼ばれず、image プロパティによる静止画描画にフォールバックする
 /// - Note: macOS 12 以降で利用可能。本アプリの対象 macOS 15+ では常に有効
 @available(macOS 12.0, *)
-@MainActor
 final class AnimatedEmoteAttachmentViewProvider: NSTextAttachmentViewProvider {
 
     /// アタッチメントに対応するアニメーション再生可能な NSImageView を生成する
