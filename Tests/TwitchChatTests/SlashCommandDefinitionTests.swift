@@ -18,7 +18,13 @@ struct SlashCommandDefinitionTests {
     func testAllCommandNamesAreUnique() {
         let names = SlashCommandDefinition.allCommands.map { $0.name }
         let uniqueNames = Set(names)
-        #expect(names.count == uniqueNames.count)
+        // 重複しているコマンド名を特定してメッセージに含める
+        let duplicates = names.filter { name in names.filter { $0 == name }.count > 1 }
+        let uniqueDuplicates = Array(Set(duplicates)).sorted()
+        #expect(
+            names.count == uniqueNames.count,
+            "重複しているコマンド名: \(uniqueDuplicates.joined(separator: ", "))"
+        )
     }
 
     @Test("allCommands の各コマンドの name に先頭スラッシュが含まれないこと")
@@ -40,33 +46,20 @@ struct SlashCommandDefinitionTests {
     @Test("id は name と一致すること")
     func testIdEqualsName() {
         for command in SlashCommandDefinition.allCommands {
-            #expect(command.id == command.name)
+            #expect(
+                command.id == command.name,
+                "コマンド '\(command.name)' の id '\(command.id)' が name と一致しません"
+            )
         }
     }
 
     // MARK: - 必須コマンドの存在確認
 
-    @Test("ban コマンドが定義されていること")
-    func testBanCommandExists() {
+    @Test("主要コマンドが allCommands に定義されていること", arguments: [
+        "me", "ban", "timeout", "clear"
+    ])
+    func testEssentialCommandExists(expectedName: String) {
         let names = SlashCommandDefinition.allCommands.map { $0.name }
-        #expect(names.contains("ban"))
-    }
-
-    @Test("timeout コマンドが定義されていること")
-    func testTimeoutCommandExists() {
-        let names = SlashCommandDefinition.allCommands.map { $0.name }
-        #expect(names.contains("timeout"))
-    }
-
-    @Test("me コマンドが定義されていること")
-    func testMeCommandExists() {
-        let names = SlashCommandDefinition.allCommands.map { $0.name }
-        #expect(names.contains("me"))
-    }
-
-    @Test("clear コマンドが定義されていること")
-    func testClearCommandExists() {
-        let names = SlashCommandDefinition.allCommands.map { $0.name }
-        #expect(names.contains("clear"))
+        #expect(names.contains(expectedName), "/\(expectedName) コマンドが allCommands に定義されていません")
     }
 }

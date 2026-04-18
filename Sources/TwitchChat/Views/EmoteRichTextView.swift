@@ -475,35 +475,25 @@ struct EmoteRichTextView: NSViewRepresentable {
         }
 
         /// / スラッシュコマンドトークンを補完候補で置換し draft を更新する
-        ///
-        /// - Parameters:
-        ///   - insertion: 挿入する文字列（`/command ` 形式）
-        ///   - range: テキスト内の置換対象範囲（/ から現在クエリ末尾まで）
-        ///   - textView: 対象の NSTextView
         private func replaceSlashCommandToken(with insertion: String, range: NSRange, in textView: NSTextView) {
-            let nsRange = EmoteRichTextView.nsViewRange(from: range, in: textView.attributedString())
-            let nsString = textView.string as NSString
-            guard nsRange.location <= nsString.length,
-                  nsRange.location + nsRange.length <= nsString.length else { return }
-
-            isUpdatingFromBinding = true
-            textView.insertText(insertion, replacementRange: nsRange)
-
-            let plain = EmoteRichTextView.plainText(from: textView.attributedString())
-            if draft != plain {
-                draft = plain
-            }
+            replaceCompletionToken(with: insertion, range: range, in: textView)
         }
 
         /// @メンショントークンを補完候補で置換し draft を更新する
+        private func replaceMentionToken(with insertion: String, range: NSRange, in textView: NSTextView) {
+            replaceCompletionToken(with: insertion, range: range, in: textView)
+        }
+
+        /// 補完トークンを挿入文字列で置換し draft を更新する共通ヘルパー
+        ///
+        /// plainText 座標の NSRange を UTF-16 座標に変換し NSTextView に挿入する。
+        /// `isUpdatingFromBinding` を設定して `textDidChange` の無限ループを防ぐ。
         ///
         /// - Parameters:
-        ///   - insertion: 挿入する文字列（`@username ` 形式）
-        ///   - range: テキスト内の置換対象範囲（@ から現在クエリ末尾まで）
+        ///   - insertion: 挿入する文字列（例: `@username ` / `/command `）
+        ///   - range: テキスト内の置換対象範囲（plainText 座標）
         ///   - textView: 対象の NSTextView
-        private func replaceMentionToken(with insertion: String, range: NSRange, in textView: NSTextView) {
-            // mentionRange は plainText 座標（Character 数）で保持されているため
-            // NSTextView.insertText の replacementRange に渡す前に UTF-16 座標に変換する
+        private func replaceCompletionToken(with insertion: String, range: NSRange, in textView: NSTextView) {
             let nsRange = EmoteRichTextView.nsViewRange(from: range, in: textView.attributedString())
             let nsString = textView.string as NSString
             guard nsRange.location <= nsString.length,
@@ -512,7 +502,6 @@ struct EmoteRichTextView: NSViewRepresentable {
             isUpdatingFromBinding = true
             textView.insertText(insertion, replacementRange: nsRange)
 
-            // draft を更新
             let plain = EmoteRichTextView.plainText(from: textView.attributedString())
             if draft != plain {
                 draft = plain

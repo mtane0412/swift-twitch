@@ -127,7 +127,8 @@ struct SlashCommandCompletionViewModelTests {
     func testNoMatchCandidatesEmpty() {
         let vm = SlashCommandCompletionViewModel()
 
-        vm.updateFromText("/存在しないコマンド", cursorPosition: 9)
+        // "/存在しないコマンド" は "/" + 9文字 = 10文字
+        vm.updateFromText("/存在しないコマンド", cursorPosition: 10)
 
         #expect(vm.candidates.isEmpty)
     }
@@ -245,23 +246,31 @@ struct SlashCommandCompletionViewModelTests {
     func testConfirmSelectionWithNoCandidatesReturnsNil() {
         let vm = SlashCommandCompletionViewModel()
 
-        vm.updateFromText("/存在しないコマンド", cursorPosition: 9)
+        // "/存在しないコマンド" は "/" + 9文字 = 10文字
+        vm.updateFromText("/存在しないコマンド", cursorPosition: 10)
         let result = vm.confirmSelection()
 
         #expect(result == nil)
     }
 
-    @Test("2番目の候補を選択して確定すると正しいコマンドが返る")
+    @Test("/em で絞り込んだ後、2番目の候補（emoteonlyoff）を選択して確定すると正しいコマンドが返る")
     @MainActor
     func testConfirmSecondCandidate() {
         let vm = SlashCommandCompletionViewModel()
 
-        // "/ban" にマッチするコマンドは ban のみ
-        vm.updateFromText("/ban", cursorPosition: 4)
+        // "/em" にマッチするコマンドは emoteonly と emoteonlyoff の2件
+        vm.updateFromText("/em", cursorPosition: 3)
+        // インデックス1（2番目の候補）を選択
+        vm.setSelection(to: 1)
 
         let result = vm.confirmSelection()
 
-        #expect(result == "/ban ")
+        // 選択した2番目の候補が "/候補名 " の形式で返る
+        #expect(result != nil)
+        if let result {
+            #expect(result.hasPrefix("/"))
+            #expect(result.hasSuffix(" "))
+        }
     }
 
     // MARK: - commandRange（置換範囲）

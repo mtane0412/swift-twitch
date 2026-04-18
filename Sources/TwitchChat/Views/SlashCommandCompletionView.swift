@@ -34,10 +34,19 @@ struct SlashCommandCompletionView: View {
         let listHeight = CGFloat(visibleCount) * Self.rowHeight
             + CGFloat(max(0, visibleCount - 1)) * Self.dividerHeight
 
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
-                    candidateRow(candidate: candidate, index: index)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
+                        candidateRow(candidate: candidate, index: index)
+                            .id(candidate.id)
+                    }
+                }
+            }
+            .onChange(of: selectedIndex) { _, newIndex in
+                guard newIndex < candidates.count else { return }
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    proxy.scrollTo(candidates[newIndex].id, anchor: .center)
                 }
             }
         }

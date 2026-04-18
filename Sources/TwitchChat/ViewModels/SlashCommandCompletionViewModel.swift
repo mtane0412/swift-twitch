@@ -51,9 +51,10 @@ final class SlashCommandCompletionViewModel {
 
         commandRange = NSRange(location: 0, length: tokenInfo.tokenNSLength)
 
+        let lowercasedQuery = tokenInfo.query.lowercased()
         let newCandidates = SlashCommandDefinition.allCommands.filter { command in
-            if tokenInfo.query.isEmpty { return true }
-            return command.name.lowercased().hasPrefix(tokenInfo.query.lowercased())
+            if lowercasedQuery.isEmpty { return true }
+            return command.name.lowercased().hasPrefix(lowercasedQuery)
         }
         candidates = newCandidates
         selectedIndex = 0

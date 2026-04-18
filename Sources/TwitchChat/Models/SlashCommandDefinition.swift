@@ -11,7 +11,7 @@ import Foundation
 /// `name` フィールドで紐づける。
 ///
 /// - Note: `allCommands` は静的リストとして定義する。
-struct SlashCommandDefinition: Identifiable {
+struct SlashCommandDefinition: Identifiable, Hashable {
 
     /// コマンド名（先頭スラッシュなし。例: "ban", "timeout"）
     let name: String
@@ -113,6 +113,91 @@ struct SlashCommandDefinition: Identifiable {
             name: "delete",
             description: "特定のメッセージを削除する",
             usage: "/delete <メッセージID>"
+        ),
+        SlashCommandDefinition(
+            name: "mod",
+            description: "ユーザーをモデレーターに任命する",
+            usage: "/mod <ユーザー名>"
+        ),
+        SlashCommandDefinition(
+            name: "unmod",
+            description: "ユーザーのモデレーター権限を解除する",
+            usage: "/unmod <ユーザー名>"
+        ),
+        SlashCommandDefinition(
+            name: "vip",
+            description: "ユーザーにVIP権限を付与する",
+            usage: "/vip <ユーザー名>"
+        ),
+        SlashCommandDefinition(
+            name: "unvip",
+            description: "ユーザーのVIP権限を解除する",
+            usage: "/unvip <ユーザー名>"
+        ),
+        SlashCommandDefinition(
+            name: "raid",
+            description: "別のチャンネルにレイドする",
+            usage: "/raid <チャンネル名>"
+        ),
+        SlashCommandDefinition(
+            name: "unraid",
+            description: "レイドをキャンセルする",
+            usage: nil
+        ),
+        SlashCommandDefinition(
+            name: "host",
+            description: "別のチャンネルをホストする",
+            usage: "/host <チャンネル名>"
+        ),
+        SlashCommandDefinition(
+            name: "unhost",
+            description: "ホストを終了する",
+            usage: nil
+        ),
+        SlashCommandDefinition(
+            name: "w",
+            description: "ウィスパー（非公開メッセージ）を送信する",
+            usage: "/w <ユーザー名> <メッセージ>"
+        ),
+        SlashCommandDefinition(
+            name: "mods",
+            description: "モデレーター一覧を表示する",
+            usage: nil
+        ),
+        SlashCommandDefinition(
+            name: "vips",
+            description: "VIP一覧を表示する",
+            usage: nil
+        ),
+        SlashCommandDefinition(
+            name: "announcement",
+            description: "アナウンスメッセージを送信する",
+            usage: "/announcement <メッセージ>"
+        ),
+        SlashCommandDefinition(
+            name: "warn",
+            description: "ユーザーに警告を送る",
+            usage: "/warn <ユーザー名> <理由>"
+        ),
+        SlashCommandDefinition(
+            name: "commercial",
+            description: "広告を再生する",
+            usage: "/commercial <秒数>"
+        ),
+        SlashCommandDefinition(
+            name: "color",
+            description: "チャット名前の色を変更する",
+            usage: "/color <色名またはHEX>"
+        ),
+        SlashCommandDefinition(
+            name: "shield",
+            description: "シールドモードを有効にする",
+            usage: nil
+        ),
+        SlashCommandDefinition(
+            name: "shieldoff",
+            description: "シールドモードを無効にする",
+            usage: nil
         )
     ]
 }

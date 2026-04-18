@@ -237,8 +237,11 @@ struct ChatInputBar: View {
             }
         }
         // / スラッシュコマンド補完ドロップダウン（入力バーの上に表示、@メンション補完と排他的）
+        // slashCommandCompletionVM.isActive が true の場合 mentionCompletionVM は必ず非アクティブだが、
+        // ビュー層でも明示的に排他制御して安全性を高める
         .overlay(alignment: .top) {
-            if slashCommandCompletionVM.isActive && !slashCommandCompletionVM.candidates.isEmpty {
+            if slashCommandCompletionVM.isActive && !slashCommandCompletionVM.candidates.isEmpty
+                && !mentionCompletionVM.isActive {
                 SlashCommandCompletionView(
                     candidates: slashCommandCompletionVM.candidates,
                     selectedIndex: slashCommandCompletionVM.selectedIndex
@@ -252,9 +255,10 @@ struct ChatInputBar: View {
                 ) * SlashCommandCompletionView.rowHeight)
             }
         }
-        // @メンション補完ドロップダウン（入力バーの上に表示）
+        // @メンション補完ドロップダウン（入力バーの上に表示、スラッシュ補完と排他的）
         .overlay(alignment: .top) {
-            if mentionCompletionVM.isActive && !mentionCompletionVM.candidates.isEmpty {
+            if mentionCompletionVM.isActive && !mentionCompletionVM.candidates.isEmpty
+                && !slashCommandCompletionVM.isActive {
                 MentionCompletionView(
                     candidates: mentionCompletionVM.candidates,
                     selectedIndex: mentionCompletionVM.selectedIndex
