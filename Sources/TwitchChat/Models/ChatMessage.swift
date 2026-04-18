@@ -77,6 +77,12 @@ struct ChatMessage: Sendable, Identifiable {
     /// このメッセージが他のメッセージへの返信である場合に設定される。通常メッセージは nil。
     let replyParentMsgId: String?
 
+    /// 楽観的 UI メッセージかどうか（送信直後にローカルで生成したメッセージ）
+    ///
+    /// true の場合は Twitch サーバーが認識する本物の message ID を持たないため、
+    /// このメッセージへの返信機能を無効化する必要がある。
+    let isOptimistic: Bool
+
     /// 返信先ユーザーのログイン名（`reply-parent-user-login` タグ）
     let replyParentUserLogin: String?
 
@@ -126,6 +132,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentUserLogin = nil
         self.replyParentDisplayName = nil
         self.replyParentMsgBody = nil
+        self.isOptimistic = true
     }
 
     /// IRCMessage から ChatMessage を生成する
@@ -172,5 +179,6 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentUserLogin = ircMessage.tags["reply-parent-user-login"].flatMap { $0.isEmpty ? nil : $0 }
         self.replyParentDisplayName = ircMessage.tags["reply-parent-display-name"].flatMap { $0.isEmpty ? nil : $0 }
         self.replyParentMsgBody = ircMessage.tags["reply-parent-msg-body"].flatMap { $0.isEmpty ? nil : $0 }
+        self.isOptimistic = false
     }
 }

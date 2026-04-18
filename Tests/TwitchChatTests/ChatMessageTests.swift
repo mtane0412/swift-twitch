@@ -380,6 +380,37 @@ struct ChatMessageTests {
         #expect(chatMessage.badges.isEmpty)
     }
 
+    // MARK: - 楽観的 UI フラグ
+
+    @Test("IRCMessage から変換した ChatMessage は isOptimistic が false になる")
+    func IRCMessageから変換したChatMessageはisOptimisticがfalseになる() {
+        // 前提: 通常の PRIVMSG（Twitch サーバーから受信したメッセージ）
+        let rawMessage = "@badges=subscriber/6;color=#FF0000;display-name=山田太郎;id=abc-123 :yamadataro!yamadataro@yamadataro.tmi.twitch.tv PRIVMSG #ch :こんにちは"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: サーバー受信メッセージは isOptimistic が false（本物の message ID を持つ）
+        guard let chatMessage = ChatMessage(from: ircMessage) else {
+            Issue.record("ChatMessage への変換に失敗しました")
+            return
+        }
+        #expect(chatMessage.isOptimistic == false)
+    }
+
+    @Test("楽観的 UI 用イニシャライザで生成した ChatMessage は isOptimistic が true になる")
+    func 楽観的UI用イニシャライザで生成したChatMessageはisOptimisticがtrueになる() {
+        // 前提: 送信直後にローカルで生成する楽観的 UI メッセージ
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            text: "送信したメッセージ"
+        )
+
+        // 検証: 楽観的 UI メッセージは isOptimistic が true（Twitch が認識できない UUID を持つ）
+        #expect(chatMessage.isOptimistic == true)
+    }
+
     // MARK: - 返信（Reply）
 
     @Test("返信タグ付き PRIVMSG から返信メタデータが読み取れる")
