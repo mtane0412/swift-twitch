@@ -104,6 +104,30 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
     }
 }
 
+// MARK: - ModerationService モック
+
+/// ModerationService のテスト用モック
+actor MockModerationService: ModerationServiceProtocol {
+    /// execute() が呼ばれた回数
+    private(set) var executeCallCount = 0
+    /// 最後に渡されたコマンド
+    private(set) var lastCommand: ChatCommand?
+    /// true の場合、execute() で HelixAPIError.unauthorized を throw する
+    var shouldThrowUnauthorized: Bool = false
+
+    func execute(command: ChatCommand, broadcasterId: String, moderatorId: String) async throws {
+        if shouldThrowUnauthorized {
+            throw HelixAPIError.unauthorized
+        }
+        executeCallCount += 1
+        lastCommand = command
+    }
+
+    func setUnauthorized(_ value: Bool) {
+        shouldThrowUnauthorized = value
+    }
+}
+
 // MARK: - テスト
 
 /// ChatViewModel のテストスイート
@@ -581,6 +605,16 @@ struct ChatViewModelTests {
         return ChatMessage(from: ircMessage)!
     }
 
+    /// room-id タグ付きのテスト用 ChatMessage を生成する
+    ///
+    /// `/ban` 等のモデレーションコマンドテストで `currentRoomId` を設定するために使用する
+    private func makeTestChatMessageWithRoomId(displayName: String, text: String, roomId: String) -> ChatMessage {
+        // swiftlint:disable:next line_length
+        let rawMessage = "@badges=;color=#FF0000;display-name=\(displayName);emotes=;id=\(UUID().uuidString);room-id=\(roomId);user-id=12345 :testuser!testuser@testuser.tmi.twitch.tv PRIVMSG #testchannel :\(text)"
+        let ircMessage = IRCMessageParser.parse(rawMessage)!
+        return ChatMessage(from: ircMessage)!
+    }
+
     /// chat:edit スコープ付きでログイン済みの AuthState を生成するヘルパー
     ///
     /// MockTwitchAuthClient を使って Device Code Flow をシミュレートし、
@@ -880,5 +914,104 @@ struct ChatViewModelTests {
         // 検証: 最後に発言した ユーザーB が先頭に来る
         let candidates = viewModel.mentionStore.candidates(matching: "")
         #expect(candidates.first?.displayName == "ユーザーB")
+    }
+
+    // MARK: - コマンドルーティング
+
+    @Test("通常テキストは IRC PRIVMSG として送信されること")
+    func 通常テキストはIRCで送信されること() async throws {
+        // 前提: ログイン済みでチャンネルに接続し、MockModerationService を注入する
+        let mockClient = MockTwitchIRCClient()
+        let mockModeration = MockModerationService()
+        let authState = try await makeLoggedInAuthState(userLogin: "テストユーザー")
+        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
+        await viewModel.connect(to: "テストチャンネル")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 実行: 通常テキストを送信する
+        try await viewModel.sendMessage("こんにちは！")
+
+        // 検証: IRC に送信され、ModerationService は呼ばれない
+        let privmsgs = await mockClient.sentPrivmsgs
+        #expect(privmsgs.contains("こんにちは！"))
+        let moderationCallCount = await mockModeration.executeCallCount
+        #expect(moderationCallCount == 0)
+    }
+
+    @Test("/me コマンドは IRC ACTION として送信されること")
+    func meコマンドはIRC_ACTIONとして送信されること() async throws {
+        // 前提: ログイン済みでチャンネルに接続し、MockModerationService を注入する
+        let mockClient = MockTwitchIRCClient()
+        let mockModeration = MockModerationService()
+        let authState = try await makeLoggedInAuthState(userLogin: "テストユーザー")
+        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
+        await viewModel.connect(to: "テストチャンネル")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 実行: /me コマンドを送信する
+        try await viewModel.sendMessage("/me 踊る")
+
+        // 検証: IRC に ACTION 形式で送信され、ModerationService は呼ばれない
+        let privmsgs = await mockClient.sentPrivmsgs
+        #expect(privmsgs.contains("\u{1}ACTION 踊る\u{1}"))
+        let moderationCallCount = await mockModeration.executeCallCount
+        #expect(moderationCallCount == 0)
+    }
+
+    @Test("/ban コマンドは ModerationService に渡されること")
+    func banコマンドはModerationServiceに渡されること() async throws {
+        // 前提: ログイン済みでチャンネルに接続し、MockModerationService を注入する
+        let mockClient = MockTwitchIRCClient()
+        let mockModeration = MockModerationService()
+        let authState = try await makeLoggedInAuthState(userLogin: "モデレーター")
+        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
+        await viewModel.connect(to: "テストチャンネル")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // チャットメッセージを受信して room-id を設定する
+        let msg = makeTestChatMessageWithRoomId(displayName: "テストユーザー", text: "こんにちは", roomId: "チャンネルRoomId")
+        await mockClient.sendMessage(msg)
+        await waitFor { viewModel.messages.count >= 1 }
+
+        // 実行: /ban コマンドを送信する
+        try await viewModel.sendMessage("/ban あらし太郎 荒らし行為")
+
+        // 検証: ModerationService に .ban コマンドが渡される
+        let callCount = await mockModeration.executeCallCount
+        #expect(callCount == 1)
+        let lastCommand = await mockModeration.lastCommand
+        #expect(lastCommand == .ban(username: "あらし太郎", reason: "荒らし行為"))
+
+        // IRC には送信されない
+        let privmsgs = await mockClient.sentPrivmsgs
+        #expect(privmsgs.isEmpty)
+    }
+
+    @Test("未知のスラッシュコマンドは unknownCommand エラーになること")
+    func 未知のスラッシュコマンドはエラーになること() async throws {
+        // 前提: ログイン済みでチャンネルに接続する
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "テストユーザー")
+
+        // 実行・検証: /unknowncmd は unknownCommand エラーになる
+        await #expect(throws: ChatSendError.unknownCommand("unknowncmd")) {
+            try await viewModel.sendMessage("/unknowncmd 引数")
+        }
+    }
+
+    @Test("room-id 未取得のモデレーションコマンドは roomIdNotAvailable エラーになること")
+    func roomId未取得のコマンドはエラーになること() async throws {
+        // 前提: ログイン済みだが、まだチャットメッセージを受信していない（room-id なし）
+        let mockClient = MockTwitchIRCClient()
+        let mockModeration = MockModerationService()
+        let authState = try await makeLoggedInAuthState(userLogin: "モデレーター")
+        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
+        await viewModel.connect(to: "テストチャンネル")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        // room-id を設定しない（メッセージ未受信）
+
+        // 実行・検証: roomIdNotAvailable エラーになる
+        await #expect(throws: ChatSendError.roomIdNotAvailable) {
+            try await viewModel.sendMessage("/ban あらし太郎")
+        }
     }
 }

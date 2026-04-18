@@ -132,22 +132,28 @@ final class ChatViewModel {
 
     // MARK: - 初期化
 
+    /// モデレーションコマンド実行サービス
+    private let moderationService: any ModerationServiceProtocol
+
     /// ChatViewModel を初期化する
     ///
     /// - Parameters:
     ///   - ircClient: IRC クライアント（テスト時はモックを注入）
     ///   - authState: 認証状態（ログイン済みなら認証接続に使用）
     ///   - apiClient: Helix API クライアント（テスト時はモックを注入）
+    ///   - moderationService: モデレーションサービス（テスト時はモックを注入）
     init(
         ircClient: any TwitchIRCClientProtocol = TwitchIRCClient(),
         authState: AuthState = AuthState(),
-        apiClient: (any HelixAPIClientProtocol)? = nil
+        apiClient: (any HelixAPIClientProtocol)? = nil,
+        moderationService: (any ModerationServiceProtocol)? = nil
     ) {
         self.ircClient = ircClient
         self.authState = authState
         let helixClient = apiClient ?? HelixAPIClient(tokenProvider: authState)
         self.badgeStore = BadgeStore(apiClient: helixClient)
         self.emoteStore = EmoteStore(apiClient: helixClient)
+        self.moderationService = moderationService ?? ModerationService(apiClient: helixClient)
     }
 
     // MARK: - 接続・切断
@@ -330,14 +336,17 @@ final class ChatViewModel {
         return authState.canSendChat
     }
 
-    /// 入力テキストをサニタイズして PRIVMSG を送信し、楽観的 UI を更新する
+    /// 入力テキストをサニタイズしてコマンドパースし、IRC 送信または Helix API 呼び出しにルーティングする
     ///
     /// Twitch IRC は自分の PRIVMSG をエコーバックしないため、
     /// 送信成功後にローカルで ChatMessage を生成して `messages` に追加する。
+    /// スラッシュコマンドは ChatCommandParser で解析し、IRC 経由（/me）または Helix API にルーティングする。
     ///
     /// - Parameter text: 生の入力テキスト（改行・空白を含む場合がある）
     /// - Throws: `ChatSendError.empty`（空文字）、`.tooLong`（500 文字超）、
     ///           `.notReady`（未接続・未ログイン・スコープ不足）、
+    ///           `.unknownCommand`（未知のスラッシュコマンド）、
+    ///           `.roomIdNotAvailable`（room-id 未取得）、
     ///           または IRC クライアントが throw するエラー
     func sendMessage(_ text: String) async throws {
         let sanitized = Self.sanitize(text)
@@ -345,8 +354,41 @@ final class ChatViewModel {
         guard sanitized.count <= 500 else { throw ChatSendError.tooLong }
         guard canSendMessage else { throw ChatSendError.notReady }
 
-        let (ircText, isAction, displayText) = try Self.prepareIRCText(sanitized)
+        let command = ChatCommandParser.parse(sanitized)
 
+        switch command {
+        case .me(let rawMessage):
+            // /me コマンドは IRC 経由で ACTION 形式に変換して送信する
+            // 本文前後の空白はトリムする（例: "/me   hello   " → "hello"）
+            let message = rawMessage.trimmingCharacters(in: .whitespaces)
+            guard !message.isEmpty else { throw ChatSendError.empty }
+            let ircText = "\u{1}ACTION \(message)\u{1}"
+            guard ircText.count <= 500 else { throw ChatSendError.tooLong }
+            try await sendIRCMessage(ircText, displayText: message, isAction: true)
+
+        case .plainText(let messageText):
+            // 通常テキストは IRC PRIVMSG として送信する
+            try await sendIRCMessage(messageText, displayText: messageText, isAction: false)
+
+        case .unknown(let name, _):
+            // 未知のスラッシュコマンドはエラーとして扱う
+            let error = ChatSendError.unknownCommand(name)
+            sendError = error.localizedDescription
+            throw error
+
+        default:
+            // Helix API コマンド（ban/timeout/emoteonly 等）
+            try await executeHelixCommand(command)
+        }
+    }
+
+    /// IRC PRIVMSG を送信して楽観的 UI を更新する
+    ///
+    /// - Parameters:
+    ///   - ircText: IRC に送信するテキスト（ACTION 形式等に変換済み）
+    ///   - displayText: UI に表示するテキスト
+    ///   - isAction: ACTION 形式（/me コマンド）かどうか
+    private func sendIRCMessage(_ ircText: String, displayText: String, isAction: Bool) async throws {
         isSending = true
         sendError = nil
         defer { isSending = false }
@@ -369,28 +411,64 @@ final class ChatViewModel {
         }
     }
 
-    /// IRC 送信用のテキストを準備する
+    /// Helix API コマンド（モデレーションコマンド等）を実行する
     ///
-    /// `/me` コマンドを検出して ACTION 形式に変換し、IRC 送信文字列・isAction フラグ・表示テキストを返す。
-    ///
-    /// - Parameter sanitized: サニタイズ済みの入力テキスト
-    /// - Returns: `(ircText, isAction, displayText)` のタプル
-    /// - Throws: `ChatSendError.empty`（/me 本文なし）、`.tooLong`（ACTION 変換後500文字超）
-    private static func prepareIRCText(_ sanitized: String) throws -> (ircText: String, isAction: Bool, displayText: String) {
-        // /me コマンドの検出: "/me" または "/me " で始まる場合は ACTION 形式に変換して送信する
-        // 大文字小文字は区別しない（/Me, /ME なども検出する）
-        let lower = sanitized.lowercased()
-        if lower == "/me" || lower.hasPrefix("/me ") {
-            let body = lower.hasPrefix("/me ")
-                ? String(sanitized.dropFirst("/me ".count)).trimmingCharacters(in: .whitespaces)
-                : ""
-            guard !body.isEmpty else { throw ChatSendError.empty }
-            let ircText = "\u{1}ACTION \(body)\u{1}"
-            // ACTION 変換後の IRC 送信文字列でサーバー制限（500文字）を再チェックする
-            guard ircText.count <= 500 else { throw ChatSendError.tooLong }
-            return (ircText, true, body)
+    /// - Parameter command: 実行する ChatCommand（ban/timeout/emoteonly 等）
+    /// - Throws: `ChatSendError.roomIdNotAvailable`、`HelixAPIError`
+    private func executeHelixCommand(_ command: ChatCommand) async throws {
+        guard let broadcasterId = currentRoomId else {
+            let error = ChatSendError.roomIdNotAvailable
+            sendError = error.localizedDescription
+            throw error
         }
-        return (sanitized, false, sanitized)
+        guard let moderatorId = authState.userId else {
+            let error = ChatSendError.notReady
+            sendError = error.localizedDescription
+            throw error
+        }
+
+        isSending = true
+        sendError = nil
+        defer { isSending = false }
+
+        do {
+            try await moderationService.execute(command: command, broadcasterId: broadcasterId, moderatorId: moderatorId)
+            // 成功時はシステム通知をチャットに表示する
+            appendSystemNotice(commandSuccessMessage(for: command))
+        } catch let helixError as HelixAPIError {
+            sendError = helixError.localizedDescription
+            throw helixError
+        } catch {
+            sendError = error.localizedDescription
+            throw error
+        }
+    }
+
+    /// コマンド成功時に表示するシステム通知メッセージを返す
+    private func commandSuccessMessage(for command: ChatCommand) -> String {
+        switch command {
+        case .ban(let username, _): return "/ban \(username): BANしました"
+        case .timeout(let username, let duration, _): return "/timeout \(username): \(duration)秒のタイムアウトを設定しました"
+        case .unban(let username), .untimeout(let username): return "\(username) の制限を解除しました"
+        case .emoteOnly(let enabled): return enabled ? "エモートオンリーモードを有効にしました" : "エモートオンリーモードを無効にしました"
+        case .slow(let seconds): return "スローモードを有効にしました（\(seconds ?? 30)秒）"
+        case .slowOff: return "スローモードを無効にしました"
+        case .subscribers(let enabled): return enabled ? "サブスクライバーモードを有効にしました" : "サブスクライバーモードを無効にしました"
+        case .followers(let duration): return duration != nil ? "フォロワーモードを有効にしました（\(duration!)日）" : "フォロワーモードを有効にしました"
+        case .followersOff: return "フォロワーモードを無効にしました"
+        case .uniqueChat(let enabled): return enabled ? "ユニークチャットモードを有効にしました" : "ユニークチャットモードを無効にしました"
+        case .clear: return "チャットをクリアしました"
+        case .delete(let msgId): return "メッセージ \(msgId) を削除しました"
+        default: return "コマンドを実行しました"
+        }
+    }
+
+    /// システム通知メッセージをチャットリストに追加する
+    ///
+    /// モデレーションコマンドの成功・失敗等のフィードバックに使用する
+    private func appendSystemNotice(_ text: String) {
+        let notice = ChatMessage(systemNotice: text, roomId: currentRoomId)
+        appendMessage(notice)
     }
 
     /// 楽観的 UI メッセージを生成して追加する
@@ -502,6 +580,14 @@ enum ChatSendError: Error, LocalizedError, Equatable {
     case verificationRequired
     /// 上記以外のサーバー起因エラー（エラー文言をそのまま保持）
     case serverRejected(String)
+    /// 未知のスラッシュコマンド（補完候補にないコマンドを入力した場合）
+    case unknownCommand(String)
+    /// チャンネル接続前でまだ room-id が不明（まだメッセージを受信していない）
+    case roomIdNotAvailable
+    /// モデレーションコマンドに必要なOAuthスコープが付与されていない
+    ///
+    /// - Parameter required: 必要なスコープ一覧（例: ["channel:moderate"]）
+    case scopeInsufficient(required: [String])
 
     var errorDescription: String? {
         switch self {
@@ -535,6 +621,12 @@ enum ChatSendError: Error, LocalizedError, Equatable {
             return "投稿にはメール/電話番号の認証が必要です"
         case .serverRejected(let message):
             return "送信できませんでした: \(message)"
+        case .unknownCommand(let name):
+            return "不明なコマンドです: /\(name)"
+        case .roomIdNotAvailable:
+            return "チャンネル情報を取得中です。しばらくしてから再試行してください"
+        case .scopeInsufficient(let required):
+            return "このコマンドには追加の権限が必要です（\(required.joined(separator: ", "))）。再ログインしてください"
         }
     }
 

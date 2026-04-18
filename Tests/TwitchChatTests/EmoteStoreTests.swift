@@ -25,6 +25,22 @@ struct MockHelixAPIClientForEmote: HelixAPIClientProtocol {
         }
         throw URLError(.badServerResponse)
     }
+
+    func post<Body: Encodable & Sendable, T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws -> T {
+        throw URLError(.badServerResponse)
+    }
+
+    func postNoContent<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+        throw URLError(.badServerResponse)
+    }
+
+    func patch<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+        throw URLError(.badServerResponse)
+    }
+
+    func delete(url: URL, queryItems: [URLQueryItem]?) async throws {
+        throw URLError(.badServerResponse)
+    }
 }
 
 // MARK: - テスト用エモートデータ
@@ -161,6 +177,22 @@ struct EmoteStoreTests {
                 if let response = HelixEmotesResponse(data: []) as? T {
                     return response
                 }
+                throw URLError(.badServerResponse)
+            }
+
+            func post<Body: Encodable & Sendable, T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws -> T {
+                throw URLError(.badServerResponse)
+            }
+
+            func postNoContent<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+                throw URLError(.badServerResponse)
+            }
+
+            func patch<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+                throw URLError(.badServerResponse)
+            }
+
+            func delete(url: URL, queryItems: [URLQueryItem]?) async throws {
                 throw URLError(.badServerResponse)
             }
         }
