@@ -1,17 +1,17 @@
-// MentionCompletionView.swift
-// @メンション補完のドロップダウン候補リスト表示ビュー
-// 入力バーの上に重ねて表示し、ユーザー名候補を一覧する
+// SlashCommandCompletionView.swift
+// スラッシュコマンド補完のドロップダウン候補リスト表示ビュー
+// 入力バーの上に重ねて表示し、利用可能なコマンド一覧を表示する
 
 import SwiftUI
 
-/// @メンション補完候補のドロップダウンビュー
+/// スラッシュコマンド補完候補のドロップダウンビュー
 ///
 /// `ChatInputBar` の `inputForm` に `.overlay` で重ね、入力バーの上方向に表示する。
 /// クリックで候補を選択確定できる。キーボード操作は `EmoteRichTextView` が担当する。
-struct MentionCompletionView: View {
+struct SlashCommandCompletionView: View {
 
     /// 表示する候補一覧
-    var candidates: [MentionStore.UserCandidate]
+    var candidates: [SlashCommandDefinition]
 
     /// 現在選択中の候補インデックス
     var selectedIndex: Int
@@ -44,10 +44,19 @@ struct MentionCompletionView: View {
     var body: some View {
         let listHeight = Self.listHeight(for: candidates.count)
 
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
-                    candidateRow(candidate: candidate, index: index)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
+                        candidateRow(candidate: candidate, index: index)
+                            .id(candidate.id)
+                    }
+                }
+            }
+            .onChange(of: selectedIndex) { _, newIndex in
+                guard newIndex < candidates.count else { return }
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    proxy.scrollTo(candidates[newIndex].id, anchor: .center)
                 }
             }
         }
@@ -65,26 +74,25 @@ struct MentionCompletionView: View {
 
     /// 候補1件分の行ビュー
     @ViewBuilder
-    private func candidateRow(candidate: MentionStore.UserCandidate, index: Int) -> some View {
+    private func candidateRow(candidate: SlashCommandDefinition, index: Int) -> some View {
         let isSelected = index == selectedIndex
         Button {
             onSelect(index)
         } label: {
             HStack(spacing: 8) {
-                // ユーザー名（displayName を優先表示）
+                // コマンド名と説明文
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(candidate.displayName)
-                        .font(.system(size: 13, weight: .medium))
+                    // コマンド名: monospace 太字で表示
+                    Text("/\(candidate.name)")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .lineLimit(1)
 
-                    // displayName と username が異なる場合のみ username をサブテキストで表示
-                    if candidate.displayName.lowercased() != candidate.username {
-                        Text("@\(candidate.username)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(isSelected ? Color.white.opacity(0.8) : Color.secondary)
-                            .lineLimit(1)
-                    }
+                    // 説明文: secondary カラーで表示
+                    Text(candidate.description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(isSelected ? Color.white.opacity(0.8) : Color.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer()
@@ -94,7 +102,7 @@ struct MentionCompletionView: View {
             .background(isSelected ? Color.accentColor : Color.clear)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(candidate.displayName)（@\(candidate.username)）")
+        .accessibilityLabel("/\(candidate.name): \(candidate.description)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
 
         if index < candidates.count - 1 {
