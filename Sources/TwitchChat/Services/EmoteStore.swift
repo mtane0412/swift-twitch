@@ -106,6 +106,17 @@ actor EmoteStore {
         }
     }
 
+    /// エモート名でエモートを検索する
+    ///
+    /// チャンネルエモートを優先し、見つからない場合はグローバルエモートを検索する。
+    /// 大文字小文字を区別する完全一致で検索する（Twitch エモート名は大文字小文字を区別するため）。
+    ///
+    /// - Parameter name: エモート名（例: "LUL", "PogChamp"）
+    /// - Returns: 見つかった HelixEmote、存在しない場合は nil
+    func emote(byName name: String) -> HelixEmote? {
+        (channelEmotes + globalEmotes).first(where: { $0.name == name })
+    }
+
     /// ピッカー用エモート一覧を返す
     ///
     /// チャンネルエモートを先頭に、グローバルエモートをその後に並べて返す。

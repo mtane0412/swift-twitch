@@ -2,6 +2,7 @@
 // EmoteImageCache の単体テスト
 // URL 生成ロジックとエモート表示サイズを検証する（画像ダウンロードは外部依存のためテスト対象外）
 
+import Foundation
 import Testing
 @testable import TwitchChat
 
@@ -60,5 +61,15 @@ struct EmoteImageCacheTests {
         // 前提: 13pt フォントの行高に合わせてエモート表示サイズは 20pt と定義されている
         // 検証: 定数が 20pt であることを確認（リグレッション防止）
         #expect(EmoteImageCache.emoteDisplaySize == 20)
+    }
+
+    // MARK: - 同期キャッシュ読み取り
+
+    @Test("キャッシュ未登録のエモートは cachedImage(for:) で nil を返す")
+    func cachedImageReturnsNilForUncachedEmote() {
+        // 前提: キャッシュに登録されていないエモートID
+        // 検証: nil が返る（ダウンロードは発生しない）
+        let result = EmoteImageCache.shared.cachedImage(for: "未登録エモートID_テスト用_\(UUID())")
+        #expect(result == nil)
     }
 }

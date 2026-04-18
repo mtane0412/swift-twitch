@@ -136,22 +136,24 @@ struct ChatInputBar: View {
             .disabled(!viewModel.canSendMessage)
 
             VStack(alignment: .trailing, spacing: 2) {
-                // テキストフィールド（複数行対応）
-                TextField("コメントを送信", text: $draft, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(.textBackgroundColor))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color(.separatorColor), lineWidth: 0.5)
-                            )
-                    )
-                    .disabled(!viewModel.canSendMessage)
-                    .onSubmit(submit)
+                // リッチテキスト入力欄（エモートをインライン画像で表示）
+                EmoteRichTextView(
+                    draft: $draft,
+                    emoteStore: viewModel.emoteStore,
+                    onSubmit: submit,
+                    isDisabled: !viewModel.canSendMessage
+                )
+                .frame(minHeight: 28, maxHeight: 100)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(.textBackgroundColor))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color(.separatorColor), lineWidth: 0.5)
+                        )
+                )
 
                 // 文字数カウンタ（450 文字超で警告）
                 if !draft.isEmpty {

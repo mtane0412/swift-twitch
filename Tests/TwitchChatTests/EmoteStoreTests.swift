@@ -170,4 +170,38 @@ struct EmoteStoreTests {
 
         #expect(fetchCount == 1)
     }
+
+    // MARK: - エモート名逆引き
+
+    @Test("emote(byName:) でグローバルエモートを名前で検索できる")
+    func testEmoteByNameFindsGlobalEmote() async {
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートLUL, .グローバルエモートPogChamp])
+
+        let result = await store.emote(byName: "LUL")
+        #expect(result?.id == "425618")
+        #expect(result?.name == "LUL")
+    }
+
+    @Test("emote(byName:) でチャンネルエモートはグローバルエモートより優先される")
+    func testEmoteByNamePrefersChannelEmote() async {
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        // チャンネルエモートとグローバルエモートで同名の場合、チャンネルエモートが返る
+        let globalLUL = HelixEmote(id: "グローバルID", name: "LUL", format: ["static"], emoteType: "globals")
+        let channelLUL = HelixEmote(id: "チャンネルID", name: "LUL", format: ["static"], emoteType: "subscriptions")
+        await store.setGlobalEmotes([globalLUL])
+        await store.setChannelEmotes([channelLUL])
+
+        let result = await store.emote(byName: "LUL")
+        #expect(result?.id == "チャンネルID")
+    }
+
+    @Test("emote(byName:) で存在しない名前は nil を返す")
+    func testEmoteByNameReturnsNilForUnknown() async {
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートLUL])
+
+        let result = await store.emote(byName: "存在しないエモート")
+        #expect(result == nil)
+    }
 }

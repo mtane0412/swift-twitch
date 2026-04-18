@@ -100,6 +100,17 @@ final class EmoteImageCache: @unchecked Sendable {
         lock.withLock { animatedEmoteIds.contains(emoteId) }
     }
 
+    /// キャッシュ済みのエモート画像を同期的に返す（ダウンロードは行わない）
+    ///
+    /// NSTextAttachment の描画など、非同期処理が使えない文脈で使用する。
+    /// キャッシュにない場合は nil を返す。ダウンロードが必要な場合は `image(for:)` を使用すること。
+    ///
+    /// - Parameter emoteId: Twitch エモートID
+    /// - Returns: キャッシュ済みの NSImage、未キャッシュの場合は nil
+    func cachedImage(for emoteId: String) -> NSImage? {
+        imageCache.object(forKey: emoteId as NSString)
+    }
+
     // MARK: - URL 生成
 
     /// エモート画像の CDN URL を生成する

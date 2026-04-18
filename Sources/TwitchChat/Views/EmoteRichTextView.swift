@@ -1,0 +1,234 @@
+// EmoteRichTextView.swift
+// エモートインライン表示対応のリッチテキスト入力ビュー
+// NSTextView をラップし、エモート名を自動検出して画像に置換する NSViewRepresentable
+
+import AppKit
+import SwiftUI
+
+/// エモートインライン表示対応の入力ビュー
+///
+/// SwiftUI の `TextField` の代替として使用する。
+/// スペース入力後に直前の単語が既知のエモート名と一致する場合、
+/// `EmoteTextAttachment` で画像に置換してインライン表示する。
+///
+/// - 送信時は `draft` バインディングに格納されたプレーンテキスト（エモート名を含む）を使用する
+/// - プレーンテキストへの変換は `plainText(from:)` が担当する
+struct EmoteRichTextView: NSViewRepresentable {
+
+    /// エモート名を含むプレーンテキスト（文字数カウント・送信テキストとして使用）
+    @Binding var draft: String
+
+    /// エモート名の検索に使用するエモートストア
+    var emoteStore: EmoteStore
+
+    /// Enter キー押下時のコールバック
+    var onSubmit: () -> Void
+
+    /// 入力無効フラグ
+    var isDisabled: Bool
+
+    // MARK: - NSViewRepresentable
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
+
+        configureTextView(textView, coordinator: context.coordinator)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+
+        // 無効化状態を反映
+        textView.isEditable = !isDisabled
+
+        // draft が外部からクリアされた場合（送信後）はテキストをリセット
+        if draft.isEmpty && !textView.string.isEmpty {
+            textView.string = ""
+            context.coordinator.isUpdatingFromBinding = true
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit)
+    }
+
+    // MARK: - NSTextView 設定
+
+    private func configureTextView(_ textView: NSTextView, coordinator: Coordinator) {
+        textView.delegate = coordinator
+        textView.isRichText = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.textColor = .labelColor
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticTextCompletionEnabled = false
+        // 水平スクロールを無効にして折り返し
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        // 縦方向のみ拡張
+        textView.isVerticallyResizable = true
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+    }
+
+    // MARK: - プレーンテキスト変換
+
+    /// NSAttributedString をプレーンテキスト（エモート名を含む）に変換する
+    ///
+    /// - `EmoteTextAttachment` は `emoteName` に変換する
+    /// - 通常の文字はそのまま保持する
+    ///
+    /// - Parameter attributedString: 変換対象の NSAttributedString
+    /// - Returns: エモート名を含むプレーンテキスト文字列
+    static func plainText(from attributedString: NSAttributedString) -> String {
+        var result = ""
+        attributedString.enumerateAttributes(in: NSRange(location: 0, length: attributedString.length), options: []) { attrs, range, _ in
+            if let attachment = attrs[.attachment] as? EmoteTextAttachment {
+                result += attachment.emoteName
+            } else {
+                result += (attributedString.string as NSString).substring(with: range)
+            }
+        }
+        return result
+    }
+
+    // MARK: - Coordinator
+
+    /// NSTextViewDelegate を実装し、エモート検出・置換・draft 更新を担当する
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+
+        @Binding var draft: String
+        let emoteStore: EmoteStore
+        let onSubmit: () -> Void
+
+        /// binding 側からのリセット中フラグ（無限ループ防止）
+        var isUpdatingFromBinding = false
+
+        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void) {
+            self._draft = draft
+            self.emoteStore = emoteStore
+            self.onSubmit = onSubmit
+        }
+
+        // MARK: - NSTextViewDelegate
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            guard !isUpdatingFromBinding else {
+                isUpdatingFromBinding = false
+                return
+            }
+
+            // スペースが入力されたとき、直前のトークンがエモート名かチェックする
+            let text = textView.string
+            if text.hasSuffix(" ") {
+                detectAndReplaceEmote(in: textView)
+            }
+
+            // draft バインディングをプレーンテキストで更新
+            let plain = EmoteRichTextView.plainText(from: textView.attributedString())
+            if draft != plain {
+                draft = plain
+            }
+        }
+
+        /// Enter キーで送信、Shift+Enter で改行
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                let shiftPressed = NSEvent.modifierFlags.contains(.shift)
+                if shiftPressed {
+                    // Shift+Enter は改行を挿入
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                    return true
+                }
+                // Enter のみで送信
+                onSubmit()
+                return true
+            }
+            return false
+        }
+
+        // MARK: - エモート検出・置換
+
+        /// テキスト末尾のトークンがエモート名と一致する場合、NSTextAttachment で置換する
+        private func detectAndReplaceEmote(in textView: NSTextView) {
+            let text = textView.string
+            // スペース直前のトークンを取り出す
+            // 末尾のスペースを除いて、最後のスペースより後ろの文字列がトークン
+            let withoutTrailingSpace = String(text.dropLast())
+            guard let lastSpaceIndex = withoutTrailingSpace.lastIndex(of: " ") else {
+                // スペースがない = テキスト全体がトークン
+                let token = withoutTrailingSpace
+                tryReplaceToken(token, range: NSRange(location: 0, length: token.utf16.count), in: textView)
+                return
+            }
+
+            let tokenStart = withoutTrailingSpace.index(after: lastSpaceIndex)
+            let token = String(withoutTrailingSpace[tokenStart...])
+            guard !token.isEmpty else { return }
+
+            // トークンの NSRange を計算（末尾スペースの手前まで）
+            let tokenStartOffset = withoutTrailingSpace.utf16.distance(
+                from: withoutTrailingSpace.utf16.startIndex,
+                to: tokenStart.samePosition(in: withoutTrailingSpace.utf16)!
+            )
+            let tokenRange = NSRange(location: tokenStartOffset, length: token.utf16.count)
+            tryReplaceToken(token, range: tokenRange, in: textView)
+        }
+
+        /// 指定トークンがエモート名なら NSTextAttachment で置換する
+        private func tryReplaceToken(_ token: String, range: NSRange, in textView: NSTextView) {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // エモート名でストアを検索
+                guard let emote = await self.emoteStore.emote(byName: token) else { return }
+
+                // キャッシュから画像を取得（未キャッシュなら非同期ダウンロードしてから置換）
+                let image: NSImage
+                if let cached = EmoteImageCache.shared.cachedImage(for: emote.id) {
+                    image = cached
+                } else {
+                    guard let downloaded = await EmoteImageCache.shared.image(for: emote.id) else { return }
+                    image = downloaded
+                }
+
+                // 置換時点での range が有効か確認（ユーザーがその間に編集した可能性がある）
+                let textLength = textView.string.utf16.count
+                // trailing space も含めた長さで確認
+                let endOfToken = range.location + range.length
+                guard endOfToken <= textLength else { return }
+                // トークン直後がスペースであることを確認
+                let nsString = textView.string as NSString
+                guard endOfToken < nsString.length,
+                      nsString.character(at: endOfToken) == " ".utf16.first else { return }
+                // 置換対象範囲（トークン部分のみ）が現在のテキストと一致するか確認
+                guard nsString.substring(with: range) == token else { return }
+
+                // NSAttributedString を変更
+                let attachment = EmoteTextAttachment(image: image, emoteName: token)
+                let attachmentString = NSAttributedString(attachment: attachment)
+
+                // フォントを引き継ぐ
+                let mutable = NSMutableAttributedString(attributedString: attachmentString)
+                let fullRange = NSRange(location: 0, length: mutable.length)
+                mutable.addAttribute(.font, value: NSFont.systemFont(ofSize: NSFont.systemFontSize), range: fullRange)
+
+                textView.textStorage?.replaceCharacters(in: range, with: mutable)
+
+                // draft を更新
+                let plain = EmoteRichTextView.plainText(from: textView.attributedString())
+                if self.draft != plain {
+                    self.draft = plain
+                }
+            }
+        }
+    }
+}
