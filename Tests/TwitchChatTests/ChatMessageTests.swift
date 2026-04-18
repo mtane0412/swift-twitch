@@ -236,6 +236,31 @@ struct ChatMessageTests {
         #expect(chatMessage?.segments == [.text("配信中です")])
     }
 
+    @Test("ACTION 形式の PRIVMSG にエモートが含まれる場合 segments にエモートが含まれる")
+    func ACTION形式のPRIVMSGにエモートが含まれる場合segmentsにエモートが含まれる() {
+        // 前提: ACTION 形式で Kappa(0-4) を含むメッセージ
+        // Twitch IRC ではエモートのオフセットは ACTION 本文に対するものとして送信される
+        // "Kappa 配信中" — Kappa は K(0) a(1) p(2) p(3) a(4)
+        let rawMessage = "@display-name=配信者;id=act-003;emotes=25:0-4 :haishinsha!haishinsha@haishinsha.tmi.twitch.tv PRIVMSG #テストチャンネル :\u{1}ACTION Kappa 配信中\u{1}"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: ACTION プレフィックス除去後のテキストでエモートセグメントが生成される
+        guard let chatMessage = ChatMessage(from: ircMessage) else {
+            Issue.record("ChatMessage への変換に失敗しました")
+            return
+        }
+        #expect(chatMessage.isAction == true)
+        #expect(chatMessage.text == "Kappa 配信中")
+        #expect(chatMessage.emotes.count == 1)
+        let segments = chatMessage.segments
+        #expect(segments.count == 2)
+        #expect(segments[0] == .emote(id: "25", name: "Kappa"))
+        #expect(segments[1] == .text(" 配信中"))
+    }
+
     // MARK: - 楽観的 UI 用イニシャライザ
 
     @Test("楽観的 UI 用イニシャライザで isAction を true に指定できる")

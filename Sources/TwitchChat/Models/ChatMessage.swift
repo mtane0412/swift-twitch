@@ -125,7 +125,7 @@ struct ChatMessage: Sendable, Identifiable {
         // ACTION 形式（/me コマンド）の検出と本文抽出
         // trailing が "\u{1}ACTION 本文\u{1}" の形式かどうかを確認する
         let actionPrefix = "\u{1}ACTION "
-        if trailing.hasPrefix(actionPrefix) && trailing.hasSuffix("\u{1}") && trailing.count > actionPrefix.count + 1 {
+        if trailing.hasPrefix(actionPrefix) && trailing.hasSuffix("\u{1}") && trailing.count >= actionPrefix.count + 1 {
             self.isAction = true
             // "\u{1}ACTION " と末尾の "\u{1}" を除去して本文のみを抽出する
             let body = trailing.dropFirst(actionPrefix.count).dropLast()

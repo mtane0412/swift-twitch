@@ -298,12 +298,14 @@ final class ChatViewModel {
         guard canSendMessage else { throw ChatSendError.notReady }
 
         // /me コマンドの検出: "/me" または "/me " で始まる場合は ACTION 形式に変換して送信する
+        // 大文字小文字は区別しない（/Me, /ME なども検出する）
         // sanitize() により末尾空白はトリム済みのため "/me   " は "/me" になる
+        let lowerSanitized = sanitized.lowercased()
         let ircText: String
         let isAction: Bool
         let displayText: String
-        if sanitized == "/me" || sanitized.hasPrefix("/me ") {
-            let body = sanitized.hasPrefix("/me ")
+        if lowerSanitized == "/me" || lowerSanitized.hasPrefix("/me ") {
+            let body = lowerSanitized.hasPrefix("/me ")
                 ? String(sanitized.dropFirst("/me ".count)).trimmingCharacters(in: .whitespaces)
                 : ""
             guard !body.isEmpty else { throw ChatSendError.empty }

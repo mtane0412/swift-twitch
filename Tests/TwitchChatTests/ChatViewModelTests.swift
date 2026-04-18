@@ -395,6 +395,36 @@ struct ChatViewModelTests {
         #expect(viewModel.messages[0].isAction == false)
     }
 
+    @Test("/me メッセージの本文前後に余分な空白がある場合はトリムされて送信される")
+    func meコマンドの本文前後の余分な空白がトリムされて送信される() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 実行: 本文前後に余分な空白を含む /me コマンド
+        try await viewModel.sendMessage("/me   hello world   ")
+
+        // 検証: IRC には余分な空白をトリムした ACTION 形式で送信される
+        let sent = await mockClient.sentPrivmsgs
+        #expect(sent == ["\u{1}ACTION hello world\u{1}"])
+        #expect(viewModel.messages[0].text == "hello world")
+        #expect(viewModel.messages[0].isAction == true)
+    }
+
+    @Test("/ME や /Me など大文字の /me コマンドも ACTION 形式で送信される")
+    func 大文字のmeコマンドもACTION形式で送信される() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 実行: 大文字の /ME コマンドを送信
+        try await viewModel.sendMessage("/ME 手を振る")
+
+        // 検証: 大文字でも ACTION 形式で IRC に送信される
+        let sent = await mockClient.sentPrivmsgs
+        #expect(sent == ["\u{1}ACTION 手を振る\u{1}"])
+        #expect(viewModel.messages[0].isAction == true)
+        #expect(viewModel.messages[0].text == "手を振る")
+    }
+
     @Test("ログアウト状態では canSendMessage が false になる")
     func ログアウト状態ではcanSendMessageがfalseになる() async throws {
         let mockClient = MockTwitchIRCClient()
