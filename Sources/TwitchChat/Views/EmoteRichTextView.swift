@@ -170,20 +170,23 @@ struct EmoteRichTextView: NSViewRepresentable {
                 object: EmoteAnimationDriver.shared,
                 queue: .main
             ) { [weak textView] _ in
-                guard let textView,
-                      let textStorage = textView.textStorage,
-                      textStorage.length > 0 else { return }
-                // attachment.image を変更しても TextKit 2 はフラグメントを有効と判断し続ける。
-                // textStorage.edited(.editedAttributes) でストレージレベルから「属性が変わった」と
-                // 通知することで、layout manager が該当範囲を無効化→再レイアウト→attachment.image
-                // を再取得する一連のパイプラインをトリガーする。
-                textStorage.beginEditing()
-                textStorage.edited(
-                    .editedAttributes,
-                    range: NSRange(location: 0, length: textStorage.length),
-                    changeInLength: 0
-                )
-                textStorage.endEditing()
+                // queue: .main で呼ばれるため MainActor 上での実行を安全に前提できる
+                MainActor.assumeIsolated {
+                    guard let textView,
+                          let textStorage = textView.textStorage,
+                          textStorage.length > 0 else { return }
+                    // attachment.image を変更しても TextKit 2 はフラグメントを有効と判断し続ける。
+                    // textStorage.edited(.editedAttributes) でストレージレベルから「属性が変わった」と
+                    // 通知することで、layout manager が該当範囲を無効化→再レイアウト→attachment.image
+                    // を再取得する一連のパイプラインをトリガーする。
+                    textStorage.beginEditing()
+                    textStorage.edited(
+                        .editedAttributes,
+                        range: NSRange(location: 0, length: textStorage.length),
+                        changeInLength: 0
+                    )
+                    textStorage.endEditing()
+                }
             }
         }
 
