@@ -894,8 +894,8 @@ struct ChatViewModelTests {
 
     @Test("/ban コマンドが IRC に PRIVMSG として送信される")
     func banコマンドがIRCにPRIVMSGとして送信される() async throws {
-        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
-        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター001")
+        // 前提: ログイン済み・接続済み（権限チェックはサーバー側で行われるためスコープは不要）
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "モデレーター001")
 
         // 実行: /ban コマンドを送信する
         try await viewModel.sendMessage("/ban スパムユーザー")
@@ -907,8 +907,8 @@ struct ChatViewModelTests {
 
     @Test("/ban コマンドは楽観的 UI メッセージを追加しない")
     func banコマンドは楽観的UIメッセージを追加しない() async throws {
-        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
-        let (viewModel, _) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター002")
+        // 前提: ログイン済み・接続済み
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "モデレーター002")
 
         // 実行: /ban コマンドを送信する
         try await viewModel.sendMessage("/ban 荒らしユーザー")
@@ -919,8 +919,8 @@ struct ChatViewModelTests {
 
     @Test("/timeout コマンドが IRC に PRIVMSG として送信される")
     func timeoutコマンドがIRCにPRIVMSGとして送信される() async throws {
-        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
-        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター003")
+        // 前提: ログイン済み・接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "モデレーター003")
 
         // 実行: /timeout コマンドを送信する
         try await viewModel.sendMessage("/timeout 荒らしユーザー 600")
@@ -932,8 +932,8 @@ struct ChatViewModelTests {
 
     @Test("/clear コマンドが IRC に PRIVMSG として送信される")
     func clearコマンドがIRCにPRIVMSGとして送信される() async throws {
-        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
-        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター004")
+        // 前提: ログイン済み・接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "モデレーター004")
 
         // 実行: /clear コマンドを送信する
         try await viewModel.sendMessage("/clear")
@@ -945,8 +945,8 @@ struct ChatViewModelTests {
 
     @Test("モデレーションコマンドは replyTo を付与しない")
     func モデレーションコマンドはreplyToを付与しない() async throws {
-        // 前提: 返信モードの状態で channel:moderate スコープ付きの接続済み
-        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター005")
+        // 前提: 返信モードの状態でログイン済み・接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "モデレーター005")
         let replyTarget = makeTestChatMessage(displayName: "返信先ユーザー", text: "テストメッセージ")
         viewModel.startReply(to: replyTarget)
         #expect(viewModel.replyingTo?.id == replyTarget.id)
@@ -957,26 +957,6 @@ struct ChatViewModelTests {
         // 検証: replyTo なしで送信されている（モデレーションコマンドは返信コンテキスト不要）
         let sentReplyToIds = await mockClient.sentReplyToIds
         #expect(sentReplyToIds == [nil])
-    }
-
-    @Test("channel:moderate スコープなしでモデレーションコマンドを送ると missingScope エラーになる")
-    func channel_moderateスコープなしでモデレーションコマンドを送るとmissingScopeエラーになる() async throws {
-        // 前提: channel:moderate スコープなし（chat:edit のみ）でログイン済み・接続済み
-        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "一般視聴者001")
-
-        // 実行: /ban コマンドを送信する（スコープ不足のため失敗するはず）
-        do {
-            try await viewModel.sendMessage("/ban スパムユーザー")
-            Issue.record("missingScope が throw されるべきです")
-        } catch ChatSendError.missingScope(let scope) {
-            // 検証: 不足しているスコープが "channel:moderate" であることを確認する
-            #expect(scope == "channel:moderate")
-        } catch {
-            Issue.record("予期しないエラーが throw されました: \(error)")
-        }
-
-        // 検証: sendError にスコープ不足のメッセージが設定されている
-        #expect(viewModel.sendError == ChatSendError.missingScope("channel:moderate").errorDescription)
     }
 
     @Test("未知のコマンドを送ると unknownCommand エラーになる")
@@ -1001,8 +981,8 @@ struct ChatViewModelTests {
 
     @Test("/ban 引数なしを送ると missingArguments エラーになる")
     func ban引数なしを送るとmissingArgumentsエラーになる() async throws {
-        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
-        let (viewModel, _) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター006")
+        // 前提: ログイン済み・接続済み
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "モデレーター006")
 
         // 実行: 引数なしで /ban を送信する
         do {
@@ -1016,19 +996,4 @@ struct ChatViewModelTests {
         }
     }
 
-    /// channel:moderate スコープ付きでログイン済み・接続済みの ChatViewModel を返すヘルパー
-    /// channel:moderate スコープ付きでログイン済み・接続済みの ChatViewModel を返すヘルパー
-    ///
-    /// makeLoggedInAuthState を channel:moderate スコープ付きで呼び出して AuthState を生成する。
-    private func makeConnectedViewModelWithModerationScope(userLogin: String) async throws -> (ChatViewModel, MockTwitchIRCClient) {
-        let mockClient = MockTwitchIRCClient()
-        let authState = try await makeLoggedInAuthState(
-            userLogin: userLogin,
-            scopes: ["chat:read", "chat:edit", "channel:moderate"]
-        )
-        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState)
-        await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
-        return (viewModel, mockClient)
-    }
 }

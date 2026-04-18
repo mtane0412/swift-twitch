@@ -341,7 +341,6 @@ final class ChatViewModel {
     ///           `.notReady`（未接続・未ログイン・スコープ不足）、
     ///           `.unknownCommand`（未知のスラッシュコマンド）、
     ///           `.missingArguments`（必須引数不足）、
-    ///           `.missingScope`（`channel:moderate` スコープ不足）、
     ///           または IRC クライアントが throw するエラー
     func sendMessage(_ text: String) async throws {
         let sanitized = Self.sanitize(text)
@@ -384,13 +383,10 @@ final class ChatViewModel {
             )
 
         case .moderationCommand(_, let ircText):
-            // モデレーションコマンド: channel:moderate スコープチェック後に送信する
+            // モデレーションコマンド: PRIVMSG として送信する
+            // 権限チェック（モデレーター権限）は Twitch サーバー側で行われる。
+            // 権限不足の場合は no_permission NOTICE が返り handleIncomingNotice で処理される。
             // 楽観的 UI は追加しない（コマンドはチャットに表示されない）
-            guard authState.grantedScopes.contains("channel:moderate") else {
-                let error = ChatSendError.missingScope("channel:moderate")
-                sendError = error.errorDescription
-                throw error
-            }
             do {
                 try await ircClient.sendPrivmsg(ircText, replyTo: nil)
                 replyingTo = nil
@@ -554,10 +550,6 @@ enum ChatSendError: Error, LocalizedError, Equatable {
     ///   - command: コマンド名（スラッシュなし）
     ///   - expected: 期待される使い方（例: "/ban <ユーザー名>"）
     case missingArguments(command: String, expected: String)
-    /// 操作に必要な OAuth スコープが不足している
-    ///
-    /// - Parameter scope: 不足しているスコープ名
-    case missingScope(String)
 
     var errorDescription: String? {
         switch self {
@@ -595,8 +587,6 @@ enum ChatSendError: Error, LocalizedError, Equatable {
             return "不明なコマンドです: /\(name)"
         case .missingArguments(let command, let expected):
             return "/\(command) の使い方: \(expected)"
-        case .missingScope(let scope):
-            return "この操作には \(scope) 権限が必要です。再ログインしてください"
         }
     }
 
