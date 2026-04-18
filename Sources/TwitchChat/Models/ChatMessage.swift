@@ -96,7 +96,6 @@ struct ChatMessage: Sendable, Identifiable {
     ///
     /// Twitch IRC は自分が送信した PRIVMSG をエコーバックしないため、
     /// 送信直後にローカルで ChatMessage を組み立てて表示リストに追加する際に使用する。
-    /// エモートは未解決のためセグメントはテキスト全体の1要素になる。
     ///
     /// - Parameters:
     ///   - username: 送信者のログイン名（IRC の NICK に使用した小文字の識別子）
@@ -107,6 +106,7 @@ struct ChatMessage: Sendable, Identifiable {
     ///   - colorHex: チャット文字色（#RRGGBB 形式、USERSTATE から取得した場合に指定）
     ///   - badges: バッジ一覧（USERSTATE から取得した場合に指定）
     ///   - replyParentMsgId: 返信先メッセージの ID（返信送信時に指定、省略可）
+    ///   - emotePositions: テキスト内のエモート位置情報（EmoteStore から解決した場合に指定）
     init(
         localUsername username: String,
         displayName: String? = nil,
@@ -115,7 +115,8 @@ struct ChatMessage: Sendable, Identifiable {
         roomId: String? = nil,
         colorHex: String? = nil,
         badges: [Badge] = [],
-        replyParentMsgId: String? = nil
+        replyParentMsgId: String? = nil,
+        emotePositions: [EmotePosition] = []
     ) {
         self.id = UUID().uuidString
         self.username = username
@@ -124,8 +125,8 @@ struct ChatMessage: Sendable, Identifiable {
         self.isAction = isAction
         self.colorHex = colorHex
         self.badges = badges
-        self.emotes = []
-        self.segments = MessageSegment.segments(from: text, emotePositions: [])
+        self.emotes = emotePositions
+        self.segments = MessageSegment.segments(from: text, emotePositions: emotePositions)
         self.roomId = roomId
         self.receivedAt = Date()
         self.replyParentMsgId = replyParentMsgId
