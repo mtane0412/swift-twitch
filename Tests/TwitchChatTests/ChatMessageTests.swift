@@ -416,6 +416,7 @@ struct ChatMessageTests {
     @Test("返信タグ付き PRIVMSG から返信メタデータが読み取れる")
     func 返信タグ付きPRIVMSGから返信メタデータが読み取れる() {
         // 前提: reply-parent-* タグを含む PRIVMSG
+        // swiftlint:disable:next line_length
         let rawMessage = "@reply-parent-msg-id=親メッセージid-123;reply-parent-user-login=oyausername;reply-parent-display-name=親ユーザー;reply-parent-msg-body=元のメッセージ内容;display-name=返信者;id=reply-001 :henshinsha!henshinsha@henshinsha.tmi.twitch.tv PRIVMSG #ch :返信テキスト"
         guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
             Issue.record("IRCMessage のパースに失敗しました")
