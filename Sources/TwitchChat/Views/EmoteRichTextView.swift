@@ -34,6 +34,8 @@ struct EmoteRichTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
 
         configureTextView(textView, coordinator: context.coordinator)
+        // アニメーションフレーム更新通知を購読して NSTextView を再描画する
+        context.coordinator.subscribeToFrameUpdates(textView: textView)
         return scrollView
     }
 
@@ -136,10 +138,36 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// binding 側からのリセット中フラグ（無限ループ防止）
         var isUpdatingFromBinding = false
 
+        /// アニメーションフレーム更新通知のオブザーバートークン
+        ///
+        /// deinit（nonisolated）からアクセスするため `nonisolated(unsafe)` を使用する。
+        /// このプロパティへのアクセスは常に MainActor 上（subscribe / deinit の DispatchQueue.main 経由）で行う。
+        nonisolated(unsafe) private var frameUpdateObserver: NSObjectProtocol?
+
         init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void) {
             self._draft = draft
             self.emoteStore = emoteStore
             self.onSubmit = onSubmit
+        }
+
+        deinit {
+            if let observer = frameUpdateObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+
+        /// アニメーションフレーム更新通知を購読し、textView に再描画を要求する
+        ///
+        /// `EmoteAnimationDriver` が `image` を新フレームに更新した後に通知が届き、
+        /// `needsDisplay = true` をセットして NSTextView に再描画をスケジュールする。
+        func subscribeToFrameUpdates(textView: NSTextView) {
+            frameUpdateObserver = NotificationCenter.default.addObserver(
+                forName: .emoteFrameDidUpdate,
+                object: nil,
+                queue: .main
+            ) { [weak textView] _ in
+                textView?.needsDisplay = true
+            }
         }
 
         // MARK: - NSTextViewDelegate
@@ -234,7 +262,10 @@ struct EmoteRichTextView: NSViewRepresentable {
                 guard nsString.substring(with: range) == token else { return }
 
                 // NSAttributedString を変更
-                let attachment = EmoteTextAttachment(image: image, emoteName: token)
+                // emoteId を渡してアニメーション駆動に必要な情報を保持させる
+                let attachment = EmoteTextAttachment(image: image, emoteName: token, emoteId: emote.id)
+                // アニメーション版エモートの場合、EmoteAnimationDriver に登録してフレーム更新を開始する
+                EmoteAnimationDriver.shared.register(attachment)
                 let attachmentString = NSAttributedString(attachment: attachment)
 
                 // フォントを引き継ぐ

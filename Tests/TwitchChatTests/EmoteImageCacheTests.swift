@@ -72,4 +72,28 @@ struct EmoteImageCacheTests {
         let result = EmoteImageCache.shared.cachedImage(for: "未登録エモートID_テスト用_\(UUID())")
         #expect(result == nil)
     }
+
+    // MARK: - GIF 生データキャッシュ
+
+    @Test("キャッシュ未登録のエモートは gifData(for:) で nil を返す")
+    func gifDataReturnsNilForUncachedEmote() {
+        // 前提: キャッシュに登録されていないエモートID
+        // 検証: nil が返る（ダウンロードは発生しない）
+        let result = EmoteImageCache.shared.gifData(for: "未登録GIFエモートID_テスト用_\(UUID())")
+        #expect(result == nil)
+    }
+
+    @Test("storeForTesting で登録した GIF データが gifData(for:) で取得できる")
+    func gifDataReturnsCachedData() {
+        // 前提: テスト用エモートID と GIF データを直接キャッシュに登録する
+        let emoteId = "テスト用GIFエモートID_\(UUID())"
+        let testGIFData = Data([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) // "GIF89a" バイト列
+        EmoteImageCache.shared.storeForTesting(gifData: testGIFData, for: emoteId)
+
+        // 実行: gifData(for:) で取得する
+        let result = EmoteImageCache.shared.gifData(for: emoteId)
+
+        // 検証: 登録したデータが取得できる
+        #expect(result == testGIFData)
+    }
 }
