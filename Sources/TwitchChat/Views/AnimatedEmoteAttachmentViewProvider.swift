@@ -36,5 +36,25 @@ final class AnimatedEmoteAttachmentViewProvider: NSTextAttachmentViewProvider {
         imageView.animates = true
         imageView.imageScaling = .scaleProportionallyUpOrDown
         view = imageView
+        // ビュープロバイダ自身が bounds を管理する
+        // attachmentBounds(for:...) の戻り値がビューのフレームに使用される
+        tracksTextAttachmentViewBounds = true
+    }
+
+    /// アタッチメントビューの表示領域を返す
+    ///
+    /// `tracksTextAttachmentViewBounds = true` のとき、レイアウトエンジンはこのメソッドを呼ぶ。
+    /// NSTextAttachment.bounds の代わりにここで bounds を確定させることで、
+    /// 挿入直後に NSImageView が正確な位置にフレーム設定される。
+    override func attachmentBounds(
+        for attributes: [NSAttributedString.Key: Any],
+        location: any NSTextLocation,
+        textContainer: NSTextContainer?,
+        proposedLineFragment: CGRect,
+        position: CGPoint
+    ) -> CGRect {
+        let size = EmoteImageCache.emoteDisplaySize
+        // y: -3 でベースラインから 3pt 下にオフセット（テキスト行高に合わせる）
+        return CGRect(x: 0, y: -3, width: size, height: size)
     }
 }

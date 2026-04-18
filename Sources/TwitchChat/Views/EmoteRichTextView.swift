@@ -67,8 +67,12 @@ struct EmoteRichTextView: NSViewRepresentable {
                 context.coordinator.detectAndReplaceEmote(in: textView)
             }
         }
-        // TextKit 2 のビューポートレイアウトを強制実行してアタッチメントビューを即座に描画する
-        textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        // NSTextView のフレーム更新（サイズ変更）が完了した後でビューポートをレイアウトする。
+        // insertText 直後に呼ぶと NSTextView のフレームがまだ古い状態でアタッチメント位置がずれるため
+        // 次のランループで実行する。
+        DispatchQueue.main.async { [weak textView] in
+            textView?.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -243,10 +247,12 @@ struct EmoteRichTextView: NSViewRepresentable {
                 self.isUpdatingFromBinding = true
                 textView.insertText(mutable, replacementRange: range)
 
-                // TextKit 2 はビューポートレイアウトを遅延実行するため、アタッチメントビューが
-                // カーソルが近づくまで描画されない問題が発生する。
-                // insertText 後に layoutViewport() を呼ぶことで即座に描画をトリガーする。
-                textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+                // NSTextView のフレーム更新が完了した後でビューポートをレイアウトする。
+                // 現在の実行コンテキスト内で呼ぶと NSTextView のフレームがまだ古い状態で
+                // アタッチメントビューの位置がずれるため、次のランループで実行する。
+                DispatchQueue.main.async { [weak textView] in
+                    textView?.textLayoutManager?.textViewportLayoutController.layoutViewport()
+                }
 
                 // draft を更新（textDidChange は isUpdatingFromBinding フラグでスキップ済み）
                 let plain = EmoteRichTextView.plainText(from: textView.attributedString())
