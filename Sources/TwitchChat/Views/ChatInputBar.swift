@@ -21,6 +21,11 @@ struct ChatInputBar: View {
             // 認証エラーバナー（chat:edit スコープ不足またはログアウト）
             authBanner
 
+            // 返信先バナー（返信モード中のみ表示）
+            if let replyTarget = viewModel.replyingTo {
+                replyBanner(target: replyTarget)
+            }
+
             // 入力フォーム（接続中のみ表示、送信不可の場合は disabled）
             if isConnected {
                 inputForm
@@ -77,6 +82,33 @@ struct ChatInputBar: View {
 
         default:
             EmptyView()
+        }
+    }
+
+    /// 返信先バナー（返信モード中に表示）
+    ///
+    /// - Parameter target: 返信先の ChatMessage
+    private func replyBanner(target: ChatMessage) -> some View {
+        HStack {
+            Image(systemName: "arrowshape.turn.up.left")
+                .foregroundStyle(.secondary)
+            Text("\(target.displayName) に返信中")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                viewModel.cancelReply()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color(.windowBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 

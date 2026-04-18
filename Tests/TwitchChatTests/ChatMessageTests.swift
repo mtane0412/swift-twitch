@@ -379,4 +379,104 @@ struct ChatMessageTests {
         #expect(chatMessage.colorHex == nil)
         #expect(chatMessage.badges.isEmpty)
     }
+
+    // MARK: - 楽観的 UI フラグ
+
+    @Test("IRCMessage から変換した ChatMessage は isOptimistic が false になる")
+    func IRCMessageから変換したChatMessageはisOptimisticがfalseになる() {
+        // 前提: 通常の PRIVMSG（Twitch サーバーから受信したメッセージ）
+        let rawMessage = "@badges=subscriber/6;color=#FF0000;display-name=山田太郎;id=abc-123 :yamadataro!yamadataro@yamadataro.tmi.twitch.tv PRIVMSG #ch :こんにちは"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: サーバー受信メッセージは isOptimistic が false（本物の message ID を持つ）
+        guard let chatMessage = ChatMessage(from: ircMessage) else {
+            Issue.record("ChatMessage への変換に失敗しました")
+            return
+        }
+        #expect(chatMessage.isOptimistic == false)
+    }
+
+    @Test("楽観的 UI 用イニシャライザで生成した ChatMessage は isOptimistic が true になる")
+    func 楽観的UI用イニシャライザで生成したChatMessageはisOptimisticがtrueになる() {
+        // 前提: 送信直後にローカルで生成する楽観的 UI メッセージ
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            text: "送信したメッセージ"
+        )
+
+        // 検証: 楽観的 UI メッセージは isOptimistic が true（Twitch が認識できない UUID を持つ）
+        #expect(chatMessage.isOptimistic == true)
+    }
+
+    // MARK: - 返信（Reply）
+
+    @Test("返信タグ付き PRIVMSG から返信メタデータが読み取れる")
+    func 返信タグ付きPRIVMSGから返信メタデータが読み取れる() {
+        // 前提: reply-parent-* タグを含む PRIVMSG
+        // swiftlint:disable:next line_length
+        let rawMessage = "@reply-parent-msg-id=親メッセージid-123;reply-parent-user-login=oyausername;reply-parent-display-name=親ユーザー;reply-parent-msg-body=元のメッセージ内容;display-name=返信者;id=reply-001 :henshinsha!henshinsha@henshinsha.tmi.twitch.tv PRIVMSG #ch :返信テキスト"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: 4つの返信メタデータが正しく読み取られる
+        guard let chatMessage = ChatMessage(from: ircMessage) else {
+            Issue.record("ChatMessage への変換に失敗しました")
+            return
+        }
+        #expect(chatMessage.replyParentMsgId == "親メッセージid-123")
+        #expect(chatMessage.replyParentUserLogin == "oyausername")
+        #expect(chatMessage.replyParentDisplayName == "親ユーザー")
+        #expect(chatMessage.replyParentMsgBody == "元のメッセージ内容")
+    }
+
+    @Test("返信タグがない PRIVMSG では返信メタデータが全て nil になる")
+    func 返信タグがないPRIVMSGでは返信メタデータが全てnilになる() {
+        // 前提: 通常のタグ付き PRIVMSG（reply タグなし）
+        let rawMessage = "@badges=subscriber/6;color=#FF0000;display-name=山田太郎;id=abc-123 :yamadataro!yamadataro@yamadataro.tmi.twitch.tv PRIVMSG #ch :通常メッセージ"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: 返信メタデータが全て nil になる
+        guard let chatMessage = ChatMessage(from: ircMessage) else {
+            Issue.record("ChatMessage への変換に失敗しました")
+            return
+        }
+        #expect(chatMessage.replyParentMsgId == nil)
+        #expect(chatMessage.replyParentUserLogin == nil)
+        #expect(chatMessage.replyParentDisplayName == nil)
+        #expect(chatMessage.replyParentMsgBody == nil)
+    }
+
+    @Test("楽観的 UI 用イニシャライザで replyParentMsgId を指定できる")
+    func 楽観的UI用イニシャライザでreplyParentMsgIdを指定できる() {
+        // 前提: 返信送信時に返信先メッセージ ID を指定
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            displayName: "山田太郎",
+            text: "返信メッセージ",
+            replyParentMsgId: "親メッセージid-456"
+        )
+
+        // 検証: replyParentMsgId が設定される
+        #expect(chatMessage.replyParentMsgId == "親メッセージid-456")
+    }
+
+    @Test("楽観的 UI 用イニシャライザで replyParentMsgId を省略すると nil になる")
+    func 楽観的UI用イニシャライザでreplyParentMsgIdを省略するとnilになる() {
+        // 前提: replyParentMsgId を省略して生成（通常メッセージ、後方互換）
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            text: "通常メッセージ"
+        )
+
+        // 検証: replyParentMsgId が nil になる
+        #expect(chatMessage.replyParentMsgId == nil)
+    }
 }

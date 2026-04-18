@@ -1,6 +1,7 @@
 // ChatViewModelTests.swift
 // ChatViewModel の単体テスト
 // MockTwitchIRCClient を使用してネットワーク通信なしで ViewModel の振る舞いを検証する
+// swiftlint:disable file_length
 
 import Foundation
 import Testing
@@ -25,6 +26,9 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
 
     /// sendPrivmsg() で送信されたメッセージのログ（テスト検証用）
     private(set) var sentPrivmsgs: [String] = []
+
+    /// sendPrivmsg() で渡された返信先 ID のログ（テスト検証用）
+    private(set) var sentReplyToIds: [String?] = []
 
     /// sendPrivmsg() が throw するエラー（nil の場合は成功）
     private var sendPrivmsgError: (any Error)?
@@ -68,7 +72,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
         userStateContinuation?.finish()
     }
 
-    func sendPrivmsg(_ text: String) async throws {
+    func sendPrivmsg(_ text: String, replyTo parentMsgId: String? = nil) async throws {
         if let error = sendPrivmsgError {
             throw error
         }
@@ -76,6 +80,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
             throw TwitchIRCClientError.notConnected
         }
         sentPrivmsgs.append(text)
+        sentReplyToIds.append(parentMsgId)
     }
 
     /// テスト用にメッセージを流し込む
@@ -738,5 +743,100 @@ struct ChatViewModelTests {
         #expect(optimisticMessage?.displayName == "新しい表示名")
         #expect(optimisticMessage?.colorHex == "#00FF7F")
         #expect(optimisticMessage?.badges == [Badge(name: "subscriber", version: "6")])
+    }
+
+    // MARK: - 返信（Reply）状態管理
+
+    @Test("replyingTo の初期値が nil である")
+    func replyingToの初期値がnilである() async throws {
+        // 前提: 接続済み ViewModel
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "視聴者001")
+
+        // 検証: replyingTo の初期値が nil
+        #expect(viewModel.replyingTo == nil)
+    }
+
+    @Test("startReply で replyingTo にメッセージがセットされる")
+    func startReplyでreplyingToにメッセージがセットされる() async throws {
+        // 前提: 接続済み ViewModel と返信先メッセージ
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "視聴者001")
+        let parentMessage = makeTestChatMessage(displayName: "配信者", text: "元のメッセージ")
+
+        // 実行: startReply を呼ぶ
+        viewModel.startReply(to: parentMessage)
+
+        // 検証: replyingTo に返信先メッセージがセットされる
+        #expect(viewModel.replyingTo?.id == parentMessage.id)
+    }
+
+    @Test("cancelReply で replyingTo が nil にリセットされる")
+    func cancelReplyでreplyingToがnilにリセットされる() async throws {
+        // 前提: 返信先がセットされた状態
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "視聴者001")
+        let parentMessage = makeTestChatMessage(displayName: "配信者", text: "元のメッセージ")
+        viewModel.startReply(to: parentMessage)
+
+        // 実行: cancelReply を呼ぶ
+        viewModel.cancelReply()
+
+        // 検証: replyingTo が nil にリセットされる
+        #expect(viewModel.replyingTo == nil)
+    }
+
+    @Test("replyingTo セット状態で sendMessage すると replyTo 付きで IRC 送信される")
+    func replyingToセット状態でsendMessageするとreplyTo付きでIRC送信される() async throws {
+        // 前提: 返信先がセットされた状態で接続・ログイン済み
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者001")
+        let parentMessage = makeTestChatMessage(displayName: "配信者", text: "元のメッセージ")
+        viewModel.startReply(to: parentMessage)
+
+        // 実行: sendMessage を呼ぶ
+        try await viewModel.sendMessage("返信テキスト")
+
+        // 検証: 返信先 ID が sendPrivmsg に渡される
+        let replyToIds = await mockClient.sentReplyToIds
+        #expect(replyToIds.last == parentMessage.id)
+    }
+
+    @Test("sendMessage 成功後に replyingTo が nil にリセットされる")
+    func sendMessage成功後にreplyingToがnilにリセットされる() async throws {
+        // 前提: 返信先がセットされた状態で接続・ログイン済み
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "視聴者001")
+        let parentMessage = makeTestChatMessage(displayName: "配信者", text: "元のメッセージ")
+        viewModel.startReply(to: parentMessage)
+
+        // 実行: sendMessage を呼ぶ
+        try await viewModel.sendMessage("返信テキスト")
+
+        // 検証: 送信成功後に replyingTo が nil にリセットされる
+        #expect(viewModel.replyingTo == nil)
+    }
+
+    @Test("replyingTo がセットされた状態の楽観的 UI メッセージに replyParentMsgId がセットされる")
+    func replyingToがセットされた状態の楽観的UIメッセージにreplyParentMsgIdがセットされる() async throws {
+        // 前提: 返信先がセットされた状態で接続・ログイン済み
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "視聴者001")
+        let parentMessage = makeTestChatMessage(displayName: "配信者", text: "元のメッセージ")
+        viewModel.startReply(to: parentMessage)
+
+        // 実行: sendMessage を呼ぶ
+        try await viewModel.sendMessage("返信テキスト")
+        await waitFor { viewModel.messages.count >= 1 }
+
+        // 検証: 楽観的 UI メッセージの replyParentMsgId が返信先の id と一致する
+        #expect(viewModel.messages.first?.replyParentMsgId == parentMessage.id)
+    }
+
+    @Test("replyingTo が nil の状態で sendMessage すると replyTo なしで送信される")
+    func replyingToがnilの状態でsendMessageするとreplyToなしで送信される() async throws {
+        // 前提: 返信先がセットされていない状態で接続・ログイン済み
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "視聴者001")
+
+        // 実行: sendMessage を呼ぶ
+        try await viewModel.sendMessage("通常メッセージ")
+
+        // 検証: 返信先 ID が nil で送信される（通常メッセージ）
+        let replyToIds = await mockClient.sentReplyToIds
+        #expect(replyToIds.last == .some(nil))
     }
 }

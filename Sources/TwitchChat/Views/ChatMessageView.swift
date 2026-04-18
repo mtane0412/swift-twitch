@@ -23,7 +23,22 @@ struct ChatMessageView: View {
     @State private var emoteImages: [String: NSImage] = [:]
 
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
+            // 返信先ヘッダー（返信メッセージの場合のみ表示）
+            if let replyDisplayName = message.replyParentDisplayName {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("@\(replyDisplayName) への返信")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.leading, 12)
+                .padding(.top, 2)
+            }
+            HStack(alignment: .top, spacing: 4) {
             // バッジ表示
             if !message.badges.isEmpty {
                 badgesView
@@ -68,11 +83,12 @@ struct ChatMessageView: View {
                     }
                 }
             }
+            }
+            .font(.system(size: 13))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
         }
-        .font(.system(size: 13))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 3)
         .task(id: message.id) {
             await loadEmoteImages()
         }

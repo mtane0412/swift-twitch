@@ -44,6 +44,17 @@ struct ChatDetailView: View {
                     ForEach(viewModel.messages) { message in
                         ChatMessageView(message: message, badgeStore: viewModel.badgeStore)
                             .id(message.id)
+                            .contextMenu {
+                                // 楽観的UIメッセージ（自分が送信した未確認メッセージ）には返信不可
+                                // Twitch サーバーが認識する本物の message ID を持たないため
+                                if viewModel.canSendMessage && !message.isOptimistic {
+                                    Button {
+                                        viewModel.startReply(to: message)
+                                    } label: {
+                                        Label("返信", systemImage: "arrowshape.turn.up.left")
+                                    }
+                                }
+                            }
                     }
                 }
             }

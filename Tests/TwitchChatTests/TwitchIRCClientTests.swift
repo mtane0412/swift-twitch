@@ -671,4 +671,49 @@ struct TwitchIRCClientTests {
         }
         return false
     }
+
+    // MARK: - 返信（Reply）送信
+
+    @Test("replyTo 指定時に @reply-parent-msg-id タグ付きで PRIVMSG が送信される")
+    func replyTo指定時にreplyParentMsgIdタグ付きでPRIVMSGが送信される() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 認証接続でチャンネルに参加
+        let connectTask = Task {
+            try await client.connect(to: "haishinshaA", accessToken: "テスト用トークン", userLogin: "視聴者001")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: replyTo に親メッセージ ID を指定すると @reply-parent-msg-id タグ付きで送信される
+        try await client.sendPrivmsg("返信テキスト", replyTo: "親メッセージid-123")
+
+        let sent = await mockWS.sentMessages
+        #expect(sent.contains("@reply-parent-msg-id=親メッセージid-123 PRIVMSG #haishinshaa :返信テキスト"))
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
+
+    @Test("replyTo が nil の場合はタグなしで従来通り PRIVMSG が送信される")
+    func replyToがnilの場合はタグなしで従来通りPRIVMSGが送信される() async throws {
+        let mockWS = MockWebSocketClient()
+        let client = TwitchIRCClient(webSocketClient: mockWS)
+
+        // 前提: 認証接続でチャンネルに参加
+        let connectTask = Task {
+            try await client.connect(to: "haishinshaB", accessToken: "テスト用トークン", userLogin: "視聴者002")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // 検証: replyTo が nil（省略）の場合はタグなしで送信される（後方互換）
+        try await client.sendPrivmsg("通常メッセージ", replyTo: nil)
+
+        let sent = await mockWS.sentMessages
+        #expect(sent.contains("PRIVMSG #haishinshab :通常メッセージ"))
+        #expect(!sent.contains { $0.hasPrefix("@reply-parent-msg-id=") && $0.contains("通常メッセージ") })
+
+        await client.disconnect()
+        connectTask.cancel()
+    }
 }

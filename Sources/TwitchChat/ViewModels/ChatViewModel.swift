@@ -63,6 +63,9 @@ final class ChatViewModel {
     /// 最後の送信エラーメッセージ（UI 表示用、成功時は nil にリセット）
     private(set) var sendError: String?
 
+    /// 現在返信対象として選択されているメッセージ（nil の場合は通常送信）
+    private(set) var replyingTo: ChatMessage?
+
     // MARK: - プライベートプロパティ
 
     private let ircClient: any TwitchIRCClientProtocol
@@ -271,6 +274,20 @@ final class ChatViewModel {
         }
     }
 
+    // MARK: - 返信
+
+    /// 指定メッセージへの返信モードを開始する
+    ///
+    /// - Parameter message: 返信先のメッセージ
+    func startReply(to message: ChatMessage) {
+        replyingTo = message
+    }
+
+    /// 返信モードをキャンセルし、通常送信モードに戻る
+    func cancelReply() {
+        replyingTo = nil
+    }
+
     // MARK: - 送信
 
     /// コメント投稿が可能かどうか
@@ -297,52 +314,19 @@ final class ChatViewModel {
         guard sanitized.count <= 500 else { throw ChatSendError.tooLong }
         guard canSendMessage else { throw ChatSendError.notReady }
 
-        // /me コマンドの検出: "/me" または "/me " で始まる場合は ACTION 形式に変換して送信する
-        // 大文字小文字は区別しない（/Me, /ME なども検出する）
-        // sanitize() により末尾空白はトリム済みのため "/me   " は "/me" になる
-        let lowerSanitized = sanitized.lowercased()
-        let ircText: String
-        let isAction: Bool
-        let displayText: String
-        if lowerSanitized == "/me" || lowerSanitized.hasPrefix("/me ") {
-            let body = lowerSanitized.hasPrefix("/me ")
-                ? String(sanitized.dropFirst("/me ".count)).trimmingCharacters(in: .whitespaces)
-                : ""
-            guard !body.isEmpty else { throw ChatSendError.empty }
-            ircText = "\u{1}ACTION \(body)\u{1}"
-            // ACTION 変換後の IRC 送信文字列でサーバー制限（500文字）を再チェックする
-            guard ircText.count <= 500 else { throw ChatSendError.tooLong }
-            isAction = true
-            displayText = body
-        } else {
-            ircText = sanitized
-            isAction = false
-            displayText = sanitized
-        }
+        let (ircText, isAction, displayText) = try Self.prepareIRCText(sanitized)
 
         isSending = true
         sendError = nil
         defer { isSending = false }
 
+        // 送信時点の返信先 ID を取得し、送信成功後にリセットするために保持する
+        let parentMsgId = replyingTo?.id
+
         do {
-            try await ircClient.sendPrivmsg(ircText)
-            // 楽観的 UI: 自分の PRIVMSG はサーバーからエコーバックされないのでローカルで追加する
-            if case .loggedIn(let login) = authState.status {
-                // USERSTATE 受信済みなら displayName / colorHex / badges に反映する
-                // ACTION の場合は本文のみを text に設定し isAction を true にする
-                let localMessage = ChatMessage(
-                    localUsername: login,
-                    displayName: currentUserState?.displayName ?? login,
-                    text: displayText,
-                    isAction: isAction,
-                    roomId: currentRoomId,
-                    colorHex: currentUserState?.colorHex,
-                    badges: currentUserState?.badges ?? []
-                )
-                appendMessage(localMessage)
-                // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
-                optimisticPendingMessages[localMessage.id] = Date()
-            }
+            try await ircClient.sendPrivmsg(ircText, replyTo: parentMsgId)
+            replyingTo = nil
+            appendOptimisticMessage(displayText: displayText, isAction: isAction, parentMsgId: parentMsgId)
         } catch TwitchIRCClientError.rateLimited(let retryAfter) {
             // クライアント側レートリミットエラーを ChatSendError に変換して上位に伝える
             let sendError = ChatSendError.clientRateLimited(retryAfter: retryAfter)
@@ -352,6 +336,51 @@ final class ChatViewModel {
             sendError = error.localizedDescription
             throw error
         }
+    }
+
+    /// IRC 送信用のテキストを準備する
+    ///
+    /// `/me` コマンドを検出して ACTION 形式に変換し、IRC 送信文字列・isAction フラグ・表示テキストを返す。
+    ///
+    /// - Parameter sanitized: サニタイズ済みの入力テキスト
+    /// - Returns: `(ircText, isAction, displayText)` のタプル
+    /// - Throws: `ChatSendError.empty`（/me 本文なし）、`.tooLong`（ACTION 変換後500文字超）
+    private static func prepareIRCText(_ sanitized: String) throws -> (ircText: String, isAction: Bool, displayText: String) {
+        // /me コマンドの検出: "/me" または "/me " で始まる場合は ACTION 形式に変換して送信する
+        // 大文字小文字は区別しない（/Me, /ME なども検出する）
+        let lower = sanitized.lowercased()
+        if lower == "/me" || lower.hasPrefix("/me ") {
+            let body = lower.hasPrefix("/me ")
+                ? String(sanitized.dropFirst("/me ".count)).trimmingCharacters(in: .whitespaces)
+                : ""
+            guard !body.isEmpty else { throw ChatSendError.empty }
+            let ircText = "\u{1}ACTION \(body)\u{1}"
+            // ACTION 変換後の IRC 送信文字列でサーバー制限（500文字）を再チェックする
+            guard ircText.count <= 500 else { throw ChatSendError.tooLong }
+            return (ircText, true, body)
+        }
+        return (sanitized, false, sanitized)
+    }
+
+    /// 楽観的 UI メッセージを生成して追加する
+    ///
+    /// 送信直後に自分のメッセージをローカルで表示するために使用する。
+    private func appendOptimisticMessage(displayText: String, isAction: Bool, parentMsgId: String?) {
+        guard case .loggedIn(let login) = authState.status else { return }
+        // USERSTATE 受信済みなら displayName / colorHex / badges に反映する
+        let localMessage = ChatMessage(
+            localUsername: login,
+            displayName: currentUserState?.displayName ?? login,
+            text: displayText,
+            isAction: isAction,
+            roomId: currentRoomId,
+            colorHex: currentUserState?.colorHex,
+            badges: currentUserState?.badges ?? [],
+            replyParentMsgId: parentMsgId
+        )
+        appendMessage(localMessage)
+        // サーバー拒否（NOTICE）が来た場合の rollback のために ID と時刻を記録する
+        optimisticPendingMessages[localMessage.id] = Date()
     }
 
     /// 送信エラーをリセットする（UI でエラー表示を消す際に呼ぶ）

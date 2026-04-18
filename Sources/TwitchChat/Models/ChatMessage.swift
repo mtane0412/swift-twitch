@@ -72,6 +72,26 @@ struct ChatMessage: Sendable, Identifiable {
     /// メッセージの受信時刻
     let receivedAt: Date
 
+    /// 返信先メッセージの一意な識別子（`reply-parent-msg-id` タグ）
+    ///
+    /// このメッセージが他のメッセージへの返信である場合に設定される。通常メッセージは nil。
+    let replyParentMsgId: String?
+
+    /// 楽観的 UI メッセージかどうか（送信直後にローカルで生成したメッセージ）
+    ///
+    /// true の場合は Twitch サーバーが認識する本物の message ID を持たないため、
+    /// このメッセージへの返信機能を無効化する必要がある。
+    let isOptimistic: Bool
+
+    /// 返信先ユーザーのログイン名（`reply-parent-user-login` タグ）
+    let replyParentUserLogin: String?
+
+    /// 返信先ユーザーの表示名（`reply-parent-display-name` タグ）
+    let replyParentDisplayName: String?
+
+    /// 返信先メッセージの本文（`reply-parent-msg-body` タグ）
+    let replyParentMsgBody: String?
+
     /// 楽観的 UI 表示のためのローカル ChatMessage を生成する
     ///
     /// Twitch IRC は自分が送信した PRIVMSG をエコーバックしないため、
@@ -86,6 +106,7 @@ struct ChatMessage: Sendable, Identifiable {
     ///   - roomId: 接続中チャンネルの room-id（既知の場合は渡す、省略可）
     ///   - colorHex: チャット文字色（#RRGGBB 形式、USERSTATE から取得した場合に指定）
     ///   - badges: バッジ一覧（USERSTATE から取得した場合に指定）
+    ///   - replyParentMsgId: 返信先メッセージの ID（返信送信時に指定、省略可）
     init(
         localUsername username: String,
         displayName: String? = nil,
@@ -93,7 +114,8 @@ struct ChatMessage: Sendable, Identifiable {
         isAction: Bool = false,
         roomId: String? = nil,
         colorHex: String? = nil,
-        badges: [Badge] = []
+        badges: [Badge] = [],
+        replyParentMsgId: String? = nil
     ) {
         self.id = UUID().uuidString
         self.username = username
@@ -106,6 +128,11 @@ struct ChatMessage: Sendable, Identifiable {
         self.segments = MessageSegment.segments(from: text, emotePositions: [])
         self.roomId = roomId
         self.receivedAt = Date()
+        self.replyParentMsgId = replyParentMsgId
+        self.replyParentUserLogin = nil
+        self.replyParentDisplayName = nil
+        self.replyParentMsgBody = nil
+        self.isOptimistic = true
     }
 
     /// IRCMessage から ChatMessage を生成する
@@ -148,5 +175,10 @@ struct ChatMessage: Sendable, Identifiable {
         self.emotes = parsedEmotes
         self.segments = MessageSegment.segments(from: parsedText, emotePositions: parsedEmotes)
         self.receivedAt = Date()
+        self.replyParentMsgId = ircMessage.tags["reply-parent-msg-id"].flatMap { $0.isEmpty ? nil : $0 }
+        self.replyParentUserLogin = ircMessage.tags["reply-parent-user-login"].flatMap { $0.isEmpty ? nil : $0 }
+        self.replyParentDisplayName = ircMessage.tags["reply-parent-display-name"].flatMap { $0.isEmpty ? nil : $0 }
+        self.replyParentMsgBody = ircMessage.tags["reply-parent-msg-body"].flatMap { $0.isEmpty ? nil : $0 }
+        self.isOptimistic = false
     }
 }
