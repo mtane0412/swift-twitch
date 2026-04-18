@@ -125,15 +125,16 @@ struct ChatMessage: Sendable, Identifiable {
         // ACTION 形式（/me コマンド）の検出と本文抽出
         // trailing が "\u{1}ACTION 本文\u{1}" の形式かどうかを確認する
         let actionPrefix = "\u{1}ACTION "
+        let parsedText: String
         if trailing.hasPrefix(actionPrefix) && trailing.hasSuffix("\u{1}") && trailing.count >= actionPrefix.count + 1 {
             self.isAction = true
             // "\u{1}ACTION " と末尾の "\u{1}" を除去して本文のみを抽出する
-            let body = trailing.dropFirst(actionPrefix.count).dropLast()
-            self.text = String(body)
+            parsedText = String(trailing.dropFirst(actionPrefix.count).dropLast())
         } else {
             self.isAction = false
-            self.text = trailing
+            parsedText = trailing
         }
+        self.text = parsedText
 
         self.id = ircMessage.tags["id"] ?? UUID().uuidString
         self.username = username
@@ -145,7 +146,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.roomId = ircMessage.tags["room-id"].flatMap { $0.isEmpty ? nil : $0 }
         let parsedEmotes = EmoteParser.parse(ircMessage.tags["emotes"] ?? "")
         self.emotes = parsedEmotes
-        self.segments = MessageSegment.segments(from: self.text, emotePositions: parsedEmotes)
+        self.segments = MessageSegment.segments(from: parsedText, emotePositions: parsedEmotes)
         self.receivedAt = Date()
     }
 }

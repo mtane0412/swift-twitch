@@ -310,6 +310,8 @@ final class ChatViewModel {
                 : ""
             guard !body.isEmpty else { throw ChatSendError.empty }
             ircText = "\u{1}ACTION \(body)\u{1}"
+            // ACTION 変換後の IRC 送信文字列でサーバー制限（500文字）を再チェックする
+            guard ircText.count <= 500 else { throw ChatSendError.tooLong }
             isAction = true
             displayText = body
         } else {
