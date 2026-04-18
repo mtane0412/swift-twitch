@@ -30,11 +30,13 @@ actor ModerationService: ModerationServiceProtocol {
 
     // MARK: - Helix API エンドポイント
 
-    private static let helixBase = "https://api.twitch.tv/helix"
-    private static let bansURL = URL(string: "\(helixBase)/moderation/bans")!
-    private static let chatSettingsURL = URL(string: "\(helixBase)/chat/settings")!
-    private static let chatMessagesURL = URL(string: "\(helixBase)/chat/messages")!
-    private static let usersURL = URL(string: "\(helixBase)/users")!
+    // swiftlint:disable force_unwrapping
+    /// リテラル文字列のため実行時クラッシュは発生しない
+    private static let bansURL = URL(string: "https://api.twitch.tv/helix/moderation/bans")!
+    private static let chatSettingsURL = URL(string: "https://api.twitch.tv/helix/chat/settings")!
+    private static let chatMessagesURL = URL(string: "https://api.twitch.tv/helix/chat/messages")!
+    private static let usersURL = URL(string: "https://api.twitch.tv/helix/users")!
+    // swiftlint:enable force_unwrapping
 
     // MARK: - プロパティ
 
@@ -119,7 +121,7 @@ actor ModerationService: ModerationServiceProtocol {
 
     /// POST /moderation/bans を実行する（BAN またはタイムアウト）
     private func executeBan(userId: String, duration: Int?, reason: String?, broadcasterId: String, moderatorId: String) async throws {
-        let body = HelixBanRequest(data: .init(userId: userId, duration: duration, reason: reason))
+        let body = HelixBanRequest(data: HelixBanData(userId: userId, duration: duration, reason: reason))
         try await apiClient.postNoContent(
             url: Self.bansURL,
             queryItems: [

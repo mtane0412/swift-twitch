@@ -21,18 +21,30 @@ struct MockHelixAPIClient: HelixAPIClientProtocol {
     }
 
     func post<Body: Encodable & Sendable, T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws -> T {
+        if shouldThrowAuthError {
+            throw URLError(.userAuthenticationRequired)
+        }
         throw URLError(.badServerResponse)
     }
 
     func postNoContent<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+        if shouldThrowAuthError {
+            throw URLError(.userAuthenticationRequired)
+        }
         throw URLError(.badServerResponse)
     }
 
     func patch<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+        if shouldThrowAuthError {
+            throw URLError(.userAuthenticationRequired)
+        }
         throw URLError(.badServerResponse)
     }
 
     func delete(url: URL, queryItems: [URLQueryItem]?) async throws {
+        if shouldThrowAuthError {
+            throw URLError(.userAuthenticationRequired)
+        }
         throw URLError(.badServerResponse)
     }
 }

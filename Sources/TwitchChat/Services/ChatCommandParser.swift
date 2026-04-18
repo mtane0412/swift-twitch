@@ -23,89 +23,79 @@ enum ChatCommandParser {
         let commandName = parts.isEmpty ? "" : String(parts[0]).lowercased()
         let argsString = parts.count > 1 ? String(parts[1]) : ""
 
+        return parseUserCommands(commandName: commandName, args: argsString)
+            ?? parseChatSettingsCommands(commandName: commandName, args: argsString)
+            ?? parseMessageCommands(commandName: commandName, args: argsString)
+            ?? .unknown(command: commandName, args: argsString)
+    }
+
+    // MARK: - カテゴリ別ルーター
+
+    /// ユーザー対象コマンドをパースする（ban/timeout/unban/untimeout/me）
+    ///
+    /// - Returns: 対応するコマンド。カテゴリ外の場合は nil
+    private static func parseUserCommands(commandName: String, args: String) -> ChatCommand? {
         switch commandName {
         case "me":
-            return .me(message: argsString)
-
+            return .me(message: args)
         case "ban":
-            return parseBan(args: argsString)
-
+            return parseBan(args: args)
         case "unban":
-            guard !argsString.isEmpty else { return .unknown(command: commandName, args: argsString) }
-            let username = argsString.split(separator: " ").first.map(String.init) ?? argsString
-            return .unban(username: username)
-
+            return parseUsernameOnly(commandName: commandName, args: args).map { .unban(username: $0) }
         case "timeout":
-            return parseTimeout(args: argsString)
-
+            return parseTimeout(args: args)
         case "untimeout":
-            guard !argsString.isEmpty else { return .unknown(command: commandName, args: argsString) }
-            let username = argsString.split(separator: " ").first.map(String.init) ?? argsString
-            return .untimeout(username: username)
-
-        case "emoteonly":
-            return .emoteOnly(enabled: true)
-
-        case "emoteonlyoff":
-            return .emoteOnly(enabled: false)
-
-        case "slow":
-            if argsString.isEmpty {
-                return .slow(seconds: nil)
-            }
-            if let seconds = Int(argsString.split(separator: " ")[0]) {
-                return .slow(seconds: seconds)
-            }
-            return .slow(seconds: nil)
-
-        case "slowoff":
-            return .slowOff
-
-        case "subscribers":
-            return .subscribers(enabled: true)
-
-        case "subscribersoff":
-            return .subscribers(enabled: false)
-
-        case "followers":
-            if argsString.isEmpty {
-                return .followers(duration: nil)
-            }
-            if let duration = Int(argsString.split(separator: " ")[0]) {
-                return .followers(duration: duration)
-            }
-            return .followers(duration: nil)
-
-        case "followersoff":
-            return .followersOff
-
-        case "uniquechat":
-            return .uniqueChat(enabled: true)
-
-        case "uniquechatoff":
-            return .uniqueChat(enabled: false)
-
-        case "clear":
-            return .clear
-
-        case "delete":
-            guard !argsString.isEmpty else { return .unknown(command: commandName, args: argsString) }
-            let messageId = String(argsString.split(separator: " ")[0])
-            return .delete(messageId: messageId)
-
+            return parseUsernameOnly(commandName: commandName, args: args).map { .untimeout(username: $0) }
         default:
-            return .unknown(command: commandName, args: argsString)
+            return nil
         }
     }
 
-    // MARK: - プライベートヘルパー
+    /// チャット設定コマンドをパースする（emoteonly/slow/subscribers/followers/uniquechat 等）
+    ///
+    /// - Returns: 対応するコマンド。カテゴリ外の場合は nil
+    private static func parseChatSettingsCommands(commandName: String, args: String) -> ChatCommand? {
+        switch commandName {
+        case "emoteonly":   return .emoteOnly(enabled: true)
+        case "emoteonlyoff": return .emoteOnly(enabled: false)
+        case "slow":        return .slow(seconds: parseOptionalInt(from: args))
+        case "slowoff":     return .slowOff
+        case "subscribers": return .subscribers(enabled: true)
+        case "subscribersoff": return .subscribers(enabled: false)
+        case "followers":   return .followers(duration: parseOptionalInt(from: args))
+        case "followersoff": return .followersOff
+        case "uniquechat":  return .uniqueChat(enabled: true)
+        case "uniquechatoff": return .uniqueChat(enabled: false)
+        default:            return nil
+        }
+    }
+
+    /// メッセージ操作コマンドをパースする（clear/delete）
+    ///
+    /// - Returns: 対応するコマンド。カテゴリ外の場合は nil
+    private static func parseMessageCommands(commandName: String, args: String) -> ChatCommand? {
+        switch commandName {
+        case "clear":
+            return .clear
+        case "delete":
+            let trimmed = args.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return .unknown(command: commandName, args: args) }
+            let messageId = String(trimmed.split(separator: " ")[0])
+            return .delete(messageId: messageId)
+        default:
+            return nil
+        }
+    }
+
+    // MARK: - 引数パーサー
 
     /// /ban コマンドの引数をパースする
     ///
     /// - Parameter args: コマンド名を除いた引数文字列（例: "あらし太郎 荒らし行為"）
     private static func parseBan(args: String) -> ChatCommand {
-        guard !args.isEmpty else { return .unknown(command: "ban", args: args) }
-        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return .unknown(command: "ban", args: args) }
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
         let username = String(parts[0])
         let reason = parts.count > 1 ? String(parts[1]) : nil
         return .ban(username: username, reason: reason)
@@ -115,11 +105,31 @@ enum ChatCommandParser {
     ///
     /// - Parameter args: コマンド名を除いた引数文字列（例: "ユーザー 600 スパム"）
     private static func parseTimeout(args: String) -> ChatCommand {
-        let parts = args.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return .unknown(command: "timeout", args: args) }
+        let parts = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
         guard parts.count >= 2 else { return .unknown(command: "timeout", args: args) }
         let username = String(parts[0])
         guard let duration = Int(parts[1]) else { return .unknown(command: "timeout", args: args) }
         let reason = parts.count > 2 ? String(parts[2]) : nil
         return .timeout(username: username, duration: duration, reason: reason)
+    }
+
+    /// ユーザー名のみを受け取るコマンドをパースする（unban/untimeout 用）
+    ///
+    /// - Returns: ユーザー名文字列。引数が空または空白のみの場合は nil
+    private static func parseUsernameOnly(commandName: String, args: String) -> String? {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.split(separator: " ").first.map(String.init) ?? trimmed
+    }
+
+    /// 先頭の数値引数をパースする（slow/followers 用）
+    ///
+    /// - Parameter args: 引数文字列（空文字列または数値を含む）
+    /// - Returns: 数値。空文字または非数値の場合は nil
+    private static func parseOptionalInt(from args: String) -> Int? {
+        guard !args.isEmpty else { return nil }
+        return args.split(separator: " ").first.flatMap { Int($0) }
     }
 }

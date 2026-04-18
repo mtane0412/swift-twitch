@@ -27,7 +27,7 @@ struct ChatCommandParserTests {
         #expect(ChatCommandParser.parse("/me 踊る") == .me(message: "踊る"))
     }
 
-    @Test("/me（本文なし）が unknown になること")
+    @Test("/me（本文なし）が .me(message: \"\") を返すこと")
     func testMeCommandWithoutBody() {
         #expect(ChatCommandParser.parse("/me") == .me(message: ""))
     }
@@ -89,6 +89,11 @@ struct ChatCommandParserTests {
     @Test("/untimeout コマンドが正しくパースされること")
     func testUntimeoutCommand() {
         #expect(ChatCommandParser.parse("/untimeout ユーザー") == .untimeout(username: "ユーザー"))
+    }
+
+    @Test("/untimeout ユーザー名なしは unknown になること")
+    func testUntimeoutCommandWithoutUsername() {
+        #expect(ChatCommandParser.parse("/untimeout") == .unknown(command: "untimeout", args: ""))
     }
 
     // MARK: - /emoteonly / /emoteonlyoff コマンド

@@ -62,4 +62,15 @@ struct HelixAPIErrorTests {
         let error = HelixAPIError.serverError(503)
         #expect(error.errorDescription?.contains("503") == true)
     }
+
+    @Test("rateLimited の errorDescription が設定されていること")
+    func testRateLimitedDescription() {
+        #expect(HelixAPIError.rateLimited.errorDescription != nil)
+    }
+
+    @Test("unexpectedStatus の errorDescription にステータスコードが含まれること")
+    func testUnexpectedStatusDescription() {
+        let error = HelixAPIError.unexpectedStatus(422)
+        #expect(error.errorDescription?.contains("422") == true)
+    }
 }

@@ -123,16 +123,13 @@ actor MockModerationService: ModerationServiceProtocol {
         lastCommand = command
     }
 
-    func setUnauthorized(_ value: Bool) {
-        shouldThrowUnauthorized = value
-    }
 }
 
 // MARK: - テスト
 
-/// ChatViewModel のテストスイート
 @Suite("ChatViewModel テスト")
 @MainActor
+// swiftlint:disable:next type_body_length
 struct ChatViewModelTests {
 
     // MARK: - 接続状態管理
@@ -926,7 +923,7 @@ struct ChatViewModelTests {
         let authState = try await makeLoggedInAuthState(userLogin: "テストユーザー")
         let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
         await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
 
         // 実行: 通常テキストを送信する
         try await viewModel.sendMessage("こんにちは！")
@@ -946,7 +943,7 @@ struct ChatViewModelTests {
         let authState = try await makeLoggedInAuthState(userLogin: "テストユーザー")
         let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
         await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
 
         // 実行: /me コマンドを送信する
         try await viewModel.sendMessage("/me 踊る")
@@ -966,7 +963,7 @@ struct ChatViewModelTests {
         let authState = try await makeLoggedInAuthState(userLogin: "モデレーター")
         let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
         await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
 
         // チャットメッセージを受信して room-id を設定する
         let msg = makeTestChatMessageWithRoomId(displayName: "テストユーザー", text: "こんにちは", roomId: "チャンネルRoomId")
@@ -1006,7 +1003,7 @@ struct ChatViewModelTests {
         let authState = try await makeLoggedInAuthState(userLogin: "モデレーター")
         let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
         await viewModel.connect(to: "テストチャンネル")
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await waitFor { viewModel.connectionState == .connected }
         // room-id を設定しない（メッセージ未受信）
 
         // 実行・検証: roomIdNotAvailable エラーになる

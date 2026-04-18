@@ -454,7 +454,7 @@ final class ChatViewModel {
         case .slow(let seconds): return "スローモードを有効にしました（\(seconds ?? 30)秒）"
         case .slowOff: return "スローモードを無効にしました"
         case .subscribers(let enabled): return enabled ? "サブスクライバーモードを有効にしました" : "サブスクライバーモードを無効にしました"
-        case .followers(let duration): return duration != nil ? "フォロワーモードを有効にしました（\(duration!)日）" : "フォロワーモードを有効にしました"
+        case .followers(let duration): return duration.map { "フォロワーモードを有効にしました（\($0)日）" } ?? "フォロワーモードを有効にしました"
         case .followersOff: return "フォロワーモードを無効にしました"
         case .uniqueChat(let enabled): return enabled ? "ユニークチャットモードを有効にしました" : "ユニークチャットモードを無効にしました"
         case .clear: return "チャットをクリアしました"

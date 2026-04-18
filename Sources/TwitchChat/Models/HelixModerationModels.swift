@@ -6,27 +6,28 @@ import Foundation
 
 // MARK: - BAN 関連
 
+/// POST /moderation/bans リクエストボディの data フィールド
+struct HelixBanData: Encodable, Sendable {
+    /// バン対象のユーザー ID
+    let userId: String
+    /// タイムアウト秒数（省略時は永久BAN）
+    let duration: Int?
+    /// バン理由（省略可）
+    let reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case duration
+        case reason
+    }
+}
+
 /// POST /moderation/bans のリクエストボディ
 ///
-/// `duration` を省略すると永久BAN、設定するとタイムアウトとなる
+/// `data.duration` を省略すると永久BAN、設定するとタイムアウトとなる
 struct HelixBanRequest: Encodable, Sendable {
     /// バン対象ユーザーの情報
-    let data: BanData
-
-    struct BanData: Encodable, Sendable {
-        /// バン対象のユーザー ID
-        let userId: String
-        /// タイムアウト秒数（省略時は永久BAN）
-        let duration: Int?
-        /// バン理由（省略可）
-        let reason: String?
-
-        enum CodingKeys: String, CodingKey {
-            case userId = "user_id"
-            case duration
-            case reason
-        }
-    }
+    let data: HelixBanData
 }
 
 // MARK: - チャット設定関連
@@ -101,7 +102,7 @@ struct HelixChatSettingsRequest: Encodable, Sendable {
             emoteMode: nil,
             slowMode: nil, slowModeWaitTime: nil,
             subscriberMode: nil,
-            followerMode: enabled, followerModeDuration: enabled ? (duration.map { $0 * 60 } ?? 0) : nil,
+            followerMode: enabled, followerModeDuration: enabled ? (duration ?? 0) : nil,
             uniqueChatMode: nil
         )
     }

@@ -2,8 +2,8 @@
 // ModerationService の単体テスト
 // MockHelixAPIClient を使ってネットワーク通信なしでモデレーション API 呼び出しを検証する
 
-import Testing
 import Foundation
+import Testing
 @testable import TwitchChat
 
 // MARK: - テスト用モック
@@ -36,6 +36,8 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
     private(set) var lastPostNoContentURL: URL?
     /// 最後に postNoContent に渡されたクエリパラメータ
     private(set) var lastPostNoContentQueryItems: [URLQueryItem]?
+    /// 最後に postNoContent に渡されたリクエストボディ（HelixBanRequest）
+    private(set) var lastPostNoContentBody: HelixBanRequest?
 
     /// 最後に patch に渡された URL
     private(set) var lastPatchURL: URL?
@@ -67,6 +69,7 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
 
     func post<Body: Encodable & Sendable, T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws -> T {
         if shouldThrowUnauthorized { throw HelixAPIError.unauthorized }
+        if shouldThrowForbidden { throw HelixAPIError.forbidden("テスト用権限エラー") }
         throw URLError(.badServerResponse)
     }
 
@@ -76,6 +79,10 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
         postNoContentCallCount += 1
         lastPostNoContentURL = url
         lastPostNoContentQueryItems = queryItems
+        // HelixBanRequest にキャストしてボディを記録する
+        if let banRequest = body as? HelixBanRequest {
+            lastPostNoContentBody = banRequest
+        }
     }
 
     func patch<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
@@ -87,6 +94,8 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
         // HelixChatSettingsRequest にキャストして記録する
         if let settings = body as? HelixChatSettingsRequest {
             lastPatchBody = settings
+        } else {
+            Issue.record("patch に予期しない型が渡されました: \(type(of: body))")
         }
     }
 
@@ -102,6 +111,10 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
 
     func addUser(id: String, login: String) {
         usersByLogin[login] = HelixUserData(id: id, login: login, displayName: login, profileImageUrl: nil)
+    }
+
+    func setUnauthorized(_ value: Bool) {
+        shouldThrowUnauthorized = value
     }
 }
 
@@ -315,6 +328,8 @@ struct ModerationServiceTests {
     @Test("API が unauthorized エラーを返した場合は HelixAPIError.unauthorized が throw されること")
     func testUnauthorizedErrorPropagates() async throws {
         let mock = MockModerationAPIClient()
+        // shouldThrowUnauthorized = true にすると get メソッドも含む全呼び出しで throw するため、
+        // addUser で登録したユーザーを解決する前に unauthorized が伝播することを検証する
         await mock.setUnauthorized(true)
         await mock.addUser(id: "ID", login: "ユーザー")
         let service = ModerationService(apiClient: mock)
@@ -326,13 +341,5 @@ struct ModerationServiceTests {
                 moderatorId: moderatorID
             )
         }
-    }
-}
-
-// MARK: - MockModerationAPIClient ヘルパー
-
-extension MockModerationAPIClient {
-    func setUnauthorized(_ value: Bool) {
-        shouldThrowUnauthorized = value
     }
 }
