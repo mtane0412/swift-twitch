@@ -26,7 +26,7 @@ final class MentionCompletionViewModel {
     /// 選択中の候補インデックス
     private(set) var selectedIndex: Int = 0
 
-    /// テキスト内の @ から現在カーソルまでの NSRange（置換に使用）
+    /// テキスト内の @ から現在カーソルまでの NSRange（UTF-16 基準、置換に使用）
     private(set) var mentionRange: NSRange?
 
     // MARK: - プライベートプロパティ
@@ -47,8 +47,8 @@ final class MentionCompletionViewModel {
     /// `@` の直前が空白または文頭の場合のみトリガーとして認識する。
     ///
     /// - Parameters:
-    ///   - text: 入力テキスト全体
-    ///   - cursorPosition: カーソル位置（文字数）
+    ///   - text: 入力テキスト全体（plainText ベースの文字列）
+    ///   - cursorPosition: カーソル位置（plainText 上の文字数）
     func updateFromText(_ text: String, cursorPosition: Int) {
         let nsText = text as NSString
         let searchRange = NSRange(location: 0, length: min(cursorPosition, nsText.length))
@@ -59,10 +59,9 @@ final class MentionCompletionViewModel {
             return
         }
 
-        let query = tokenInfo.query
-        mentionRange = NSRange(location: tokenInfo.atLocation, length: tokenInfo.atLocation + tokenInfo.tokenLength - tokenInfo.atLocation)
+        mentionRange = NSRange(location: tokenInfo.atNSLocation, length: tokenInfo.tokenNSLength)
 
-        let newCandidates = mentionStore.candidates(matching: query)
+        let newCandidates = mentionStore.candidates(matching: tokenInfo.query)
         candidates = newCandidates
         selectedIndex = 0
         isActive = true
@@ -76,6 +75,16 @@ final class MentionCompletionViewModel {
     func moveSelection(by offset: Int) {
         guard !candidates.isEmpty else { return }
         selectedIndex = max(0, min(candidates.count - 1, selectedIndex + offset))
+    }
+
+    /// 選択インデックスを直接指定する
+    ///
+    /// 範囲外の値はクランプする。
+    ///
+    /// - Parameter index: 設定するインデックス
+    func setSelection(to index: Int) {
+        guard !candidates.isEmpty else { return }
+        selectedIndex = max(0, min(candidates.count - 1, index))
     }
 
     /// 選択中の候補を確定し、挿入文字列を返す
@@ -115,11 +124,11 @@ final class MentionCompletionViewModel {
             return nil
         }
 
-        let atIndex = textUpToCursor.distance(from: textUpToCursor.startIndex, to: atRange.lowerBound)
-        let atNSLocation = atIndex
+        // 文字数ベースのインデックス（isWhitespace チェック用）
+        let atCharIndex = textUpToCursor.distance(from: textUpToCursor.startIndex, to: atRange.lowerBound)
 
         // @ の直前が空白または文頭であることを確認（メールアドレス等の誤検出防止）
-        if atIndex > 0 {
+        if atCharIndex > 0 {
             let beforeAt = textUpToCursor[textUpToCursor.index(before: atRange.lowerBound)]
             guard beforeAt.isWhitespace else {
                 return nil
@@ -129,17 +138,23 @@ final class MentionCompletionViewModel {
         // @ 以降のクエリ文字列を取得
         let afterAt = String(textUpToCursor[atRange.upperBound...])
 
-        // クエリにスペースが含まれる場合はトークン終了（補完対象外）
-        guard !afterAt.contains(" ") else {
+        // クエリにホワイトスペースが含まれる場合はトークン終了（補完対象外）
+        guard !afterAt.contains(where: { $0.isWhitespace }) else {
             return nil
         }
 
-        let tokenLength = 1 + afterAt.count // @ + クエリ文字列
+        // UTF-16 オフセットを計算（NSRange / NSTextView との整合性のため）
+        let atNSLocation = textUpToCursor.utf16.distance(
+            from: textUpToCursor.utf16.startIndex,
+            to: atRange.lowerBound.samePosition(in: textUpToCursor.utf16)!
+        )
+        // "@" は BMP 文字で常に 1 UTF-16 code unit
+        let tokenNSLength = 1 + afterAt.utf16.count
 
         return MentionTokenInfo(
-            atLocation: atNSLocation,
+            atNSLocation: atNSLocation,
             query: afterAt,
-            tokenLength: tokenLength
+            tokenNSLength: tokenNSLength
         )
     }
 }
@@ -148,10 +163,10 @@ final class MentionCompletionViewModel {
 
 /// メンショントークンの検出結果
 private struct MentionTokenInfo {
-    /// テキスト内の @ の位置（文字インデックス）
-    let atLocation: Int
+    /// テキスト内の @ の UTF-16 オフセット（NSRange 用）
+    let atNSLocation: Int
     /// @ 以降のクエリ文字列
     let query: String
-    /// トークン全体の長さ（@ + クエリ）
-    let tokenLength: Int
+    /// トークン全体の UTF-16 長さ（@ + クエリ）
+    let tokenNSLength: Int
 }

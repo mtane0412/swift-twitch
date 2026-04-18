@@ -21,7 +21,18 @@ struct ChatInputBar: View {
     @State private var showEmotePicker = false
 
     /// @メンション補完の状態管理 ViewModel
-    @State private var mentionCompletionVM: MentionCompletionViewModel = MentionCompletionViewModel(mentionStore: MentionStore())
+    ///
+    /// `viewModel.mentionStore` を使って初期化する。
+    /// `@State` プロパティは init 引数で初期値を設定することで不要な再作成を防ぐ。
+    @State private var mentionCompletionVM: MentionCompletionViewModel
+
+    init(viewModel: ChatViewModel, authState: AuthState) {
+        self.viewModel = viewModel
+        self.authState = authState
+        self._mentionCompletionVM = State(
+            initialValue: MentionCompletionViewModel(mentionStore: viewModel.mentionStore)
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,10 +50,6 @@ struct ChatInputBar: View {
             }
         }
         .background(Color(.controlBackgroundColor))
-        .onAppear {
-            // viewModel の mentionStore を使用するよう初期化する
-            mentionCompletionVM = MentionCompletionViewModel(mentionStore: viewModel.mentionStore)
-        }
     }
 
     // MARK: - サブビュー
@@ -232,14 +239,21 @@ struct ChatInputBar: View {
                     confirmMentionCandidate(at: index)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .offset(y: -(mentionCompletionVM.candidates.isEmpty
-                    ? 0
-                    : min(CGFloat(mentionCompletionVM.candidates.count), 6) * 32))
+                .offset(y: -min(
+                    CGFloat(mentionCompletionVM.candidates.count),
+                    CGFloat(Self.mentionDropdownMaxRows)
+                ) * Self.mentionDropdownRowHeight)
             }
         }
     }
 
     // MARK: - ヘルパー
+
+    /// @メンション補完ドロップダウンの1行あたりの高さ（MentionCompletionView.rowHeight と連動）
+    private static let mentionDropdownRowHeight: CGFloat = 32
+
+    /// @メンション補完ドロップダウンの最大表示件数（MentionCompletionView.maxVisibleRows と連動）
+    private static let mentionDropdownMaxRows: Int = 6
 
     /// TextKit のデフォルト行高とインライン emote の高さを考慮した1行分の入力フィールド高さを計算する
     ///
@@ -302,12 +316,14 @@ struct ChatInputBar: View {
     ///
     /// - Parameter index: 選択した候補のインデックス
     private func confirmMentionCandidate(at index: Int) {
-        mentionCompletionVM.moveSelection(by: index - mentionCompletionVM.selectedIndex)
+        mentionCompletionVM.setSelection(to: index)
+        // mentionRange は confirmSelection() の前に取得する（確定後に nil になるため）
+        let range = mentionCompletionVM.mentionRange
         guard let insertion = mentionCompletionVM.confirmSelection() else { return }
 
         // draft の @ トークン部分を挿入文字列で置換する
-        // draft はプレーンテキストなので文字列操作で直接置換できる
-        if let range = findMentionTokenRange(in: draft) {
+        // draft はプレーンテキストなので NSString で直接置換できる
+        if let range {
             let nsString = draft as NSString
             draft = nsString.replacingCharacters(in: range, with: insertion)
         } else {
@@ -318,21 +334,26 @@ struct ChatInputBar: View {
     /// draft テキストから末尾の @メンショントークンの NSRange を探す
     ///
     /// - Parameter text: 対象のテキスト
-    /// - Returns: @トークンの NSRange。見つからない場合は nil
+    /// - Returns: @トークンの NSRange（UTF-16 基準）。見つからない場合は nil
     private func findMentionTokenRange(in text: String) -> NSRange? {
         guard let atRange = text.range(of: "@", options: .backwards) else { return nil }
         let atIndex = text.distance(from: text.startIndex, to: atRange.lowerBound)
 
-        // @ の直前が空白または文頭であることを確認
+        // @ の直前がホワイトスペースまたは文頭であることを確認
         if atIndex > 0 {
             let beforeAt = text[text.index(before: atRange.lowerBound)]
             guard beforeAt.isWhitespace else { return nil }
         }
 
         let afterAt = String(text[atRange.upperBound...])
-        guard !afterAt.contains(" ") else { return nil }
+        // ホワイトスペースを含む場合はトークン終了（isWhitespace で統一）
+        guard !afterAt.contains(where: { $0.isWhitespace }) else { return nil }
 
-        return NSRange(location: atIndex, length: 1 + afterAt.count)
+        let atNSLocation = text.utf16.distance(
+            from: text.utf16.startIndex,
+            to: atRange.lowerBound.samePosition(in: text.utf16)!
+        )
+        return NSRange(location: atNSLocation, length: 1 + afterAt.utf16.count)
     }
 }
 

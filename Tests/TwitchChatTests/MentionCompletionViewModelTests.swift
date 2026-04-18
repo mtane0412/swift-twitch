@@ -11,6 +11,9 @@ struct MentionCompletionViewModelTests {
     // MARK: - テスト用ヘルパー
 
     /// ユーザーが3名登録済みの MentionStore を生成する
+    ///
+    /// 登録順: ninja → pokimane → nickmercs
+    /// candidates(matching: "") の返却順（最新発言順）: [nickmercs, pokimane, ninja]
     @MainActor
     private func makeStore() -> MentionStore {
         let store = MentionStore()
@@ -37,7 +40,8 @@ struct MentionCompletionViewModelTests {
     func testAtSignAfterSpaceActivates() {
         let vm = MentionCompletionViewModel(mentionStore: makeStore())
 
-        vm.updateFromText("こんにちは @", cursorPosition: 8)
+        // "こんにちは @" は7文字（カーソルは末尾）
+        vm.updateFromText("こんにちは @", cursorPosition: 7)
 
         #expect(vm.isActive == true)
     }
@@ -119,7 +123,8 @@ struct MentionCompletionViewModelTests {
     func testNoMatchCandidatesEmpty() {
         let vm = MentionCompletionViewModel(mentionStore: makeStore())
 
-        vm.updateFromText("@存在しないユーザー", cursorPosition: 9)
+        // "@存在しないユーザー" は10文字（カーソルは末尾）
+        vm.updateFromText("@存在しないユーザー", cursorPosition: 10)
 
         #expect(vm.candidates.isEmpty)
     }
@@ -176,28 +181,49 @@ struct MentionCompletionViewModelTests {
         let vm = MentionCompletionViewModel(mentionStore: makeStore())
 
         vm.updateFromText("@", cursorPosition: 1)
-        // 候補は3件（ninja, pokimane, nickmercs）。インデックスの最大は 2
+        // 候補は3件（nickmercs, pokimane, ninja）。インデックスの最大は 2
         vm.moveSelection(by: 10)
 
         #expect(vm.selectedIndex == 2)
     }
 
+    @Test("setSelection(to:) で直接インデックスを指定できる")
+    @MainActor
+    func testSetSelectionDirectly() {
+        let vm = MentionCompletionViewModel(mentionStore: makeStore())
+
+        vm.updateFromText("@", cursorPosition: 1)
+        vm.setSelection(to: 2)
+
+        #expect(vm.selectedIndex == 2)
+    }
+
+    @Test("setSelection(to:) は範囲外の値をクランプする")
+    @MainActor
+    func testSetSelectionClamped() {
+        let vm = MentionCompletionViewModel(mentionStore: makeStore())
+
+        vm.updateFromText("@", cursorPosition: 1)
+        vm.setSelection(to: 100)
+
+        #expect(vm.selectedIndex == 2) // 候補3件なので最大インデックスは2
+    }
+
     // MARK: - confirmSelection（確定）
 
-    @Test("confirmSelection() は選択中のユーザーの @username 形式の文字列を返す")
+    @Test("confirmSelection() は選択中の候補（先頭）の @username 形式の文字列を返す")
     @MainActor
     func testConfirmSelectionReturnsUsername() {
         let vm = MentionCompletionViewModel(mentionStore: makeStore())
 
-        // 前提: @ を入力すると最新発言順で nickmercs, pokimane, ninja の順になる
+        // 前提: makeStore は ninja → pokimane → nickmercs の順に記録するため、
+        // 最新発言順では nickmercs が先頭（インデックス0）になる
         vm.updateFromText("@", cursorPosition: 1)
 
         let result = vm.confirmSelection()
 
-        // 先頭（インデックス0）の候補の username が返る
-        #expect(result != nil)
-        #expect(result?.hasPrefix("@") == true)
-        #expect(result?.hasSuffix(" ") == true)
+        // 先頭の候補（nickmercs）が "@nickmercs " の形式で返る
+        #expect(result == "@nickmercs ")
     }
 
     @Test("confirmSelection() は選択確定後に非アクティブ状態になる")
@@ -227,13 +253,14 @@ struct MentionCompletionViewModelTests {
     func testConfirmSecondCandidate() {
         let vm = MentionCompletionViewModel(mentionStore: makeStore())
 
+        // "@ni" にマッチするのは nickmercs（0番目）と ninja（1番目）
         vm.updateFromText("@ni", cursorPosition: 3)
-        // ni にマッチするのは nickmercs と ninja の2件
-        vm.moveSelection(by: 1)  // インデックス 1 に移動
+        vm.moveSelection(by: 1)  // インデックス1（ninja）に移動
+
         let result = vm.confirmSelection()
 
-        #expect(result != nil)
-        #expect(result?.hasPrefix("@") == true)
+        // インデックス1の ninja が "@ninja " として返る
+        #expect(result == "@ninja ")
     }
 
     // MARK: - mentionRange（置換範囲）
@@ -258,7 +285,7 @@ struct MentionCompletionViewModelTests {
     func testMentionRangeAfterSpace() {
         let vm = MentionCompletionViewModel(mentionStore: makeStore())
 
-        // "こんにちは @ni" のような入力
+        // "hello @ni" のような入力
         let text = "hello @ni"
         vm.updateFromText(text, cursorPosition: text.count)
 

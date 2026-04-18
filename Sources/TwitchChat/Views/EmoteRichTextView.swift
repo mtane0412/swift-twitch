@@ -144,6 +144,54 @@ struct EmoteRichTextView: NSViewRepresentable {
         return result
     }
 
+    /// NSTextView の UTF-16 カーソル位置を plainText 上の文字数インデックスに変換する
+    ///
+    /// エモートアタッチメントが存在する場合、NSTextView 上では1文字（U+FFFC）だが
+    /// plainText ではエモート名の文字数分になるためオフセットのずれが生じる。
+    /// この変換を行うことで `MentionCompletionViewModel.updateFromText` に正確な
+    /// カーソル位置を渡せる。
+    ///
+    /// - Parameters:
+    ///   - nsViewOffset: NSTextView の selectedRange().location（UTF-16 オフセット）
+    ///   - attributedString: NSTextView の現在の attributedString
+    /// - Returns: plainText 上の文字数インデックス
+    static func plainTextCursorPosition(from nsViewOffset: Int, in attributedString: NSAttributedString) -> Int {
+        var plainOffset = 0
+        var nsOffset = 0
+
+        attributedString.enumerateAttributes(
+            in: NSRange(location: 0, length: attributedString.length),
+            options: []
+        ) { attrs, range, stop in
+            guard nsOffset < nsViewOffset else {
+                stop.pointee = true
+                return
+            }
+
+            if let attachment = attrs[.attachment] as? EmoteTextAttachment {
+                // アタッチメントは NSTextView 上では range.length (通常1) 、plainText ではエモート名の長さ
+                let remaining = nsViewOffset - nsOffset
+                plainOffset += attachment.emoteName.count
+                nsOffset += range.length
+                if remaining < range.length {
+                    stop.pointee = true
+                }
+            } else {
+                let segmentNSLen = range.length
+                let remaining = nsViewOffset - nsOffset
+                let partRange = NSRange(location: range.location, length: min(remaining, segmentNSLen))
+                let partStr = (attributedString.string as NSString).substring(with: partRange)
+                plainOffset += partStr.count
+                nsOffset += partRange.length
+                if remaining < segmentNSLen {
+                    stop.pointee = true
+                }
+            }
+        }
+
+        return plainOffset
+    }
+
     // MARK: - Coordinator
 
     /// NSTextViewDelegate を実装し、エモート検出・置換・draft 更新を担当する
@@ -244,8 +292,13 @@ struct EmoteRichTextView: NSViewRepresentable {
             }
 
             // @メンション補完の候補を更新する
-            let cursorPosition = textView.selectedRange().location
-            mentionCompletionViewModel.updateFromText(plain, cursorPosition: cursorPosition)
+            // NSTextView の UTF-16 カーソル位置を plainText の文字数インデックスに変換して渡す
+            let nsViewOffset = textView.selectedRange().location
+            let plainCursorPosition = EmoteRichTextView.plainTextCursorPosition(
+                from: nsViewOffset,
+                in: textView.attributedString()
+            )
+            mentionCompletionViewModel.updateFromText(plain, cursorPosition: plainCursorPosition)
         }
 
         /// Enter / Shift+Enter で送信、補完アクティブ時は上下キー・Esc も処理する
@@ -275,10 +328,12 @@ struct EmoteRichTextView: NSViewRepresentable {
                     // Enter / Tab: 候補確定
                     // confirmSelection() は内部で mentionRange を nil にリセットするため、先に取得しておく
                     let range = mentionCompletionViewModel.mentionRange
-                    if let insertion = mentionCompletionViewModel.confirmSelection(), let range {
+                    let insertion = mentionCompletionViewModel.confirmSelection()
+                    if let insertion, let range {
+                        // 候補が選択されていた場合: トークンを置換
                         replaceMentionToken(with: insertion, range: range, in: textView)
-                    } else if mentionCompletionViewModel.isActive {
-                        // 候補が空でもアクティブな場合は Enter を送信に通す
+                    } else {
+                        // 候補が空または選択なしの場合: 補完をキャンセルして通常送信へ
                         mentionCompletionViewModel.cancel()
                         onSubmit()
                     }

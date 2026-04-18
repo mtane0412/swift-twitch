@@ -22,16 +22,21 @@ struct MentionCompletionView: View {
     /// 1行の高さ
     private static let rowHeight: CGFloat = 32
 
+    /// Divider の高さ（1pt）
+    private static let dividerHeight: CGFloat = 1
+
     /// 最大表示件数
     private static let maxVisibleRows: Int = 6
 
     var body: some View {
         let visibleCount = min(candidates.count, Self.maxVisibleRows)
+        // Divider を含めた正確な高さ計算（最後の行には Divider なし）
         let listHeight = CGFloat(visibleCount) * Self.rowHeight
+            + CGFloat(max(0, visibleCount - 1)) * Self.dividerHeight
 
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(Array(candidates.enumerated()), id: \.offset) { index, candidate in
+                ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
                     candidateRow(candidate: candidate, index: index)
                 }
             }
@@ -51,6 +56,7 @@ struct MentionCompletionView: View {
     /// 候補1件分の行ビュー
     @ViewBuilder
     private func candidateRow(candidate: MentionStore.UserCandidate, index: Int) -> some View {
+        let isSelected = index == selectedIndex
         Button {
             onSelect(index)
         } label: {
@@ -59,14 +65,14 @@ struct MentionCompletionView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(candidate.displayName)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(index == selectedIndex ? Color.white : Color.primary)
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
                         .lineLimit(1)
 
                     // displayName と username が異なる場合のみ username をサブテキストで表示
                     if candidate.displayName.lowercased() != candidate.username {
                         Text("@\(candidate.username)")
                             .font(.system(size: 11))
-                            .foregroundStyle(index == selectedIndex ? Color.white.opacity(0.8) : Color.secondary)
+                            .foregroundStyle(isSelected ? Color.white.opacity(0.8) : Color.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -75,9 +81,11 @@ struct MentionCompletionView: View {
             }
             .frame(height: Self.rowHeight)
             .padding(.horizontal, 12)
-            .background(index == selectedIndex ? Color.accentColor : Color.clear)
+            .background(isSelected ? Color.accentColor : Color.clear)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(candidate.displayName)（@\(candidate.username)）")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
 
         if index < candidates.count - 1 {
             Divider()
