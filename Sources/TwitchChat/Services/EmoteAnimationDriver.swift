@@ -150,7 +150,9 @@ final class EmoteAnimationDriver {
         // フレームが実際に変化したかどうかを追跡する（変化がない場合は通知しない）
         var anyFrameChanged = false
 
-        for (emoteId, list) in registrations {
+        // 列挙中の辞書ミューテーションを避けるためキーのスナップショットで反復する
+        for emoteId in Array(registrations.keys) {
+            guard let list = registrations[emoteId] else { continue }
             let alive = list.filter { $0.value != nil }
             if alive.isEmpty {
                 emoteIdsToRemove.append(emoteId)

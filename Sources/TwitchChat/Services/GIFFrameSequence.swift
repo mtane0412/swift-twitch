@@ -10,8 +10,11 @@ import ImageIO
 /// `CGImageSource` を使って GIF バイナリから全フレームを分解し、
 /// `EmoteAnimationDriver` がタイマー駆動でフレームを切り替えるために使用する。
 ///
+/// `NSImage` は `Sendable` 非準拠のため `@MainActor` に隔離する。
+/// これによりコンパイル時に MainActor 外からの誤用を防ぐ。
+///
 /// - Note: 静止画（フレーム数 1 以下）の場合は `init` が nil を返す
-/// - Note: `NSImage` は `Sendable` 非準拠のため、このクラスは `@MainActor` 内でのみ使用する
+@MainActor
 struct GIFFrameSequence {
 
     /// 各フレームの NSImage（`EmoteImageCache.emoteDisplaySize` にリサイズ済み）

@@ -23,7 +23,9 @@ struct EmoteAnimationDriverTests {
             "com.compuserve.gif" as CFString,
             frameCount,
             nil
-        ) else { return Data() }
+        ) else {
+            preconditionFailure("CGImageDestinationCreateWithData の作成に失敗した")
+        }
 
         CGImageDestinationSetProperties(destination, [
             kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]

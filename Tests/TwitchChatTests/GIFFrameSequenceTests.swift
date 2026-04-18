@@ -8,7 +8,10 @@ import Testing
 @testable import TwitchChat
 
 /// GIFFrameSequence のテストスイート
+///
+/// `GIFFrameSequence` は `@MainActor` 隔離のため、テストスイートも `@MainActor` で実行する。
 @Suite("GIFFrameSequence テスト")
+@MainActor
 struct GIFFrameSequenceTests {
 
     // MARK: - テスト用 GIF 生成ヘルパー

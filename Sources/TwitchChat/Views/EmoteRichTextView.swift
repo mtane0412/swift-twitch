@@ -81,6 +81,14 @@ struct EmoteRichTextView: NSViewRepresentable {
         Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit)
     }
 
+    /// ビュー破棄前に呼ばれるクリーンアップ（@MainActor 上で実行される）
+    ///
+    /// `Coordinator.deinit` は任意スレッドから呼ばれる可能性があるため、
+    /// 代わりにここで通知購読を解除する。これにより `nonisolated(unsafe)` を使わずに済む。
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.unsubscribeFromFrameUpdates()
+    }
+
     // MARK: - NSTextView 設定
 
     private func configureTextView(_ textView: NSTextView, coordinator: Coordinator) {
@@ -140,9 +148,9 @@ struct EmoteRichTextView: NSViewRepresentable {
 
         /// アニメーションフレーム更新通知のオブザーバートークン
         ///
-        /// deinit（nonisolated）からアクセスするため `nonisolated(unsafe)` を使用する。
-        /// このプロパティへのアクセスは常に MainActor 上（subscribe / deinit の DispatchQueue.main 経由）で行う。
-        nonisolated(unsafe) private var frameUpdateObserver: NSObjectProtocol?
+        /// `dismantleNSView`（MainActor）で `unsubscribeFromFrameUpdates()` を呼ぶため
+        /// `nonisolated(unsafe)` は不要。プロパティは常に MainActor 上でアクセスされる。
+        private var frameUpdateObserver: NSObjectProtocol?
 
         init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void) {
             self._draft = draft
@@ -150,20 +158,11 @@ struct EmoteRichTextView: NSViewRepresentable {
             self.onSubmit = onSubmit
         }
 
-        deinit {
-            if let observer = frameUpdateObserver {
-                // deinit は非 MainActor コンテキストから呼ばれる場合があるため
-                // NotificationCenter の解除処理をメインスレッドで非同期実行する
-                DispatchQueue.main.async {
-                    NotificationCenter.default.removeObserver(observer)
-                }
-            }
-        }
-
         /// アニメーションフレーム更新通知を購読し、textView に再描画を要求する
         ///
-        /// `EmoteAnimationDriver` が `image` を新フレームに更新した後に通知が届き、
-        /// `needsDisplay = true` をセットして NSTextView に再描画をスケジュールする。
+        /// `EmoteAnimationDriver` がフレームを更新した後に通知が届き、
+        /// `textStorage.edited(.editedAttributes)` で TextKit 2 に属性変更を通知して
+        /// レイアウトフラグメントを無効化し、attachment.image の再取得をトリガーする。
         func subscribeToFrameUpdates(textView: NSTextView) {
             frameUpdateObserver = NotificationCenter.default.addObserver(
                 forName: .emoteFrameDidUpdate,
@@ -179,14 +178,34 @@ struct EmoteRichTextView: NSViewRepresentable {
                     // textStorage.edited(.editedAttributes) でストレージレベルから「属性が変わった」と
                     // 通知することで、layout manager が該当範囲を無効化→再レイアウト→attachment.image
                     // を再取得する一連のパイプラインをトリガーする。
+                    // パフォーマンス最適化: EmoteTextAttachment を持つ range のみを無効化する
+                    var attachmentRanges: [NSRange] = []
+                    textStorage.enumerateAttribute(
+                        .attachment,
+                        in: NSRange(location: 0, length: textStorage.length),
+                        options: []
+                    ) { value, range, _ in
+                        if value is EmoteTextAttachment {
+                            attachmentRanges.append(range)
+                        }
+                    }
+                    guard !attachmentRanges.isEmpty else { return }
                     textStorage.beginEditing()
-                    textStorage.edited(
-                        .editedAttributes,
-                        range: NSRange(location: 0, length: textStorage.length),
-                        changeInLength: 0
-                    )
+                    for range in attachmentRanges {
+                        textStorage.edited(.editedAttributes, range: range, changeInLength: 0)
+                    }
                     textStorage.endEditing()
                 }
+            }
+        }
+
+        /// アニメーションフレーム更新通知の購読を解除する
+        ///
+        /// `dismantleNSView` から呼ばれる（MainActor 上）。
+        func unsubscribeFromFrameUpdates() {
+            if let observer = frameUpdateObserver {
+                NotificationCenter.default.removeObserver(observer)
+                frameUpdateObserver = nil
             }
         }
 
