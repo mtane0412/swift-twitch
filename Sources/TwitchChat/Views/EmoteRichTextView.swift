@@ -107,9 +107,16 @@ struct EmoteRichTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        // 縦方向のみ拡張
-        textView.isVerticallyResizable = true
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        // 縦方向は固定（1行固定高さ）、テキストコンテナの高さをビュー高さに追従させる
+        textView.isVerticallyResizable = false
+        textView.textContainer?.heightTracksTextView = true
+        // フォントのラインハイトからインセットを計算して縦方向に中央揃えにする
+        // inputFieldHeight = lineHeight + 6（上下各 3pt）のため、verticalInset = 3 になる
+        let font = textView.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let lineHeight = ceil(font.ascender - font.descender)
+        let fieldHeight = lineHeight + 6
+        let verticalInset = max(0, floor((fieldHeight - lineHeight) / 2))
+        textView.textContainerInset = NSSize(width: 0, height: verticalInset)
     }
 
     // MARK: - プレーンテキスト変換
