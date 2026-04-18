@@ -29,15 +29,14 @@ struct EmoteTextAttachmentTests {
         #expect(attachment.emoteName == "PogChamp")
     }
 
-    @Test("emoteImage がアタッチメントに正しく保持される")
-    func testEmoteImageIsStored() {
+    @Test("image プロパティがアタッチメントに正しく設定される")
+    func testImageIsStored() {
         // 前提: NSImage を渡してアタッチメントを作成する
-        // （image プロパティは fileType と排他的なため、emoteImage を独立して保持する）
         let image = NSImage()
         let attachment = EmoteTextAttachment(image: image, emoteName: "Kappa")
 
-        // 検証: emoteImage が保持されている
-        #expect(attachment.emoteImage === image)
+        // 検証: image プロパティに設定されている（TextKit 2 の静止画インライン描画で使用）
+        #expect(attachment.image === image)
     }
 
     // MARK: - bounds
