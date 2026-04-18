@@ -109,6 +109,7 @@ actor MockTwitchIRCClient: TwitchIRCClientProtocol {
 /// ChatViewModel のテストスイート
 @Suite("ChatViewModel テスト")
 @MainActor
+// swiftlint:disable:next type_body_length
 struct ChatViewModelTests {
 
     // MARK: - 接続状態管理
@@ -880,5 +881,170 @@ struct ChatViewModelTests {
         // 検証: 最後に発言した ユーザーB が先頭に来る
         let candidates = viewModel.mentionStore.candidates(matching: "")
         #expect(candidates.first?.displayName == "ユーザーB")
+    }
+
+    // MARK: - モデレーションコマンド
+
+    @Test("/ban コマンドが IRC に PRIVMSG として送信される")
+    func banコマンドがIRCにPRIVMSGとして送信される() async throws {
+        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター001")
+
+        // 実行: /ban コマンドを送信する
+        try await viewModel.sendMessage("/ban スパムユーザー")
+
+        // 検証: IRC クライアントに "/ban スパムユーザー" が PRIVMSG として送られている
+        let sentMessages = await mockClient.sentPrivmsgs
+        #expect(sentMessages == ["/ban スパムユーザー"])
+    }
+
+    @Test("/ban コマンドは楽観的 UI メッセージを追加しない")
+    func banコマンドは楽観的UIメッセージを追加しない() async throws {
+        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
+        let (viewModel, _) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター002")
+
+        // 実行: /ban コマンドを送信する
+        try await viewModel.sendMessage("/ban 荒らしユーザー")
+
+        // 検証: チャットメッセージリストに変化がない（コマンドはチャットに表示されない）
+        #expect(viewModel.messages.isEmpty)
+    }
+
+    @Test("/timeout コマンドが IRC に PRIVMSG として送信される")
+    func timeoutコマンドがIRCにPRIVMSGとして送信される() async throws {
+        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター003")
+
+        // 実行: /timeout コマンドを送信する
+        try await viewModel.sendMessage("/timeout 荒らしユーザー 600")
+
+        // 検証: IRC クライアントに "/timeout 荒らしユーザー 600" が送られている
+        let sentMessages = await mockClient.sentPrivmsgs
+        #expect(sentMessages == ["/timeout 荒らしユーザー 600"])
+    }
+
+    @Test("/clear コマンドが IRC に PRIVMSG として送信される")
+    func clearコマンドがIRCにPRIVMSGとして送信される() async throws {
+        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター004")
+
+        // 実行: /clear コマンドを送信する
+        try await viewModel.sendMessage("/clear")
+
+        // 検証: IRC クライアントに "/clear" が送られている
+        let sentMessages = await mockClient.sentPrivmsgs
+        #expect(sentMessages == ["/clear"])
+    }
+
+    @Test("モデレーションコマンドは replyTo を付与しない")
+    func モデレーションコマンドはreplyToを付与しない() async throws {
+        // 前提: 返信モードの状態で channel:moderate スコープ付きの接続済み
+        let (viewModel, mockClient) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター005")
+        let replyTarget = makeTestChatMessage(displayName: "返信先ユーザー", text: "テストメッセージ")
+        viewModel.startReply(to: replyTarget)
+        #expect(viewModel.replyingTo?.id == replyTarget.id)
+
+        // 実行: 返信モード中に /ban コマンドを送信する
+        try await viewModel.sendMessage("/ban 対象ユーザー")
+
+        // 検証: replyTo なしで送信されている（モデレーションコマンドは返信コンテキスト不要）
+        let sentReplyToIds = await mockClient.sentReplyToIds
+        #expect(sentReplyToIds == [nil])
+    }
+
+    @Test("channel:moderate スコープなしでモデレーションコマンドを送ると missingScope エラーになる")
+    func channel_moderateスコープなしでモデレーションコマンドを送るとmissingScopeエラーになる() async throws {
+        // 前提: channel:moderate スコープなし（chat:edit のみ）でログイン済み・接続済み
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "一般視聴者001")
+
+        // 実行: /ban コマンドを送信する（スコープ不足のため失敗するはず）
+        do {
+            try await viewModel.sendMessage("/ban スパムユーザー")
+            Issue.record("missingScope が throw されるべきです")
+        } catch ChatSendError.missingScope(let scope) {
+            // 検証: 不足しているスコープが "channel:moderate" であることを確認する
+            #expect(scope == "channel:moderate")
+        } catch {
+            Issue.record("予期しないエラーが throw されました: \(error)")
+        }
+
+        // 検証: sendError にスコープ不足のメッセージが設定されている
+        #expect(viewModel.sendError == ChatSendError.missingScope("channel:moderate").errorDescription)
+    }
+
+    @Test("未知のコマンドを送ると unknownCommand エラーになる")
+    func 未知のコマンドを送るとunknownCommandエラーになる() async throws {
+        // 前提: ログイン済み・接続済み
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "視聴者999")
+
+        // 実行: 未知のコマンドを送信する
+        do {
+            try await viewModel.sendMessage("/踊れ")
+            Issue.record("unknownCommand が throw されるべきです")
+        } catch ChatSendError.unknownCommand(let name) {
+            // 検証: コマンド名が正しく伝播している
+            #expect(name == "踊れ")
+        } catch {
+            Issue.record("予期しないエラーが throw されました: \(error)")
+        }
+
+        // 検証: sendError に未知コマンドのメッセージが設定されている
+        #expect(viewModel.sendError == ChatSendError.unknownCommand("踊れ").errorDescription)
+    }
+
+    @Test("/ban 引数なしを送ると missingArguments エラーになる")
+    func ban引数なしを送るとmissingArgumentsエラーになる() async throws {
+        // 前提: channel:moderate スコープ付きでログイン済み・接続済み
+        let (viewModel, _) = try await makeConnectedViewModelWithModerationScope(userLogin: "モデレーター006")
+
+        // 実行: 引数なしで /ban を送信する
+        do {
+            try await viewModel.sendMessage("/ban")
+            Issue.record("missingArguments が throw されるべきです")
+        } catch ChatSendError.missingArguments(let command, _) {
+            // 検証: コマンド名が "ban" であることを確認する
+            #expect(command == "ban")
+        } catch {
+            Issue.record("予期しないエラーが throw されました: \(error)")
+        }
+    }
+
+    /// channel:moderate スコープ付きでログイン済み・接続済みの ChatViewModel を返すヘルパー
+    private func makeConnectedViewModelWithModerationScope(userLogin: String) async throws -> (ChatViewModel, MockTwitchIRCClient) {
+        let mockClient = MockTwitchIRCClient()
+        let store = KeychainStore(service: "test.\(UUID().uuidString)")
+        let mockAuthClient = MockTwitchAuthClient(
+            deviceCodeResponse: TwitchDeviceCodeResponse(
+                deviceCode: "モデレーターテスト用デバイスコード",
+                userCode: "MOD-1234",
+                verificationUri: "https://www.twitch.tv/activate",
+                expiresIn: 1800,
+                interval: 0
+            ),
+            tokenResponse: TwitchTokenResponse(
+                accessToken: "モデレーターテスト用アクセストークン",
+                refreshToken: "モデレーターテスト用リフレッシュトークン",
+                expiresIn: 14400,
+                tokenType: "bearer",
+                scope: ["chat:read", "chat:edit", "channel:moderate"]
+            ),
+            validateResponse: TwitchValidateResponse(
+                clientId: "testclientid",
+                login: userLogin,
+                userId: "67890",
+                scopes: ["chat:read", "chat:edit", "channel:moderate"],
+                expiresIn: 14400
+            )
+        )
+        let authState = AuthState(
+            authClient: mockAuthClient,
+            keychainStore: store,
+            openURL: { _ in }
+        )
+        await authState.login()
+        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState)
+        await viewModel.connect(to: "テストチャンネル")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        return (viewModel, mockClient)
     }
 }

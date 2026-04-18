@@ -333,11 +333,15 @@ final class ChatViewModel {
     /// 入力テキストをサニタイズして PRIVMSG を送信し、楽観的 UI を更新する
     ///
     /// Twitch IRC は自分の PRIVMSG をエコーバックしないため、
-    /// 送信成功後にローカルで ChatMessage を生成して `messages` に追加する。
+    /// 通常メッセージ・`/me` コマンドの送信成功後にローカルで ChatMessage を生成して `messages` に追加する。
+    /// モデレーションコマンドはチャットに表示されないため楽観的 UI メッセージを追加しない。
     ///
     /// - Parameter text: 生の入力テキスト（改行・空白を含む場合がある）
     /// - Throws: `ChatSendError.empty`（空文字）、`.tooLong`（500 文字超）、
     ///           `.notReady`（未接続・未ログイン・スコープ不足）、
+    ///           `.unknownCommand`（未知のスラッシュコマンド）、
+    ///           `.missingArguments`（必須引数不足）、
+    ///           `.missingScope`（`channel:moderate` スコープ不足）、
     ///           または IRC クライアントが throw するエラー
     func sendMessage(_ text: String) async throws {
         let sanitized = Self.sanitize(text)
@@ -345,7 +349,14 @@ final class ChatViewModel {
         guard sanitized.count <= 500 else { throw ChatSendError.tooLong }
         guard canSendMessage else { throw ChatSendError.notReady }
 
-        let (ircText, isAction, displayText) = try Self.prepareIRCText(sanitized)
+        let parsed = try ChatCommandParser.parse(sanitized)
+
+        // 未知のコマンドは早期エラー（IRC 送信しない）
+        if case .unknownCommand(let name) = parsed {
+            let error = ChatSendError.unknownCommand(name)
+            sendError = error.errorDescription
+            throw error
+        }
 
         isSending = true
         sendError = nil
@@ -354,6 +365,63 @@ final class ChatViewModel {
         // 送信時点の返信先 ID を取得し、送信成功後にリセットするために保持する
         let parentMsgId = replyingTo?.id
 
+        switch parsed {
+        case .message(let messageText):
+            // 通常メッセージ: そのまま送信して楽観的 UI を追加する
+            try await sendAndAppendOptimistic(
+                ircText: messageText, displayText: messageText,
+                isAction: false, parentMsgId: parentMsgId
+            )
+
+        case .me(let body):
+            // /me コマンド: ACTION 形式に変換して送信する
+            let ircText = "\u{1}ACTION \(body)\u{1}"
+            // ACTION ラッパー付きで 500 文字を超える場合はエラー
+            guard ircText.count <= 500 else { throw ChatSendError.tooLong }
+            try await sendAndAppendOptimistic(
+                ircText: ircText, displayText: body,
+                isAction: true, parentMsgId: parentMsgId
+            )
+
+        case .moderationCommand(_, let ircText):
+            // モデレーションコマンド: channel:moderate スコープチェック後に送信する
+            // 楽観的 UI は追加しない（コマンドはチャットに表示されない）
+            guard authState.grantedScopes.contains("channel:moderate") else {
+                let error = ChatSendError.missingScope("channel:moderate")
+                sendError = error.errorDescription
+                throw error
+            }
+            do {
+                try await ircClient.sendPrivmsg(ircText, replyTo: nil)
+                replyingTo = nil
+            } catch TwitchIRCClientError.rateLimited(let retryAfter) {
+                let sendError = ChatSendError.clientRateLimited(retryAfter: retryAfter)
+                self.sendError = sendError.localizedDescription
+                throw sendError
+            } catch {
+                sendError = error.localizedDescription
+                throw error
+            }
+
+        case .unknownCommand:
+            // このケースは上で早期リターン済みのため到達しない
+            break
+        }
+    }
+
+    /// PRIVMSG を送信し、楽観的 UI メッセージを追加する共通処理
+    ///
+    /// 通常メッセージと `/me` コマンドで共有する。
+    /// モデレーションコマンドは楽観的 UI が不要なためこのメソッドを使用しない。
+    ///
+    /// - Parameters:
+    ///   - ircText: IRC 送信用テキスト
+    ///   - displayText: 画面表示用テキスト（/me の場合は ACTION ラッパーを除いた本文）
+    ///   - isAction: `/me` コマンドかどうか（UI の色付け等に使用）
+    ///   - parentMsgId: 返信先メッセージ ID（nil の場合は通常送信）
+    private func sendAndAppendOptimistic(
+        ircText: String, displayText: String, isAction: Bool, parentMsgId: String?
+    ) async throws {
         do {
             try await ircClient.sendPrivmsg(ircText, replyTo: parentMsgId)
             replyingTo = nil
@@ -367,30 +435,6 @@ final class ChatViewModel {
             sendError = error.localizedDescription
             throw error
         }
-    }
-
-    /// IRC 送信用のテキストを準備する
-    ///
-    /// `/me` コマンドを検出して ACTION 形式に変換し、IRC 送信文字列・isAction フラグ・表示テキストを返す。
-    ///
-    /// - Parameter sanitized: サニタイズ済みの入力テキスト
-    /// - Returns: `(ircText, isAction, displayText)` のタプル
-    /// - Throws: `ChatSendError.empty`（/me 本文なし）、`.tooLong`（ACTION 変換後500文字超）
-    private static func prepareIRCText(_ sanitized: String) throws -> (ircText: String, isAction: Bool, displayText: String) {
-        // /me コマンドの検出: "/me" または "/me " で始まる場合は ACTION 形式に変換して送信する
-        // 大文字小文字は区別しない（/Me, /ME なども検出する）
-        let lower = sanitized.lowercased()
-        if lower == "/me" || lower.hasPrefix("/me ") {
-            let body = lower.hasPrefix("/me ")
-                ? String(sanitized.dropFirst("/me ".count)).trimmingCharacters(in: .whitespaces)
-                : ""
-            guard !body.isEmpty else { throw ChatSendError.empty }
-            let ircText = "\u{1}ACTION \(body)\u{1}"
-            // ACTION 変換後の IRC 送信文字列でサーバー制限（500文字）を再チェックする
-            guard ircText.count <= 500 else { throw ChatSendError.tooLong }
-            return (ircText, true, body)
-        }
-        return (sanitized, false, sanitized)
     }
 
     /// 楽観的 UI メッセージを生成して追加する
@@ -502,6 +546,18 @@ enum ChatSendError: Error, LocalizedError, Equatable {
     case verificationRequired
     /// 上記以外のサーバー起因エラー（エラー文言をそのまま保持）
     case serverRejected(String)
+    /// 未知のスラッシュコマンド
+    case unknownCommand(String)
+    /// コマンドの必須引数が不足している
+    ///
+    /// - Parameters:
+    ///   - command: コマンド名（スラッシュなし）
+    ///   - expected: 期待される使い方（例: "/ban <ユーザー名>"）
+    case missingArguments(command: String, expected: String)
+    /// 操作に必要な OAuth スコープが不足している
+    ///
+    /// - Parameter scope: 不足しているスコープ名
+    case missingScope(String)
 
     var errorDescription: String? {
         switch self {
@@ -535,6 +591,12 @@ enum ChatSendError: Error, LocalizedError, Equatable {
             return "投稿にはメール/電話番号の認証が必要です"
         case .serverRejected(let message):
             return "送信できませんでした: \(message)"
+        case .unknownCommand(let name):
+            return "不明なコマンドです: /\(name)"
+        case .missingArguments(let command, let expected):
+            return "/\(command) の使い方: \(expected)"
+        case .missingScope(let scope):
+            return "この操作には \(scope) 権限が必要です。再ログインしてください"
         }
     }
 
