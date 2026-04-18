@@ -27,6 +27,9 @@ struct EmoteRichTextView: NSViewRepresentable {
     /// 入力無効フラグ
     var isDisabled: Bool
 
+    /// @メンション補完の状態管理 ViewModel
+    var mentionCompletionViewModel: MentionCompletionViewModel
+
     // MARK: - NSViewRepresentable
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -78,7 +81,7 @@ struct EmoteRichTextView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit)
+        Coordinator(draft: $draft, emoteStore: emoteStore, onSubmit: onSubmit, mentionCompletionViewModel: mentionCompletionViewModel)
     }
 
     /// ビュー破棄前に呼ばれるクリーンアップ（@MainActor 上で実行される）
@@ -150,6 +153,7 @@ struct EmoteRichTextView: NSViewRepresentable {
         @Binding var draft: String
         let emoteStore: EmoteStore
         let onSubmit: () -> Void
+        let mentionCompletionViewModel: MentionCompletionViewModel
 
         /// binding 側からのリセット中フラグ（無限ループ防止）
         var isUpdatingFromBinding = false
@@ -160,10 +164,11 @@ struct EmoteRichTextView: NSViewRepresentable {
         /// `nonisolated(unsafe)` は不要。プロパティは常に MainActor 上でアクセスされる。
         private var frameUpdateObserver: NSObjectProtocol?
 
-        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void) {
+        init(draft: Binding<String>, emoteStore: EmoteStore, onSubmit: @escaping () -> Void, mentionCompletionViewModel: MentionCompletionViewModel) {
             self._draft = draft
             self.emoteStore = emoteStore
             self.onSubmit = onSubmit
+            self.mentionCompletionViewModel = mentionCompletionViewModel
         }
 
         /// アニメーションフレーム更新通知を購読し、textView に再描画を要求する
@@ -237,19 +242,79 @@ struct EmoteRichTextView: NSViewRepresentable {
             if draft != plain {
                 draft = plain
             }
+
+            // @メンション補完の候補を更新する
+            let cursorPosition = textView.selectedRange().location
+            mentionCompletionViewModel.updateFromText(plain, cursorPosition: cursorPosition)
         }
 
-        /// Enter / Shift+Enter で送信
+        /// Enter / Shift+Enter で送信、補完アクティブ時は上下キー・Esc も処理する
         ///
         /// - Note: 入力欄は1行固定高さのため、Shift+Enter による改行挿入は無効化している。
         ///   改行を挿入しても表示領域外にクリップされるだけで混乱を招くため、両キーで送信する。
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // 補完アクティブ中のキーハンドリング
+            if mentionCompletionViewModel.isActive {
+                if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                    // 上キー: 前の候補に移動
+                    mentionCompletionViewModel.moveSelection(by: -1)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                    // 下キー: 次の候補に移動
+                    mentionCompletionViewModel.moveSelection(by: 1)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                    // Esc: 補完キャンセル
+                    mentionCompletionViewModel.cancel()
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.insertNewline(_:))
+                    || commandSelector == #selector(NSResponder.insertTab(_:)) {
+                    // Enter / Tab: 候補確定
+                    if let insertion = mentionCompletionViewModel.confirmSelection(),
+                       let range = mentionCompletionViewModel.mentionRange {
+                        // mentionRange は確定前に取得しておく（confirmSelection 後は nil になる）
+                        replaceMentionToken(with: insertion, range: range, in: textView)
+                    } else if mentionCompletionViewModel.isActive {
+                        // 候補が空でもアクティブな場合は Enter を送信に通す
+                        mentionCompletionViewModel.cancel()
+                        onSubmit()
+                    }
+                    return true
+                }
+            }
+
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 // Enter / Shift+Enter いずれも送信（1行固定のため改行を許可しない）
                 onSubmit()
                 return true
             }
             return false
+        }
+
+        /// @メンショントークンを補完候補で置換し draft を更新する
+        ///
+        /// - Parameters:
+        ///   - insertion: 挿入する文字列（`@username ` 形式）
+        ///   - range: テキスト内の置換対象範囲（@ から現在クエリ末尾まで）
+        ///   - textView: 対象の NSTextView
+        private func replaceMentionToken(with insertion: String, range: NSRange, in textView: NSTextView) {
+            // NSTextView 上の対応する範囲を置換する
+            // plainText の文字オフセットと NSTextView.string の UTF-16 オフセットを整合させる
+            let nsString = textView.string as NSString
+            guard range.location <= nsString.length,
+                  range.location + range.length <= nsString.length else { return }
+
+            isUpdatingFromBinding = true
+            textView.insertText(insertion, replacementRange: range)
+
+            // draft を更新
+            let plain = EmoteRichTextView.plainText(from: textView.attributedString())
+            if draft != plain {
+                draft = plain
+            }
         }
 
         // MARK: - エモート検出・置換

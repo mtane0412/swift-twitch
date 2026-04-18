@@ -80,6 +80,9 @@ final class ChatViewModel {
     /// エモート定義ストア（エモートピッカーのデータソースに使用）
     let emoteStore: EmoteStore
 
+    /// @メンション補完用ユーザー名リスト（入力バーの補完候補として使用）
+    let mentionStore: MentionStore = MentionStore()
+
     /// グローバルバッジフェッチタスク（切断時にキャンセル）
     private var globalBadgeFetchTask: Task<Void, Never>?
 
@@ -275,6 +278,8 @@ final class ChatViewModel {
         if currentRoomId == nil {
             currentRoomId = message.roomId
         }
+        // @メンション補完の候補リストを更新する
+        mentionStore.recordUser(username: message.username, displayName: message.displayName)
         messages.append(message)
         if messages.count > Self.maxMessages {
             messages.removeFirst(messages.count - Self.maxMessages)

@@ -20,6 +20,9 @@ struct ChatInputBar: View {
     /// エモートピッカーの表示状態
     @State private var showEmotePicker = false
 
+    /// @メンション補完の状態管理 ViewModel
+    @State private var mentionCompletionVM: MentionCompletionViewModel = MentionCompletionViewModel(mentionStore: MentionStore())
+
     var body: some View {
         VStack(spacing: 0) {
             // 認証エラーバナー（chat:edit スコープ不足またはログアウト）
@@ -36,6 +39,10 @@ struct ChatInputBar: View {
             }
         }
         .background(Color(.controlBackgroundColor))
+        .onAppear {
+            // viewModel の mentionStore を使用するよう初期化する
+            mentionCompletionVM = MentionCompletionViewModel(mentionStore: viewModel.mentionStore)
+        }
     }
 
     // MARK: - サブビュー
@@ -143,7 +150,8 @@ struct ChatInputBar: View {
                 draft: $draft,
                 emoteStore: viewModel.emoteStore,
                 onSubmit: submit,
-                isDisabled: !viewModel.canSendMessage
+                isDisabled: !viewModel.canSendMessage,
+                mentionCompletionViewModel: mentionCompletionVM
             )
             .frame(height: Self.inputFieldHeight)
             .padding(.leading, 14)
@@ -214,6 +222,21 @@ struct ChatInputBar: View {
                     .id(error)
             }
         }
+        // @メンション補完ドロップダウン（入力バーの上に表示）
+        .overlay(alignment: .top) {
+            if mentionCompletionVM.isActive && !mentionCompletionVM.candidates.isEmpty {
+                MentionCompletionView(
+                    candidates: mentionCompletionVM.candidates,
+                    selectedIndex: mentionCompletionVM.selectedIndex
+                ) { index in
+                    confirmMentionCandidate(at: index)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .offset(y: -(mentionCompletionVM.candidates.isEmpty
+                    ? 0
+                    : min(CGFloat(mentionCompletionVM.candidates.count), 6) * 32))
+            }
+        }
     }
 
     // MARK: - ヘルパー
@@ -273,6 +296,43 @@ struct ChatInputBar: View {
         Task {
             try? await viewModel.sendMessage(text)
         }
+    }
+
+    /// クリックで @メンション候補を選択確定する
+    ///
+    /// - Parameter index: 選択した候補のインデックス
+    private func confirmMentionCandidate(at index: Int) {
+        mentionCompletionVM.moveSelection(by: index - mentionCompletionVM.selectedIndex)
+        guard let insertion = mentionCompletionVM.confirmSelection() else { return }
+
+        // draft の @ トークン部分を挿入文字列で置換する
+        // draft はプレーンテキストなので文字列操作で直接置換できる
+        if let range = findMentionTokenRange(in: draft) {
+            let nsString = draft as NSString
+            draft = nsString.replacingCharacters(in: range, with: insertion)
+        } else {
+            draft += insertion
+        }
+    }
+
+    /// draft テキストから末尾の @メンショントークンの NSRange を探す
+    ///
+    /// - Parameter text: 対象のテキスト
+    /// - Returns: @トークンの NSRange。見つからない場合は nil
+    private func findMentionTokenRange(in text: String) -> NSRange? {
+        guard let atRange = text.range(of: "@", options: .backwards) else { return nil }
+        let atIndex = text.distance(from: text.startIndex, to: atRange.lowerBound)
+
+        // @ の直前が空白または文頭であることを確認
+        if atIndex > 0 {
+            let beforeAt = text[text.index(before: atRange.lowerBound)]
+            guard beforeAt.isWhitespace else { return nil }
+        }
+
+        let afterAt = String(text[atRange.upperBound...])
+        guard !afterAt.contains(" ") else { return nil }
+
+        return NSRange(location: atIndex, length: 1 + afterAt.count)
     }
 }
 
