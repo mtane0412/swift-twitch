@@ -220,9 +220,12 @@ struct EmoteRichTextView: NSViewRepresentable {
                 let fullRange = NSRange(location: 0, length: mutable.length)
                 mutable.addAttribute(.font, value: NSFont.systemFont(ofSize: NSFont.systemFontSize), range: fullRange)
 
-                textView.textStorage?.replaceCharacters(in: range, with: mutable)
+                // textDidChange の再入を防ぐフラグを立ててから insertText を呼ぶ
+                // insertText は layout manager と表示更新を確実にトリガーする推奨 API
+                self.isUpdatingFromBinding = true
+                textView.insertText(mutable, replacementRange: range)
 
-                // draft を更新
+                // draft を更新（textDidChange は isUpdatingFromBinding フラグでスキップ済み）
                 let plain = EmoteRichTextView.plainText(from: textView.attributedString())
                 if self.draft != plain {
                     self.draft = plain
