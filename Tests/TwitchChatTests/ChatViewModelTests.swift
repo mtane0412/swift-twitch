@@ -1,7 +1,6 @@
 // ChatViewModelTests.swift
 // ChatViewModel の単体テスト
 // MockTwitchIRCClient を使用してネットワーク通信なしで ViewModel の振る舞いを検証する
-// swiftlint:disable file_length type_body_length
 
 import Foundation
 import Testing
