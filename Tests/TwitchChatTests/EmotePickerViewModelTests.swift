@@ -36,10 +36,13 @@ struct EmotePickerViewModelTests {
     @Test("エモートが空の場合は filteredEmotes も空になる")
     @MainActor
     func testLoadEmotesEmpty() async {
-        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        // 前提: API がエモートを 0 件返す状態（stubbedEmotes: []）
+        // loadEmotes() 内で fetchGlobalEmotes() を await するため stubbedEmotes を設定する
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
         let viewModel = EmotePickerViewModel(emoteStore: store)
         await viewModel.loadEmotes()
 
+        // 検証: エモートが存在しない場合 filteredEmotes は空
         #expect(viewModel.filteredEmotes.isEmpty)
     }
 

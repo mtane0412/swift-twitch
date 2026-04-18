@@ -41,10 +41,13 @@ struct EmotePickerView: View {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 4) {
                         ForEach(viewModel.filteredEmotes) { emote in
-                            EmoteCellView(emoteId: emote.id, emoteName: emote.name)
-                                .onTapGesture {
-                                    onSelect(emote.name)
-                                }
+                            Button {
+                                onSelect(emote.name)
+                            } label: {
+                                EmoteCellView(emoteId: emote.id, emoteName: emote.name)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(Text(emote.name))
                         }
                     }
                     .padding(8)

@@ -48,8 +48,11 @@ final class EmotePickerViewModel {
 
     /// EmoteStore から全エモートを取得してフィルタを適用する
     ///
+    /// グローバルエモートのフェッチを待ってからスナップショットを取得することで、
+    /// 接続直後にピッカーを開いても「エモートが見つかりません」にならないようにする。
     /// ピッカーが表示されるタイミング（.task モディファイア）で呼び出す。
     func loadEmotes() async {
+        await emoteStore.fetchGlobalEmotes()
         allEmotes = await emoteStore.allEmotes()
         applyFilter()
     }

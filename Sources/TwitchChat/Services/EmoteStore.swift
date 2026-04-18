@@ -71,6 +71,10 @@ actor EmoteStore {
                 self.isGlobalLoaded = true
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
+            } catch let error as URLError where error.code == .cancelled {
+                // Task キャンセル（disconnect 等）による中断は正常系のためスキップ
+            } catch is CancellationError {
+                // Swift concurrency のキャンセル伝播は正常系のためスキップ
             } catch is AuthConfigError {
                 // Client ID 未設定（開発環境・テスト実行時）は正常状態のためスキップ
             } catch {
@@ -88,8 +92,8 @@ actor EmoteStore {
     /// - Parameter broadcasterId: Twitch チャンネルID（IRCの room-id タグの値、数字のみ）
     /// トークン未設定（未ログイン）の場合はスキップする。
     func fetchChannelEmotes(broadcasterId: String) async {
-        // Twitch の room-id は数字のみで構成される（URLパラメータインジェクション対策）
-        guard !broadcasterId.isEmpty, broadcasterId.allSatisfy(\.isNumber) else { return }
+        // Twitch の room-id は ASCII 十進数のみで構成される（URLパラメータインジェクション対策）
+        guard !broadcasterId.isEmpty, broadcasterId.allSatisfy({ $0.isASCII && $0.isNumber }) else { return }
         do {
             let response: HelixEmotesResponse = try await apiClient.get(
                 url: Self.helixChannelEmotesURL,
@@ -98,6 +102,10 @@ actor EmoteStore {
             channelEmotes = response.data
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はスキップ
+        } catch let error as URLError where error.code == .cancelled {
+            // Task キャンセル（disconnect 等）による中断は正常系のためスキップ
+        } catch is CancellationError {
+            // Swift concurrency のキャンセル伝播は正常系のためスキップ
         } catch is AuthConfigError {
             // Client ID 未設定（開発環境・テスト実行時）は正常状態のためスキップ
         } catch {

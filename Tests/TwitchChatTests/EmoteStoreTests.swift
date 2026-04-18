@@ -146,15 +146,18 @@ struct EmoteStoreTests {
 
     @Test("グローバルエモートは1回だけフェッチされる（isGlobalLoaded フラグ）")
     func testGlobalEmotesFetchedOnce() async {
-        // Swift 6 の Sendable 制約を満たすため nonisolated(unsafe) で宣言する
-        nonisolated(unsafe) var fetchCount = 0
+        // フェッチ回数を Sendable なクラスで安全に計測する
+        final class FetchCounter: @unchecked Sendable {
+            var value = 0
+        }
+        let counter = FetchCounter()
 
         // フェッチ回数をカウントするモック
         struct CountingMockClient: HelixAPIClientProtocol {
-            let counter: (@Sendable () -> Void)
+            let counter: FetchCounter
 
             func get<T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?) async throws -> T {
-                counter()
+                counter.value += 1
                 if let response = HelixEmotesResponse(data: []) as? T {
                     return response
                 }
@@ -162,13 +165,13 @@ struct EmoteStoreTests {
             }
         }
 
-        let store = EmoteStore(apiClient: CountingMockClient { fetchCount += 1 })
+        let store = EmoteStore(apiClient: CountingMockClient(counter: counter))
 
         // 2回呼んでも1回しかフェッチしない
         await store.fetchGlobalEmotes()
         await store.fetchGlobalEmotes()
 
-        #expect(fetchCount == 1)
+        #expect(counter.value == 1)
     }
 
     // MARK: - エモート名逆引き
