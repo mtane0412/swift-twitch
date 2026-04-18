@@ -249,10 +249,8 @@ struct ChatInputBar: View {
                     confirmSlashCommandCandidate(at: index)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .offset(y: -min(
-                    CGFloat(slashCommandCompletionVM.candidates.count),
-                    CGFloat(SlashCommandCompletionView.maxVisibleRows)
-                ) * SlashCommandCompletionView.rowHeight)
+                // listHeight(for:) を使って Divider 高さも含んだ正確なオフセットを計算する
+                .offset(y: -SlashCommandCompletionView.listHeight(for: slashCommandCompletionVM.candidates.count))
             }
         }
         // @メンション補完ドロップダウン（入力バーの上に表示、スラッシュ補完と排他的）
@@ -266,10 +264,8 @@ struct ChatInputBar: View {
                     confirmMentionCandidate(at: index)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .offset(y: -min(
-                    CGFloat(mentionCompletionVM.candidates.count),
-                    CGFloat(MentionCompletionView.maxVisibleRows)
-                ) * MentionCompletionView.rowHeight)
+                // listHeight(for:) を使って Divider 高さも含んだ正確なオフセットを計算する
+                .offset(y: -MentionCompletionView.listHeight(for: mentionCompletionVM.candidates.count))
             }
         }
     }

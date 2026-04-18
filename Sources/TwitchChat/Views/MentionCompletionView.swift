@@ -23,16 +23,26 @@ struct MentionCompletionView: View {
     static let rowHeight: CGFloat = 32
 
     /// Divider の高さ（1pt）
-    private static let dividerHeight: CGFloat = 1
+    static let dividerHeight: CGFloat = 1
 
     /// 最大表示件数（ChatInputBar のオフセット計算と共有するため internal）
     static let maxVisibleRows: Int = 6
 
+    /// 候補数からドロップダウンの正確な表示高さを計算する
+    ///
+    /// Divider 高さを含む正確な高さを返す。`ChatInputBar` の `.offset` 計算と同一の式を使うことで
+    /// ビューの frame とオフセットのズレを防ぐ。
+    ///
+    /// - Parameter candidateCount: 表示する候補の件数
+    /// - Returns: ドロップダウンの高さ（pt）
+    static func listHeight(for candidateCount: Int) -> CGFloat {
+        let visibleCount = min(candidateCount, maxVisibleRows)
+        return CGFloat(visibleCount) * rowHeight
+            + CGFloat(max(0, visibleCount - 1)) * dividerHeight
+    }
+
     var body: some View {
-        let visibleCount = min(candidates.count, Self.maxVisibleRows)
-        // Divider を含めた正確な高さ計算（最後の行には Divider なし）
-        let listHeight = CGFloat(visibleCount) * Self.rowHeight
-            + CGFloat(max(0, visibleCount - 1)) * Self.dividerHeight
+        let listHeight = Self.listHeight(for: candidates.count)
 
         ScrollView {
             LazyVStack(spacing: 0) {
