@@ -273,9 +273,9 @@ struct EmoteRichTextView: NSViewRepresentable {
                 if commandSelector == #selector(NSResponder.insertNewline(_:))
                     || commandSelector == #selector(NSResponder.insertTab(_:)) {
                     // Enter / Tab: 候補確定
-                    if let insertion = mentionCompletionViewModel.confirmSelection(),
-                       let range = mentionCompletionViewModel.mentionRange {
-                        // mentionRange は確定前に取得しておく（confirmSelection 後は nil になる）
+                    // confirmSelection() は内部で mentionRange を nil にリセットするため、先に取得しておく
+                    let range = mentionCompletionViewModel.mentionRange
+                    if let insertion = mentionCompletionViewModel.confirmSelection(), let range {
                         replaceMentionToken(with: insertion, range: range, in: textView)
                     } else if mentionCompletionViewModel.isActive {
                         // 候補が空でもアクティブな場合は Enter を送信に通す
