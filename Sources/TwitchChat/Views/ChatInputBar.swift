@@ -127,7 +127,7 @@ struct ChatInputBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("エモートピッカーを開く")
-            .popover(isPresented: $showEmotePicker) {
+            .popover(isPresented: $showEmotePicker, arrowEdge: .bottom) {
                 EmotePickerView(emoteStore: viewModel.emoteStore) { emoteName in
                     insertEmote(emoteName)
                     showEmotePicker = false
