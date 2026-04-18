@@ -111,6 +111,25 @@ final class EmoteImageCache: @unchecked Sendable {
         imageCache.object(forKey: emoteId as NSString)
     }
 
+    /// 入力欄インライン表示用のスタティックエモート画像を取得する
+    ///
+    /// アニメーションエモートはスタティック版（PNG）をダウンロードして返す。
+    /// NSTextAttachment はアニメーション GIF を再生できないため、
+    /// 入力欄ではスタティック版を使用してフレームが固まって見える問題を防ぐ。
+    /// 非アニメーションエモートはキャッシュ済み画像をそのまま返す。
+    ///
+    /// - Parameter emoteId: Twitch エモートID
+    /// - Returns: スタティック NSImage。取得失敗時は nil
+    func staticImage(for emoteId: String) async -> NSImage? {
+        if isAnimated(emoteId: emoteId) {
+            // アニメーションエモートはスタティック版を都度ダウンロードする
+            // （スタティック版の独立したキャッシュは持たないが頻度が低いため許容する）
+            return await download(emoteId: emoteId, type: "default")
+        }
+        // 非アニメーションはキャッシュから返す（なければ通常取得）
+        return await image(for: emoteId)
+    }
+
     // MARK: - URL 生成
 
     /// エモート画像の CDN URL を生成する

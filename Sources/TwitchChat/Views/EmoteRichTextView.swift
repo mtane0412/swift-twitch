@@ -43,10 +43,29 @@ struct EmoteRichTextView: NSViewRepresentable {
         // 無効化状態を反映
         textView.isEditable = !isDisabled
 
-        // draft が外部からクリアされた場合（送信後）はテキストをリセット
-        if draft.isEmpty && !textView.string.isEmpty {
+        // NSTextView のプレーンテキスト（アタッチメント → エモート名）と draft を比較して外部変更を検出する
+        let currentPlainText = EmoteRichTextView.plainText(from: textView.attributedString())
+        guard draft != currentPlainText else { return }
+
+        context.coordinator.isUpdatingFromBinding = true
+        if draft.isEmpty {
+            // 送信後クリア: NSTextView をリセット
             textView.string = ""
-            context.coordinator.isUpdatingFromBinding = true
+        } else if draft.hasPrefix(currentPlainText) {
+            // エモートピッカーによる追記: 差分のみ末尾に挿入し、既存アタッチメントを保持する
+            let newPart = String(draft.dropFirst(currentPlainText.count))
+            let endRange = NSRange(location: textView.string.utf16.count, length: 0)
+            textView.insertText(newPart, replacementRange: endRange)
+            // 末尾にスペースがある場合は直前のトークンをエモート置換する
+            if draft.hasSuffix(" ") {
+                context.coordinator.detectAndReplaceEmote(in: textView)
+            }
+        } else {
+            // その他の外部変更: テキスト全体を置き換えてエモート置換を実行する
+            textView.string = draft
+            if draft.hasSuffix(" ") {
+                context.coordinator.detectAndReplaceEmote(in: textView)
+            }
         }
     }
 
@@ -158,7 +177,9 @@ struct EmoteRichTextView: NSViewRepresentable {
         // MARK: - エモート検出・置換
 
         /// テキスト末尾のトークンがエモート名と一致する場合、NSTextAttachment で置換する
-        private func detectAndReplaceEmote(in textView: NSTextView) {
+        ///
+        /// - Note: `updateNSView` からもエモートピッカー挿入時に呼ばれるため `private` ではない
+        func detectAndReplaceEmote(in textView: NSTextView) {
             let text = textView.string
             // スペース直前のトークンを取り出す
             // 末尾のスペースを除いて、最後のスペースより後ろの文字列がトークン
@@ -190,14 +211,8 @@ struct EmoteRichTextView: NSViewRepresentable {
                 // エモート名でストアを検索
                 guard let emote = await self.emoteStore.emote(byName: token) else { return }
 
-                // キャッシュから画像を取得（未キャッシュなら非同期ダウンロードしてから置換）
-                let image: NSImage
-                if let cached = EmoteImageCache.shared.cachedImage(for: emote.id) {
-                    image = cached
-                } else {
-                    guard let downloaded = await EmoteImageCache.shared.image(for: emote.id) else { return }
-                    image = downloaded
-                }
+                // 入力欄ではスタティック版を使用する（NSTextAttachment は GIF アニメーション非対応）
+                guard let image = await EmoteImageCache.shared.staticImage(for: emote.id) else { return }
 
                 // 置換時点での range が有効か確認（ユーザーがその間に編集した可能性がある）
                 let textLength = textView.string.utf16.count
