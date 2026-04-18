@@ -211,8 +211,9 @@ struct EmoteRichTextView: NSViewRepresentable {
                 // エモート名でストアを検索
                 guard let emote = await self.emoteStore.emote(byName: token) else { return }
 
-                // 入力欄ではスタティック版を使用する（NSTextAttachment は GIF アニメーション非対応）
-                guard let image = await EmoteImageCache.shared.staticImage(for: emote.id) else { return }
+                // アニメーション版を含むエモート画像を取得する
+                // TextKit 2 環境では AnimatedEmoteAttachmentViewProvider が NSImageView で描画するためアニメーションが動く
+                guard let image = await EmoteImageCache.shared.image(for: emote.id) else { return }
 
                 // 置換時点での range が有効か確認（ユーザーがその間に編集した可能性がある）
                 let textLength = textView.string.utf16.count
