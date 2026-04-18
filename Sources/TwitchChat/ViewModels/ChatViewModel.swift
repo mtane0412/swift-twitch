@@ -297,19 +297,40 @@ final class ChatViewModel {
         guard sanitized.count <= 500 else { throw ChatSendError.tooLong }
         guard canSendMessage else { throw ChatSendError.notReady }
 
+        // /me コマンドの検出: "/me" または "/me " で始まる場合は ACTION 形式に変換して送信する
+        // sanitize() により末尾空白はトリム済みのため "/me   " は "/me" になる
+        let ircText: String
+        let isAction: Bool
+        let displayText: String
+        if sanitized == "/me" || sanitized.hasPrefix("/me ") {
+            let body = sanitized.hasPrefix("/me ")
+                ? String(sanitized.dropFirst("/me ".count)).trimmingCharacters(in: .whitespaces)
+                : ""
+            guard !body.isEmpty else { throw ChatSendError.empty }
+            ircText = "\u{1}ACTION \(body)\u{1}"
+            isAction = true
+            displayText = body
+        } else {
+            ircText = sanitized
+            isAction = false
+            displayText = sanitized
+        }
+
         isSending = true
         sendError = nil
         defer { isSending = false }
 
         do {
-            try await ircClient.sendPrivmsg(sanitized)
+            try await ircClient.sendPrivmsg(ircText)
             // 楽観的 UI: 自分の PRIVMSG はサーバーからエコーバックされないのでローカルで追加する
             if case .loggedIn(let login) = authState.status {
                 // USERSTATE 受信済みなら displayName / colorHex / badges に反映する
+                // ACTION の場合は本文のみを text に設定し isAction を true にする
                 let localMessage = ChatMessage(
                     localUsername: login,
                     displayName: currentUserState?.displayName ?? login,
-                    text: sanitized,
+                    text: displayText,
+                    isAction: isAction,
                     roomId: currentRoomId,
                     colorHex: currentUserState?.colorHex,
                     badges: currentUserState?.badges ?? []

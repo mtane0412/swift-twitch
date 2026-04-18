@@ -33,13 +33,24 @@ struct ChatMessageView: View {
             // ユーザー名・コロン・メッセージ本文をすべてフロー内に配置することで
             // テキストとエモート画像が自然に折り返す
             FlowLayout(horizontalSpacing: 0, verticalSpacing: 2) {
-                // ユーザー名 + コロン（1つの Text ビューとして連結）
-                (Text(message.displayName)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(usernameColor)
-                    + Text(": ")
-                    .foregroundStyle(.secondary))
-                    .fixedSize(horizontal: false, vertical: true)
+                // ユーザー名表示:
+                // ACTION メッセージ（/me）はコロンを省略して斜体表示する
+                // 通常メッセージは "ユーザー名: " の形式で表示する
+                if message.isAction {
+                    Text(message.displayName)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(usernameColor)
+                        .italic()
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(" ")
+                } else {
+                    (Text(message.displayName)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(usernameColor)
+                        + Text(": ")
+                        .foregroundStyle(.secondary))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // メッセージ本文のセグメント
                 // segments は message 生成後に変更されないため、インデックスを安定 ID として使用する
@@ -47,8 +58,10 @@ struct ChatMessageView: View {
                     let segment = message.segments[index]
                     switch segment {
                     case .text(let str):
+                        // ACTION メッセージはテキストをユーザー色で斜体表示する
                         Text(str)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(message.isAction ? usernameColor : .primary)
+                            .italic(message.isAction)
                             // 長いテキストセグメントは幅に収まるよう折り返す
                             .fixedSize(horizontal: false, vertical: true)
 

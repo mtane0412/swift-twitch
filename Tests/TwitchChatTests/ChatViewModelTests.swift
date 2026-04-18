@@ -329,6 +329,72 @@ struct ChatViewModelTests {
         }
     }
 
+    // MARK: - /me コマンド（ACTION 形式）
+
+    @Test("/me コマンドのメッセージが ACTION 形式で IRC に送信される")
+    func meコマンドのメッセージがACTION形式でIRCに送信される() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, mockClient) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 実行: /me コマンドでメッセージ送信
+        try await viewModel.sendMessage("/me こんにちは")
+
+        // 検証: IRC には ACTION 形式で送信される
+        let sent = await mockClient.sentPrivmsgs
+        #expect(sent == ["\u{1}ACTION こんにちは\u{1}"])
+    }
+
+    @Test("/me 送信の楽観的 UI メッセージで isAction が true になりテキストは本文のみになる")
+    func meコマンドの楽観的UIメッセージでisActionがtrueになる() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 実行: /me コマンドでメッセージ送信
+        try await viewModel.sendMessage("/me 手を振る")
+
+        // 検証: 楽観的 UI メッセージで isAction が true になり、text は本文のみ
+        #expect(viewModel.messages.count == 1)
+        #expect(viewModel.messages[0].isAction == true)
+        #expect(viewModel.messages[0].text == "手を振る")
+    }
+
+    @Test("/me のみで本文がない場合は empty エラーを throw する")
+    func meコマンドのみで本文がない場合はemptyエラーをthrowする() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 検証: 本文なしの /me は empty エラー
+        await #expect(throws: ChatSendError.empty) {
+            try await viewModel.sendMessage("/me")
+        }
+        #expect(viewModel.messages.isEmpty)
+    }
+
+    @Test("/me の後が空白のみの場合は empty エラーを throw する")
+    func meコマンドの後が空白のみの場合はemptyエラーをthrowする() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 検証: 本文が空白のみの /me は empty エラー
+        await #expect(throws: ChatSendError.empty) {
+            try await viewModel.sendMessage("/me   ")
+        }
+        #expect(viewModel.messages.isEmpty)
+    }
+
+    @Test("通常のメッセージ送信では楽観的 UI メッセージの isAction が false になる")
+    func 通常のメッセージ送信ではisActionがfalseになる() async throws {
+        // 前提: 認証接続済みの状態
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "yamadataro")
+
+        // 実行: 通常メッセージ送信
+        try await viewModel.sendMessage("普通のコメント")
+
+        // 検証: isAction が false のまま
+        #expect(viewModel.messages.count == 1)
+        #expect(viewModel.messages[0].isAction == false)
+    }
+
     @Test("ログアウト状態では canSendMessage が false になる")
     func ログアウト状態ではcanSendMessageがfalseになる() async throws {
         let mockClient = MockTwitchIRCClient()
