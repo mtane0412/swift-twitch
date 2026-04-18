@@ -187,7 +187,108 @@ struct ChatMessageTests {
         #expect(chatMessage?.roomId == nil)
     }
 
+    // MARK: - ACTION（/me コマンド）
+
+    @Test("ACTION 形式の PRIVMSG で isAction が true になりテキストから ACTION プレフィックスが除去される")
+    func ACTION形式のPRIVMSGでisActionがtrueになりテキストからACTIONプレフィックスが除去される() {
+        // 前提: trailing が "\u{1}ACTION こんにちは\u{1}" の PRIVMSG
+        let rawMessage = "@display-name=山田太郎;id=act-001 :yamadataro!yamadataro@yamadataro.tmi.twitch.tv PRIVMSG #テストチャンネル :\u{1}ACTION こんにちは\u{1}"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: isAction が true になり、text から ACTION プレフィックスが除去される
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage != nil)
+        #expect(chatMessage?.isAction == true)
+        #expect(chatMessage?.text == "こんにちは")
+    }
+
+    @Test("通常の PRIVMSG で isAction が false になる")
+    func 通常のPRIVMSGでisActionがfalseになる() {
+        // 前提: 通常の PRIVMSG メッセージ
+        let rawMessage = "@display-name=山田太郎;id=msg-001 :yamadataro!yamadataro@yamadataro.tmi.twitch.tv PRIVMSG #テストチャンネル :こんにちは！"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: isAction が false になる
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage?.isAction == false)
+        #expect(chatMessage?.text == "こんにちは！")
+    }
+
+    @Test("ACTION 形式の PRIVMSG でも segments は ACTION 除去後のテキストで生成される")
+    func ACTION形式のPRIVMSGでもsegmentsはACTION除去後のテキストで生成される() {
+        // 前提: ACTION 形式でテキストのみ（エモートなし）
+        let rawMessage = "@display-name=配信者;id=act-002;emotes= :haishinsha!haishinsha@haishinsha.tmi.twitch.tv PRIVMSG #テストチャンネル :\u{1}ACTION 配信中です\u{1}"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: segments が ACTION 除去後のテキストで1セグメントになる
+        let chatMessage = ChatMessage(from: ircMessage)
+        #expect(chatMessage?.isAction == true)
+        #expect(chatMessage?.text == "配信中です")
+        #expect(chatMessage?.segments == [.text("配信中です")])
+    }
+
+    @Test("ACTION 形式の PRIVMSG にエモートが含まれる場合 segments にエモートが含まれる")
+    func ACTION形式のPRIVMSGにエモートが含まれる場合segmentsにエモートが含まれる() {
+        // 前提: ACTION 形式で Kappa(0-4) を含むメッセージ
+        // Twitch IRC ではエモートのオフセットは ACTION 本文に対するものとして送信される
+        // "Kappa 配信中" — Kappa は K(0) a(1) p(2) p(3) a(4)
+        let rawMessage = "@display-name=配信者;id=act-003;emotes=25:0-4 :haishinsha!haishinsha@haishinsha.tmi.twitch.tv PRIVMSG #テストチャンネル :\u{1}ACTION Kappa 配信中\u{1}"
+        guard let ircMessage = IRCMessageParser.parse(rawMessage) else {
+            Issue.record("IRCMessage のパースに失敗しました")
+            return
+        }
+
+        // 検証: ACTION プレフィックス除去後のテキストでエモートセグメントが生成される
+        guard let chatMessage = ChatMessage(from: ircMessage) else {
+            Issue.record("ChatMessage への変換に失敗しました")
+            return
+        }
+        #expect(chatMessage.isAction == true)
+        #expect(chatMessage.text == "Kappa 配信中")
+        #expect(chatMessage.emotes.count == 1)
+        let segments = chatMessage.segments
+        #expect(segments.count == 2)
+        #expect(segments[0] == .emote(id: "25", name: "Kappa"))
+        #expect(segments[1] == .text(" 配信中"))
+    }
+
     // MARK: - 楽観的 UI 用イニシャライザ
+
+    @Test("楽観的 UI 用イニシャライザで isAction を true に指定できる")
+    func 楽観的UI用イニシャライザでisActionをtrueに指定できる() {
+        // 前提: /me コマンドの楽観的 UI 表示用メッセージ（本文のみ指定）
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            displayName: "山田太郎",
+            text: "手を振る",
+            isAction: true
+        )
+
+        // 検証: isAction が true になり、text は本文のみになる
+        #expect(chatMessage.isAction == true)
+        #expect(chatMessage.text == "手を振る")
+    }
+
+    @Test("楽観的 UI 用イニシャライザで isAction を省略すると false になる")
+    func 楽観的UI用イニシャライザでisActionを省略するとfalseになる() {
+        // 前提: 通常メッセージの楽観的 UI 表示用（isAction 省略）
+        let chatMessage = ChatMessage(
+            localUsername: "yamadataro",
+            text: "普通のメッセージ"
+        )
+
+        // 検証: isAction がデフォルト値の false になる
+        #expect(chatMessage.isAction == false)
+    }
 
     @Test("楽観的 UI 用イニシャライザで ChatMessage を生成できる")
     func 楽観的UI用イニシャライザでChatMessageを生成できる() {

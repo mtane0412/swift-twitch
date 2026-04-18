@@ -63,6 +63,12 @@ struct ChatMessage: Sendable, Identifiable {
     /// チャンネル固有バッジ（subscriber 等）のフェッチに使用する
     let roomId: String?
 
+    /// ACTION メッセージ（/me コマンド）かどうか
+    ///
+    /// IRC の PRIVMSG trailing が `\u{1}ACTION ...\u{1}` 形式の場合に true となる。
+    /// true の場合、text には ACTION プレフィックスを除去した本文のみが格納される。
+    let isAction: Bool
+
     /// メッセージの受信時刻
     let receivedAt: Date
 
@@ -75,7 +81,8 @@ struct ChatMessage: Sendable, Identifiable {
     /// - Parameters:
     ///   - username: 送信者のログイン名（IRC の NICK に使用した小文字の識別子）
     ///   - displayName: 表示名（省略時は username と同じ値を使用）
-    ///   - text: 送信したメッセージ本文
+    ///   - text: 送信したメッセージ本文（/me の場合は本文のみ、プレフィックスなし）
+    ///   - isAction: ACTION メッセージ（/me コマンド）かどうか（省略時は false）
     ///   - roomId: 接続中チャンネルの room-id（既知の場合は渡す、省略可）
     ///   - colorHex: チャット文字色（#RRGGBB 形式、USERSTATE から取得した場合に指定）
     ///   - badges: バッジ一覧（USERSTATE から取得した場合に指定）
@@ -83,6 +90,7 @@ struct ChatMessage: Sendable, Identifiable {
         localUsername username: String,
         displayName: String? = nil,
         text: String,
+        isAction: Bool = false,
         roomId: String? = nil,
         colorHex: String? = nil,
         badges: [Badge] = []
@@ -91,6 +99,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.username = username
         self.displayName = displayName ?? username
         self.text = text
+        self.isAction = isAction
         self.colorHex = colorHex
         self.badges = badges
         self.emotes = []
@@ -107,24 +116,37 @@ struct ChatMessage: Sendable, Identifiable {
     /// - Returns: 変換成功時は ChatMessage、失敗時は nil
     init?(from ircMessage: IRCMessage) {
         guard ircMessage.command == "PRIVMSG",
-              let text = ircMessage.trailing,
+              let trailing = ircMessage.trailing,
               let rawPrefix = ircMessage.prefix else { return nil }
 
         // プレフィックス "nick!user@host" から nick 部分を抽出し小文字に正規化
         let username = String(rawPrefix.split(separator: "!").first ?? Substring(rawPrefix)).lowercased()
+
+        // ACTION 形式（/me コマンド）の検出と本文抽出
+        // trailing が "\u{1}ACTION 本文\u{1}" の形式かどうかを確認する
+        let actionPrefix = "\u{1}ACTION "
+        let parsedText: String
+        if trailing.hasPrefix(actionPrefix) && trailing.hasSuffix("\u{1}") && trailing.count >= actionPrefix.count + 1 {
+            self.isAction = true
+            // "\u{1}ACTION " と末尾の "\u{1}" を除去して本文のみを抽出する
+            parsedText = String(trailing.dropFirst(actionPrefix.count).dropLast())
+        } else {
+            self.isAction = false
+            parsedText = trailing
+        }
+        self.text = parsedText
 
         self.id = ircMessage.tags["id"] ?? UUID().uuidString
         self.username = username
         self.displayName = ircMessage.tags["display-name"]?.isEmpty == false
             ? ircMessage.tags["display-name"]!
             : username
-        self.text = text
         self.colorHex = ircMessage.tags["color"].flatMap { $0.isEmpty ? nil : $0 }
         self.badges = Badge.parse(ircMessage.tags["badges"] ?? "")
         self.roomId = ircMessage.tags["room-id"].flatMap { $0.isEmpty ? nil : $0 }
         let parsedEmotes = EmoteParser.parse(ircMessage.tags["emotes"] ?? "")
         self.emotes = parsedEmotes
-        self.segments = MessageSegment.segments(from: text, emotePositions: parsedEmotes)
+        self.segments = MessageSegment.segments(from: parsedText, emotePositions: parsedEmotes)
         self.receivedAt = Date()
     }
 }
