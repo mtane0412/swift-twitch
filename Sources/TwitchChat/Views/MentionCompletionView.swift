@@ -19,14 +19,14 @@ struct MentionCompletionView: View {
     /// 候補を選択したときのコールバック（インデックスを渡す）
     var onSelect: (Int) -> Void
 
-    /// 1行の高さ
-    private static let rowHeight: CGFloat = 32
+    /// 1行の高さ（ChatInputBar のオフセット計算と共有するため internal）
+    static let rowHeight: CGFloat = 32
 
     /// Divider の高さ（1pt）
     private static let dividerHeight: CGFloat = 1
 
-    /// 最大表示件数
-    private static let maxVisibleRows: Int = 6
+    /// 最大表示件数（ChatInputBar のオフセット計算と共有するため internal）
+    static let maxVisibleRows: Int = 6
 
     var body: some View {
         let visibleCount = min(candidates.count, Self.maxVisibleRows)

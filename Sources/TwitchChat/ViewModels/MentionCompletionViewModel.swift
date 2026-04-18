@@ -48,11 +48,12 @@ final class MentionCompletionViewModel {
     ///
     /// - Parameters:
     ///   - text: 入力テキスト全体（plainText ベースの文字列）
-    ///   - cursorPosition: カーソル位置（plainText 上の文字数）
+    ///   - cursorPosition: カーソル位置（plainText 上の Character 数）
     func updateFromText(_ text: String, cursorPosition: Int) {
-        let nsText = text as NSString
-        let searchRange = NSRange(location: 0, length: min(cursorPosition, nsText.length))
-        let textUpToCursor = nsText.substring(with: searchRange)
+        // String.Index ベースで切り出すことで Character と UTF-16 の不整合を回避する
+        let clampedPosition = max(0, min(cursorPosition, text.count))
+        let cursorIndex = text.index(text.startIndex, offsetBy: clampedPosition)
+        let textUpToCursor = String(text[..<cursorIndex])
 
         guard let tokenInfo = findMentionToken(in: textUpToCursor) else {
             deactivate()

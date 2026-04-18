@@ -241,19 +241,13 @@ struct ChatInputBar: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .offset(y: -min(
                     CGFloat(mentionCompletionVM.candidates.count),
-                    CGFloat(Self.mentionDropdownMaxRows)
-                ) * Self.mentionDropdownRowHeight)
+                    CGFloat(MentionCompletionView.maxVisibleRows)
+                ) * MentionCompletionView.rowHeight)
             }
         }
     }
 
     // MARK: - ヘルパー
-
-    /// @メンション補完ドロップダウンの1行あたりの高さ（MentionCompletionView.rowHeight と連動）
-    private static let mentionDropdownRowHeight: CGFloat = 32
-
-    /// @メンション補完ドロップダウンの最大表示件数（MentionCompletionView.maxVisibleRows と連動）
-    private static let mentionDropdownMaxRows: Int = 6
 
     /// TextKit のデフォルト行高とインライン emote の高さを考慮した1行分の入力フィールド高さを計算する
     ///
@@ -331,30 +325,6 @@ struct ChatInputBar: View {
         }
     }
 
-    /// draft テキストから末尾の @メンショントークンの NSRange を探す
-    ///
-    /// - Parameter text: 対象のテキスト
-    /// - Returns: @トークンの NSRange（UTF-16 基準）。見つからない場合は nil
-    private func findMentionTokenRange(in text: String) -> NSRange? {
-        guard let atRange = text.range(of: "@", options: .backwards) else { return nil }
-        let atIndex = text.distance(from: text.startIndex, to: atRange.lowerBound)
-
-        // @ の直前がホワイトスペースまたは文頭であることを確認
-        if atIndex > 0 {
-            let beforeAt = text[text.index(before: atRange.lowerBound)]
-            guard beforeAt.isWhitespace else { return nil }
-        }
-
-        let afterAt = String(text[atRange.upperBound...])
-        // ホワイトスペースを含む場合はトークン終了（isWhitespace で統一）
-        guard !afterAt.contains(where: { $0.isWhitespace }) else { return nil }
-
-        let atNSLocation = text.utf16.distance(
-            from: text.utf16.startIndex,
-            to: atRange.lowerBound.samePosition(in: text.utf16)!
-        )
-        return NSRange(location: atNSLocation, length: 1 + afterAt.utf16.count)
-    }
 }
 
 // MARK: - CircularIconBackground
