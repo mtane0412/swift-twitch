@@ -230,6 +230,7 @@ final class ChatViewModel {
             userStateReceiveTask?.cancel()
             globalBadgeFetchTask?.cancel()
             globalEmoteFetchTask?.cancel()
+            userEmoteFetchTask?.cancel()
         }
     }
 

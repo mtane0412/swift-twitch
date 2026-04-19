@@ -7,9 +7,13 @@ import Testing
 
 // MARK: - テスト用モック
 
-/// フェッチ回数を Sendable なクラスで安全に計測するカウンター
-final class FetchCounter: @unchecked Sendable {
-    var value = 0
+/// フェッチ回数をデータレースなく計測するカウンター
+actor FetchCounter {
+    private(set) var value = 0
+
+    func increment() {
+        value += 1
+    }
 }
 
 /// 特定エンドポイントへのフェッチ回数をカウントするモッククライアント
@@ -23,7 +27,7 @@ struct CountingMockClient: HelixAPIClientProtocol {
 
     func get<T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?) async throws -> T {
         if url.absoluteString.contains(countedEndpoint) {
-            counter.value += 1
+            await counter.increment()
         }
         if url.absoluteString.contains("/emotes/user") {
             if let response = HelixUserEmotesResponse(data: [], cursor: nil) as? T {
@@ -241,7 +245,7 @@ struct EmoteStoreTests {
         await store.fetchGlobalEmotes()
         await store.fetchGlobalEmotes()
 
-        #expect(counter.value == 1)
+        #expect(await counter.value == 1)
     }
 
     // MARK: - エモート名逆引き
@@ -475,7 +479,7 @@ struct EmoteStoreTests {
         await store.fetchUserEmotes(userId: "123456789")
         await store.fetchUserEmotes(userId: "123456789")
 
-        #expect(counter.value == 1)
+        #expect(await counter.value == 1)
     }
 
     // MARK: - ユーザーエモート重複排除・優先順位

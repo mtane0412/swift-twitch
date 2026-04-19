@@ -212,6 +212,8 @@ actor EmoteStore {
         var cursor: String?
         var pageCount = 0
         repeat {
+            // キャンセル済みの場合はループを抜けて古いデータを書き込まない
+            guard !Task.isCancelled else { return accumulated }
             var queryItems: [URLQueryItem] = [URLQueryItem(name: "user_id", value: userId)]
             if let after = cursor {
                 queryItems.append(URLQueryItem(name: "after", value: after))
