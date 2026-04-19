@@ -242,6 +242,66 @@ struct ChatCommandParserTests {
         #expect(ChatCommandParser.parse("/followers 10days") == .unknown(command: "followers", args: "10days"))
     }
 
+    // MARK: - /slow 範囲チェック
+
+    @Test("/slow で秒数が下限（3秒）未満の場合は unknown になること")
+    func testSlowCommandWithBelowMinDuration() {
+        // Helix API の slow_mode_wait_time は最低3秒
+        #expect(ChatCommandParser.parse("/slow 2") == .unknown(command: "slow", args: "2"))
+    }
+
+    @Test("/slow で秒数が0の場合は unknown になること")
+    func testSlowCommandWithZeroDuration() {
+        // 0秒はHelix APIの下限（3秒）を下回るため不正
+        #expect(ChatCommandParser.parse("/slow 0") == .unknown(command: "slow", args: "0"))
+    }
+
+    @Test("/slow で秒数が上限（120秒）を超える場合は unknown になること")
+    func testSlowCommandWithExceedingDuration() {
+        // Helix API の slow_mode_wait_time は最大120秒
+        #expect(ChatCommandParser.parse("/slow 121") == .unknown(command: "slow", args: "121"))
+    }
+
+    @Test("/slow で負の値は unknown になること")
+    func testSlowCommandWithNegativeDuration() {
+        // 負の秒数は無効
+        #expect(ChatCommandParser.parse("/slow -1") == .unknown(command: "slow", args: "-1"))
+    }
+
+    @Test("/slow で秒数が下限ちょうど（3秒）は正常にパースされること")
+    func testSlowCommandWithMinDuration() {
+        #expect(ChatCommandParser.parse("/slow 3") == .slow(seconds: 3))
+    }
+
+    @Test("/slow で秒数が上限ちょうど（120秒）は正常にパースされること")
+    func testSlowCommandWithMaxDuration() {
+        #expect(ChatCommandParser.parse("/slow 120") == .slow(seconds: 120))
+    }
+
+    // MARK: - /followers 範囲チェック
+
+    @Test("/followers で分数が0未満の場合は unknown になること")
+    func testFollowersCommandWithNegativeDuration() {
+        // フォロワー期間は0分以上
+        #expect(ChatCommandParser.parse("/followers -1") == .unknown(command: "followers", args: "-1"))
+    }
+
+    @Test("/followers で分数が上限（129,600分=90日）を超える場合は unknown になること")
+    func testFollowersCommandWithExceedingDuration() {
+        // Helix API の follower_mode_duration は最大129,600分
+        #expect(ChatCommandParser.parse("/followers 129601") == .unknown(command: "followers", args: "129601"))
+    }
+
+    @Test("/followers で分数が下限ちょうど（0分）は正常にパースされること")
+    func testFollowersCommandWithMinDuration() {
+        #expect(ChatCommandParser.parse("/followers 0") == .followers(duration: 0))
+    }
+
+    @Test("/followers で分数が上限ちょうど（129,600分）は正常にパースされること")
+    func testFollowersCommandWithMaxDuration() {
+        #expect(ChatCommandParser.parse("/followers 129600") == .followers(duration: 129_600))
+    }
+
     // MARK: - 連続する空白の正規化
 
     @Test("/ban で連続する空白が含まれても正しくパースされること")
