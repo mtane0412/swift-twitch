@@ -166,7 +166,9 @@ final class EmotePickerViewModel {
         global: [HelixEmote]
     ) -> [EmotePickerSection] {
         var seen = Set<String>()
-        let classified = classifyEmotes(channel: channel, user: user, seen: &seen)
+        // グローバルエンドポイントに存在する ID セットを事前に作成してユーザーエモートの振り分けに使用する
+        let globalIdSet = Set(global.map(\.id))
+        let classified = classifyEmotes(channel: channel, user: user, globalIdSet: globalIdSet, seen: &seen)
         return assembleSections(classified: classified, global: global, seen: &seen)
     }
 
@@ -174,18 +176,17 @@ final class EmotePickerViewModel {
     ///
     /// 分類ルール（優先順位）:
     /// 1. `emoteType == "hypetrain"` → `hypeTrain` セクション
-    /// 2. `emoteType == "globals"` → global セクションに送る（ownerId があっても優先）
+    /// 2. グローバル判定（`emoteType == "globals"` または `globalIdSet` に含まれる ID）→ global セクション
     /// 3. `ownerId == currentBroadcasterId` → `currentChannel` セクション（channelEmotes 含む）
     /// 4. `ownerId != nil && ownerId != "0"` → `subscribedChannel(ownerId)` セクション（ビッツエモート含む）
-    /// 5. それ以外（`ownerId == nil` または `ownerId == "0"` かつ hypetrain 以外）→ global セクションに送る
+    /// 5. それ以外（`ownerId == nil` または `ownerId == "0"`）→ global セクションに送る
     ///
-    /// - Note: `/helix/chat/emotes/user` は Kappa 等の globals タイプエモートを
-    ///   ownerId 付きで返すことがある。emoteType で先に判定して global に振り分ける。
-    /// - Note: `owner_id: "0"` は Twitch 自身が所有するグローバル系エモートを示すため、
-    ///   表示名を解決できないチャンネルセクションを作らず global にまとめる。
+    /// - Note: `/helix/chat/emotes/user` はグローバルエモート（smilies 等）を ownerId 付きで返すため、
+    ///   emoteType だけでなくグローバルエンドポイントの ID セットとも照合して振り分ける。
     private func classifyEmotes(
         channel: [HelixEmote],
         user: [HelixEmote],
+        globalIdSet: Set<String>,
         seen: inout Set<String>
     ) -> (currentChannel: [HelixEmote], hype: [HelixEmote],
           subscribedOwnerIds: [String], subscribedByOwnerId: [String: [HelixEmote]],
@@ -203,8 +204,9 @@ final class EmotePickerViewModel {
         for emote in user where seen.insert(emote.id).inserted {
             if emote.emoteType == "hypetrain" {
                 hypeEmotes.append(emote)
-            } else if emote.emoteType == "globals" {
-                // globals タイプは ownerId があっても global セクションへ送る
+            } else if emote.emoteType == "globals" || globalIdSet.contains(emote.id) {
+                // globals タイプまたはグローバルエンドポイントに存在する ID は global セクションへ送る
+                // seen から除外して assembleSections の global 合算処理で拾う
                 seen.remove(emote.id)
                 otherEmotes.append(emote)
             } else if let ownerId = emote.ownerId, ownerId == currentBroadcasterId {
