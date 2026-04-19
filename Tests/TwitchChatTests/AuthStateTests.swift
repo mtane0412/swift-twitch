@@ -67,13 +67,13 @@ struct AuthStateTests {
                 refreshToken: "新しいリフレッシュトークン",
                 expiresIn: 14400,
                 tokenType: "bearer",
-                scope: ["chat:read"]
+                scope: ["chat:read", "chat:edit", "user:read:chat"]
             ),
             validateResponse: TwitchValidateResponse(
                 clientId: "testclientid",
                 login: "テスト配信者",
                 userId: "12345678",
-                scopes: ["chat:read"],
+                scopes: ["chat:read", "chat:edit", "user:read:chat"],
                 expiresIn: 14400
             )
         )
@@ -125,13 +125,13 @@ struct AuthStateTests {
                 refreshToken: "テスト用リフレッシュトークン",
                 expiresIn: 14400,
                 tokenType: "bearer",
-                scope: ["chat:read"]
+                scope: ["chat:read", "chat:edit", "user:read:chat"]
             ),
             validateResponse: TwitchValidateResponse(
                 clientId: "testclientid",
                 login: "テスト配信者",
                 userId: "12345678",
-                scopes: ["chat:read"],
+                scopes: ["chat:read", "chat:edit", "user:read:chat"],
                 expiresIn: 14400
             )
         )
@@ -272,13 +272,13 @@ struct AuthStateTests {
                 refreshToken: "テスト用リフレッシュトークン",
                 expiresIn: 14400,
                 tokenType: "bearer",
-                scope: ["chat:read", "chat:edit"]
+                scope: ["chat:read", "chat:edit", "user:read:chat"]
             ),
             validateResponse: TwitchValidateResponse(
                 clientId: "testclientid",
                 login: "新規ログイン者",
                 userId: "11111",
-                scopes: ["chat:read", "chat:edit"],
+                scopes: ["chat:read", "chat:edit", "user:read:chat"],
                 expiresIn: 14400
             )
         )

@@ -557,6 +557,12 @@ final class ChatViewModel {
         let now = Date()
         let matchWindow: TimeInterval = 10
 
+        // 期限切れエントリを先に除去して辞書が無限に膨らむのを防ぐ
+        // EventSub 確認が来なかったメッセージが蓄積しないようにする
+        optimisticPendingMessages = optimisticPendingMessages.filter { _, sentAt in
+            now.timeIntervalSince(sentAt) < matchWindow
+        }
+
         // optimisticPendingMessages から候補を絞り込む
         // 条件: 対応する messages エントリのテキストが一致、かつ送信時刻が 10 秒以内
         let candidates = optimisticPendingMessages.filter { candidateId, sentAt in

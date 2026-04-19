@@ -133,11 +133,9 @@ public final class AuthState {
             print("[AuthState] restoreSession: validateToken 成功 — login=\(validateResponse.login)")
             #endif
 
-            // 必須スコープが不足している場合は自動ログアウトして再ログインを促す。
-            // chat:edit: コメント投稿に必要。user:read:chat: EventSub 購読（楽観的メッセージ ID 確定）に必要。
+            // 必須スコープが不足している場合は自動ログアウトして再ログインを促す
             let scopes = validateResponse.scopes
-            let requiredScopes = ["chat:edit", "user:read:chat"]
-            let missingScopes = requiredScopes.filter { !scopes.contains($0) }
+            let missingScopes = missingRequiredChatScopes(in: scopes)
             if !missingScopes.isEmpty {
                 #if DEBUG
                 print("[AuthState] restoreSession: 必須スコープ不足 \(missingScopes) — 自動ログアウトして再ログインを要求")
@@ -206,6 +204,18 @@ public final class AuthState {
                 expiresIn: deviceResponse.expiresIn
             )
             let validateResponse = try await authClient.validateToken(accessToken: tokenResponse.accessToken)
+
+            // 必須スコープ不足の場合はロールバックしてログアウト状態に戻す
+            let missingScopes = missingRequiredChatScopes(in: validateResponse.scopes)
+            guard missingScopes.isEmpty else {
+                #if DEBUG
+                print("[AuthState] login: 必須スコープ不足 \(missingScopes) — ログインを中断")
+                #endif
+                deviceFlowInfo = nil
+                loginError = "必要なスコープ（\(missingScopes.joined(separator: ", "))）が付与されていません。再ログインしてください。"
+                status = .loggedOut
+                return
+            }
 
             // Keychain にトークンを保存
             try await keychainStore.save(key: "access_token", value: tokenResponse.accessToken)
@@ -281,6 +291,17 @@ public final class AuthState {
 
     // MARK: - プライベートメソッド
 
+    /// EventSub 購読・チャット投稿に必要な必須スコープ一覧
+    private static let requiredChatScopes = ["chat:edit", "user:read:chat"]
+
+    /// 不足している必須スコープを返す
+    ///
+    /// - Parameter scopes: トークンに付与されているスコープ一覧
+    /// - Returns: 不足スコープの配列。すべて揃っている場合は空配列
+    private func missingRequiredChatScopes(in scopes: [String]) -> [String] {
+        Self.requiredChatScopes.filter { !scopes.contains($0) }
+    }
+
     /// リフレッシュトークンで新しいアクセストークンを取得する
 
     private func tryRefreshToken() async {
@@ -296,12 +317,28 @@ public final class AuthState {
             let tokenResponse = try await authClient.refreshToken(refreshToken: refreshTokenValue)
             let validateResponse = try await authClient.validateToken(accessToken: tokenResponse.accessToken)
 
+            // 必須スコープ不足の場合は認証情報を廃棄してログアウト
+            let missingScopes = missingRequiredChatScopes(in: validateResponse.scopes)
+            guard missingScopes.isEmpty else {
+                #if DEBUG
+                print("[AuthState] tryRefreshToken: 必須スコープ不足 \(missingScopes) — ログアウト")
+                #endif
+                await keychainStore.deleteAll()
+                accessToken = nil
+                userId = nil
+                grantedScopes = []
+                status = .loggedOut
+                return
+            }
+
             try await keychainStore.save(key: "access_token", value: tokenResponse.accessToken)
             try await keychainStore.save(key: "refresh_token", value: tokenResponse.refreshToken)
+            // validateResponse.userId を優先して使用し、Keychain にも上書き保存する
+            try await keychainStore.save(key: "user_id", value: validateResponse.userId)
 
             grantedScopes = validateResponse.scopes
             accessToken = tokenResponse.accessToken
-            userId = await keychainStore.load(key: "user_id")
+            userId = validateResponse.userId
             status = .loggedIn(userLogin: validateResponse.login)
         } catch {
             await keychainStore.deleteAll()

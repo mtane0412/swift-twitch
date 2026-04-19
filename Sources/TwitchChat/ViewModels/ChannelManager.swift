@@ -47,6 +47,9 @@ final class ChannelManager {
     /// EventSub クライアントファクトリ（テスト時にモックを注入するために使用）
     private let makeEventSubClient: (@MainActor () -> any TwitchEventSubClientProtocol)?
 
+    /// EventSub 初回接続タスク（disconnectAll() でキャンセルできるように保持）
+    private var eventSubConnectTask: Task<Void, Never>?
+
     /// EventSub イベント受信ループタスク
     private var eventSubReceiveTask: Task<Void, Never>?
 
@@ -109,7 +112,8 @@ final class ChannelManager {
         if eventSubClient == nil, let factory = makeEventSubClient {
             let client = factory()
             eventSubClient = client
-            Task {
+            // disconnectAll() でキャンセルできるよう Task 参照を保持する
+            eventSubConnectTask = Task {
                 do {
                     try await client.connect()
                 } catch {
@@ -120,6 +124,7 @@ final class ChannelManager {
                     eventSubClient = nil
                     return
                 }
+                guard !Task.isCancelled else { return }
                 // EventSub イベント受信ループを起動する
                 await startEventSubReceiveLoop(client: client)
             }
@@ -267,6 +272,8 @@ final class ChannelManager {
         selectedChannel = nil
 
         // EventSub クライアントを切断してリソースを解放する
+        eventSubConnectTask?.cancel()
+        eventSubConnectTask = nil
         eventSubReceiveTask?.cancel()
         eventSubReceiveTask = nil
         if let client = eventSubClient {

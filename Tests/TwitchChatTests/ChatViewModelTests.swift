@@ -643,13 +643,13 @@ struct ChatViewModelTests {
                 refreshToken: "テスト用リフレッシュトークン",
                 expiresIn: 14400,
                 tokenType: "bearer",
-                scope: ["chat:read", "chat:edit"]
+                scope: ["chat:read", "chat:edit", "user:read:chat"]
             ),
             validateResponse: TwitchValidateResponse(
                 clientId: "testclientid",
                 login: userLogin,
                 userId: "12345",
-                scopes: ["chat:read", "chat:edit"],
+                scopes: ["chat:read", "chat:edit", "user:read:chat"],
                 expiresIn: 14400
             )
         )
