@@ -35,6 +35,13 @@ final class EmotePickerViewModel {
     /// エモート定義ストア
     private let emoteStore: EmoteStore
 
+    /// ユーザーが使用可能なエモートセット ID のスナップショット
+    ///
+    /// `loadEmotes()` 呼び出し時に EmoteStore からスナップショットを取得する。
+    /// - `nil`: USERSTATE 未受信（全エモートを使用可能として扱う）
+    /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
+    private var userEmoteSets: Set<String>?
+
     // MARK: - 初期化
 
     /// EmotePickerViewModel を初期化する
@@ -54,7 +61,35 @@ final class EmotePickerViewModel {
     func loadEmotes() async {
         await emoteStore.fetchGlobalEmotes()
         allEmotes = await emoteStore.allEmotes()
+        userEmoteSets = await emoteStore.userAvailableEmoteSets()
         applyFilter()
+    }
+
+    /// ピッカー表示中に USERSTATE が届いた場合にエモートの使用可否をリアルタイムで更新する
+    ///
+    /// View の `.task` モディファイアから呼び出す。View が消えると `.task` が
+    /// このメソッドのタスクをキャンセルし、`waitForNextUserEmoteSetsUpdate` が
+    /// resume されてループを抜けるため、Continuation リークは発生しない。
+    func observeUserEmoteSetsUpdates() async {
+        while !Task.isCancelled {
+            await emoteStore.waitForNextUserEmoteSetsUpdate()
+            guard !Task.isCancelled else { break }
+            userEmoteSets = await emoteStore.userAvailableEmoteSets()
+        }
+    }
+
+    /// エモートがユーザーにとって使用可能かどうかを返す
+    ///
+    /// - `userEmoteSets` が `nil`（USERSTATE 未受信）の場合は全て true
+    /// - `emote.emoteSetId` が nil の場合は安全側に倒して true
+    /// - それ以外は emoteSetId が userEmoteSets に含まれるか判定する
+    ///
+    /// - Parameter emote: 判定対象のエモート
+    /// - Returns: 使用可能な場合は true
+    func isAvailable(_ emote: HelixEmote) -> Bool {
+        guard let sets = userEmoteSets else { return true }
+        guard let emoteSetId = emote.emoteSetId else { return true }
+        return sets.contains(emoteSetId)
     }
 
     // MARK: - プライベートメソッド

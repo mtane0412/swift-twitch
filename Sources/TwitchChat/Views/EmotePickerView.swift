@@ -41,13 +41,16 @@ struct EmotePickerView: View {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 4) {
                         ForEach(viewModel.filteredEmotes) { emote in
+                            let available = viewModel.isAvailable(emote)
                             Button {
                                 onSelect(emote.name)
                             } label: {
-                                EmoteCellView(emoteId: emote.id, emoteName: emote.name)
+                                EmoteCellView(emoteId: emote.id, emoteName: emote.name, isAvailable: available)
                             }
                             .buttonStyle(.plain)
+                            .disabled(!available)
                             .accessibilityLabel(Text(emote.name))
+                            .accessibilityValue(available ? "" : "使用不可")
                         }
                     }
                     .padding(8)
@@ -56,6 +59,8 @@ struct EmotePickerView: View {
         }
         .frame(width: 320, height: 300)
         .task { await viewModel.loadEmotes() }
+        // ピッカー表示中に USERSTATE が届いた場合の使用可否リアルタイム更新
+        .task { await viewModel.observeUserEmoteSetsUpdates() }
     }
 }
 
@@ -65,11 +70,13 @@ struct EmotePickerView: View {
 /// - 画像は `EmoteImageCache.shared` を再利用して非同期取得する
 /// - アニメーション GIF は `AnimatedEmoteView` で再生する
 /// - `isAnimated` フラグは画像取得時にキャッシュし、毎レンダリングで再計算しない
-/// - ホバー時のツールチップでエモート名を表示する
+/// - `isAvailable` が false の場合は半透明表示し、右下にロックアイコンを重ねる
+/// - ホバー時のツールチップでエモート名（使用不可時はサブスク必要の旨）を表示する
 private struct EmoteCellView: View {
 
     let emoteId: String
     let emoteName: String
+    let isAvailable: Bool
 
     @State private var image: NSImage?
     @State private var isAnimated: Bool = false
@@ -94,7 +101,18 @@ private struct EmoteCellView: View {
         }
         .frame(width: 40, height: 40)
         .contentShape(Rectangle())
-        .help(emoteName)
+        // 使用不可エモートは半透明でグレーアウト表示する
+        .opacity(isAvailable ? 1.0 : 0.35)
+        // 使用不可エモートは右下にロックアイコンを表示してサブスク必要を示す
+        .overlay(alignment: .bottomTrailing) {
+            if !isAvailable {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .padding(2)
+            }
+        }
+        .help(isAvailable ? emoteName : "\(emoteName)（サブスクライブが必要です）")
         .task(id: emoteId) {
             image = await EmoteImageCache.shared.image(for: emoteId)
             isAnimated = EmoteImageCache.shared.isAnimated(emoteId: emoteId)

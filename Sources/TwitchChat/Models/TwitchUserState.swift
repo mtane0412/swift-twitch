@@ -26,6 +26,13 @@ struct TwitchUserState: Sendable, Equatable {
     /// バッジ一覧（broadcaster / moderator / subscriber 等）
     let badges: [Badge]
 
+    /// ユーザーが使用可能なエモートセット ID の一覧
+    ///
+    /// USERSTATE の `emote-sets` タグをカンマ区切りで分割した Set<String>。
+    /// タグが存在してグローバルエモートにアクセスできる場合は "0" が含まれる。
+    /// タグが存在しない場合、または空文字の場合は空セットになる。
+    let emoteSets: Set<String>
+
     /// IRCMessage から TwitchUserState を生成する
     ///
     /// USERSTATE コマンド以外の場合は nil を返す。
@@ -37,5 +44,11 @@ struct TwitchUserState: Sendable, Equatable {
         self.displayName = ircMessage.tags["display-name"].flatMap { $0.isEmpty ? nil : $0 }
         self.colorHex = ircMessage.tags["color"].flatMap { $0.isEmpty ? nil : $0 }
         self.badges = Badge.parse(ircMessage.tags["badges"] ?? "")
+        // emote-sets タグをカンマ区切りで分割して Set に変換する
+        if let rawEmoteSets = ircMessage.tags["emote-sets"], !rawEmoteSets.isEmpty {
+            self.emoteSets = Set(rawEmoteSets.split(separator: ",").map(String.init))
+        } else {
+            self.emoteSets = []
+        }
     }
 }

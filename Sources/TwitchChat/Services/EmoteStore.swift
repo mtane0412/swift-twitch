@@ -38,6 +38,20 @@ actor EmoteStore {
     /// Helix API クライアント
     private let apiClient: any HelixAPIClientProtocol
 
+    /// ユーザーが使用可能なエモートセット ID の一覧
+    ///
+    /// USERSTATE の `emote-sets` タグから更新される。
+    /// - `nil`: USERSTATE 未受信（全エモートを使用可能として扱う）
+    /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
+    private var userEmoteSets: Set<String>?
+
+    /// `userEmoteSets` 更新を待機している Continuation の一覧（ID → Continuation）
+    ///
+    /// `waitForNextUserEmoteSetsUpdate()` が呼ばれるたびに UUID キーで Continuation を登録し、
+    /// `updateUserEmoteSets` / `resetUserEmoteSets` が呼ばれたときに全件 resume する。
+    /// タスクキャンセル時は UUID で個別に resume して Continuation リークを防ぐ。
+    private var userEmoteSetsUpdateContinuations: [UUID: CheckedContinuation<Void, Never>] = [:]
+
     // MARK: - 初期化
 
     /// EmoteStore を初期化する
@@ -179,6 +193,68 @@ actor EmoteStore {
         channelEmotes + globalEmotes
     }
 
+    /// ユーザーが使用可能なエモートセット ID を更新する
+    ///
+    /// USERSTATE の `emote-sets` タグを受信するたびに呼び出す。
+    /// チャンネル切替時は新チャンネルの USERSTATE が自動的に更新するため、
+    /// `resetChannelEmotes()` ではリセットしない。
+    ///
+    /// - Parameter sets: USERSTATE の emote-sets タグから生成した Set<String>
+    func updateUserEmoteSets(_ sets: Set<String>) {
+        userEmoteSets = sets
+        notifyUserEmoteSetsUpdated()
+    }
+
+    /// ユーザーエモートセットをリセットする
+    ///
+    /// disconnect / ログアウト時に呼び出すことで、前回接続時のセット情報が
+    /// 次回接続に持ち越されないようにする。
+    func resetUserEmoteSets() {
+        userEmoteSets = nil
+        notifyUserEmoteSetsUpdated()
+    }
+
+    /// ユーザーが使用可能なエモートセット ID のスナップショットを返す
+    ///
+    /// ViewModel が使用可否を判定するためのスナップショット取得に使用する。
+    ///
+    /// - Returns: 使用可能なエモートセット ID の Set。`nil` の場合は USERSTATE 未受信。
+    func userAvailableEmoteSets() -> Set<String>? {
+        userEmoteSets
+    }
+
+    /// 次回の `userEmoteSets` 更新を待機する
+    ///
+    /// ピッカー表示中に USERSTATE が届いた場合に即座に追従するために使用する。
+    /// `updateUserEmoteSets` または `resetUserEmoteSets` が呼ばれたときに返る。
+    /// タスクキャンセル時は `withTaskCancellationHandler` が Continuation を resume して
+    /// リークを防ぐ。キャンセル時は resume するだけで CancellationError は投げない。
+    func waitForNextUserEmoteSetsUpdate() async {
+        guard !Task.isCancelled else { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { cont in
+                userEmoteSetsUpdateContinuations[id] = cont
+            }
+        } onCancel: {
+            Task { await self.resumeContinuation(id: id) }
+        }
+        userEmoteSetsUpdateContinuations.removeValue(forKey: id)
+    }
+
+    /// 登録済みの全 Continuation を resume して更新を通知する
+    private func notifyUserEmoteSetsUpdated() {
+        let conts = userEmoteSetsUpdateContinuations
+        userEmoteSetsUpdateContinuations.removeAll()
+        conts.values.forEach { $0.resume() }
+    }
+
+    /// 指定 ID の Continuation を resume する（キャンセル時のリーク防止用）
+    private func resumeContinuation(id: UUID) {
+        guard let cont = userEmoteSetsUpdateContinuations.removeValue(forKey: id) else { return }
+        cont.resume()
+    }
+
     /// チャンネルエモートのキャッシュをクリアする
     ///
     /// チャンネル切替時（connect 呼び出し前）に呼び出すことで、
@@ -207,6 +283,11 @@ actor EmoteStore {
     /// チャンネルエモート一覧を直接設定する（テスト用）
     func setChannelEmotes(_ emotes: [HelixEmote]) {
         channelEmotes = emotes
+    }
+
+    /// ユーザーエモートセットを直接設定する（テスト用）
+    func setUserEmoteSets(_ sets: Set<String>) {
+        userEmoteSets = sets
     }
 #endif
 }
