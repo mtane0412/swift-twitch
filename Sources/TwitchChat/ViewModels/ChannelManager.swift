@@ -38,6 +38,18 @@ final class ChannelManager {
     /// IRC クライアントファクトリ（テスト時にモックを注入するために使用）
     private let makeIRCClient: @MainActor () -> any TwitchIRCClientProtocol
 
+    /// EventSub WebSocket クライアント（チャンネル横断で共有）
+    ///
+    /// 最初のチャンネル参加時に生成・接続し、全チャンネル退出後も維持する。
+    /// `disconnectAll()` 時に切断する。
+    private var eventSubClient: (any TwitchEventSubClientProtocol)?
+
+    /// EventSub クライアントファクトリ（テスト時にモックを注入するために使用）
+    private let makeEventSubClient: (@MainActor () -> any TwitchEventSubClientProtocol)?
+
+    /// EventSub イベント受信ループタスク
+    private var eventSubReceiveTask: Task<Void, Never>?
+
     // MARK: - 初期化
 
     /// ChannelManager を初期化する（本番用）
@@ -47,6 +59,9 @@ final class ChannelManager {
         self.authState = authState
         self.apiClient = HelixAPIClient(tokenProvider: authState)
         self.makeIRCClient = { TwitchIRCClient() }
+        self.makeEventSubClient = { [authState] in
+            TwitchEventSubClient(apiClient: HelixAPIClient(tokenProvider: authState))
+        }
     }
 
     /// ChannelManager を初期化する（テスト用: IRC クライアントファクトリを注入）
@@ -54,13 +69,16 @@ final class ChannelManager {
     /// - Parameters:
     ///   - authState: 認証状態
     ///   - makeIRCClient: IRC クライアントを生成するファクトリクロージャ
+    ///   - makeEventSubClient: EventSub クライアントを生成するファクトリクロージャ（nil で EventSub 無効化）
     init(
         authState: AuthState,
-        makeIRCClient: @escaping @MainActor () -> any TwitchIRCClientProtocol
+        makeIRCClient: @escaping @MainActor () -> any TwitchIRCClientProtocol,
+        makeEventSubClient: (@MainActor () -> any TwitchEventSubClientProtocol)? = nil
     ) {
         self.authState = authState
         self.apiClient = HelixAPIClient(tokenProvider: authState)
         self.makeIRCClient = makeIRCClient
+        self.makeEventSubClient = makeEventSubClient
     }
 
     // MARK: - 公開メソッド
@@ -87,9 +105,64 @@ final class ChannelManager {
         channelOrder.append(normalized)
         selectedChannel = normalized
 
+        // EventSub クライアントを初期化する（最初のチャンネル参加時のみ接続）
+        if eventSubClient == nil, let factory = makeEventSubClient {
+            let client = factory()
+            eventSubClient = client
+            Task {
+                try? await client.connect()
+                // EventSub イベント受信ループを起動する
+                await startEventSubReceiveLoop(client: client)
+            }
+        }
+
+        // room-id 確定時に EventSub サブスクリプションを登録するコールバックをセットする
+        setupRoomIdConfirmedCallback(for: viewModel, channelName: normalized)
+
         // バックグラウンドで接続開始（joinChannel がブロックされないように）
         Task {
             await viewModel.connect(to: normalized)
+        }
+    }
+
+    /// EventSub イベント受信ループを起動する
+    ///
+    /// 受信したイベントを broadcasterUserLogin からチャンネルを特定し、
+    /// 該当する ChatViewModel の handleEventSubChatMessage に振り分ける。
+    private func startEventSubReceiveLoop(client: any TwitchEventSubClientProtocol) async {
+        eventSubReceiveTask?.cancel()
+        // Swift Concurrency: actor メソッドは actor context で実行されるため
+        // ループ内で self にアクセスするとデータ競合が発生しない
+        eventSubReceiveTask = Task { [weak self] in
+            let stream = await client.chatMessageEventStream
+            for await event in stream {
+                await self?.routeEventSubChatMessage(event)
+            }
+        }
+    }
+
+    /// EventSub チャットメッセージイベントを対象チャンネルの ChatViewModel に振り分ける
+    private func routeEventSubChatMessage(_ event: EventSubChatEvent) {
+        let channelName = event.broadcasterUserLogin.lowercased()
+        channels[channelName]?.handleEventSubChatMessage(event)
+    }
+
+    /// ChatViewModel に room-id 確定コールバックをセットする
+    ///
+    /// room-id 確定時に EventSub の subscribeChatMessage を呼び出す。
+    /// 認証済みユーザーの ID は AuthState から取得する。
+    private func setupRoomIdConfirmedCallback(for viewModel: ChatViewModel, channelName: String) {
+        viewModel.onRoomIdConfirmed = { [weak self] broadcasterId in
+            guard let self else { return }
+            Task {
+                // subscribeChatMessage には認証済みユーザーの ID が必要
+                guard let userId = await self.authState.userId else { return }
+                guard let client = await self.eventSubClient else { return }
+                try? await client.subscribeChatMessage(
+                    broadcasterId: broadcasterId,
+                    userId: userId
+                )
+            }
         }
     }
 
@@ -103,6 +176,11 @@ final class ChannelManager {
         let normalized = channelLogin.lowercased()
 
         guard let viewModel = channels[normalized] else { return }
+
+        // room-id が確定済みならサブスクリプションを解除する
+        if let broadcasterId = viewModel.currentRoomId {
+            try? await eventSubClient?.unsubscribeChatMessage(broadcasterId: broadcasterId)
+        }
 
         await viewModel.disconnect()
         channels.removeValue(forKey: normalized)
@@ -164,5 +242,13 @@ final class ChannelManager {
         channels = [:]
         channelOrder = []
         selectedChannel = nil
+
+        // EventSub クライアントを切断してリソースを解放する
+        eventSubReceiveTask?.cancel()
+        eventSubReceiveTask = nil
+        if let client = eventSubClient {
+            await client.disconnect()
+        }
+        eventSubClient = nil
     }
 }

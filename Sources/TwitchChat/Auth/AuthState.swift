@@ -311,6 +311,18 @@ public final class AuthState {
     }
 }
 
+// MARK: - テスト用メソッド
+
+extension AuthState {
+    /// テスト用: ユーザー ID を直接設定する
+    ///
+    /// ログインフローをバイパスして userId だけを設定するテスト専用メソッド。
+    /// 実際のログインとトークンは設定しないため、本番コードでは使用しないこと。
+    func setUserIdForTesting(_ id: String) {
+        userId = id
+    }
+}
+
 // MARK: - HelixAPITokenProvider 準拠
 
 extension AuthState: HelixAPITokenProvider {

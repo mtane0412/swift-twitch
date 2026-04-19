@@ -124,6 +124,12 @@ final class ChatViewModel {
     /// ROOMSTATE 購読のポーリング条件として参照できるよう `private(set)` で公開する。
     private(set) var currentRoomId: String?
 
+    /// room-id が確定したときに呼ばれるコールバック
+    ///
+    /// ChannelManager が EventSub の subscribeChatMessage を呼ぶタイミングを知るために使用する。
+    /// room-id は最初の 1 回のみ確定するため、コールバックも 1 度だけ呼ばれる。
+    var onRoomIdConfirmed: ((String) -> Void)?
+
     /// 楽観的 UI メッセージの送信時刻マップ（messageId → 送信時刻）
     ///
     /// 複数のメッセージを連続送信した場合でも各メッセージを個別に rollback できるよう
@@ -317,6 +323,8 @@ final class ChatViewModel {
     private func applyRoomState(roomId: String) {
         if currentRoomId == nil {
             currentRoomId = roomId
+            // room-id 確定を ChannelManager に通知する（EventSub サブスクリプション登録に使用）
+            onRoomIdConfirmed?(roomId)
         }
     }
 
@@ -527,6 +535,46 @@ final class ChatViewModel {
     /// 送信エラーをリセットする（UI でエラー表示を消す際に呼ぶ）
     func clearSendError() {
         sendError = nil
+    }
+
+    /// EventSub `channel.chat.message` イベントを処理する
+    ///
+    /// `optimisticPendingMessages` に記録されている楽観的 UI メッセージと照合し、
+    /// 一致すれば本物の message ID で差し替え `isOptimistic` を false にする。
+    /// これにより、自分のメッセージへの返信機能が有効化される。
+    ///
+    /// マッチング条件:
+    /// 1. 送信者ログイン名が自分と一致
+    /// 2. メッセージテキストが完全一致
+    /// 3. 送信時刻が楽観的メッセージの追加時刻から 10 秒以内
+    ///
+    /// - Parameter event: EventSub から受信した channel.chat.message イベント
+    func handleEventSubChatMessage(_ event: EventSubChatEvent) {
+        // 自分のメッセージのみ照合する（他人のメッセージは IRC 経由で受信済み）
+        guard case .loggedIn(let login) = authState.status,
+              event.chatterUserLogin == login else { return }
+
+        let now = Date()
+        let matchWindow: TimeInterval = 10
+
+        // optimisticPendingMessages から候補を絞り込む
+        // 条件: 対応する messages エントリのテキストが一致、かつ送信時刻が 10 秒以内
+        let candidates = optimisticPendingMessages.filter { candidateId, sentAt in
+            guard let msg = messages.first(where: { $0.id == candidateId }) else { return false }
+            return msg.text == event.message.text
+                && abs(sentAt.timeIntervalSince(now)) < matchWindow
+        }
+
+        // 同一テキストの連投がある場合は最も古いエントリを優先（FIFO）
+        guard let (optimisticId, _) = candidates.min(by: { $0.value < $1.value }) else { return }
+
+        // messages 配列内で本物の ID に差し替える
+        if let index = messages.firstIndex(where: { $0.id == optimisticId }) {
+            messages[index] = ChatMessage(confirming: messages[index], withRealId: event.messageId)
+        }
+
+        // pending から除去する
+        optimisticPendingMessages.removeValue(forKey: optimisticId)
     }
 
     /// サーバーから受信した NOTICE を処理する
