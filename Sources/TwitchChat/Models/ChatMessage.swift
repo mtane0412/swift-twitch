@@ -92,6 +92,12 @@ struct ChatMessage: Sendable, Identifiable {
     /// 返信先メッセージの本文（`reply-parent-msg-body` タグ）
     let replyParentMsgBody: String?
 
+    /// システム通知メッセージかどうか（モデレーションコマンド成功等のローカル通知）
+    ///
+    /// true の場合は通常のチャットメッセージではなく、アプリが生成した情報メッセージとして表示する。
+    /// ユーザー名やバッジは表示せず、テキストのみをシステムスタイルで表示する。
+    let isSystemNotice: Bool
+
     /// 楽観的 UI 表示のためのローカル ChatMessage を生成する
     ///
     /// Twitch IRC は自分が送信した PRIVMSG をエコーバックしないため、
@@ -134,6 +140,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentDisplayName = nil
         self.replyParentMsgBody = nil
         self.isOptimistic = true
+        self.isSystemNotice = false
     }
 
     /// IRCMessage から ChatMessage を生成する
@@ -181,5 +188,33 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentDisplayName = ircMessage.tags["reply-parent-display-name"].flatMap { $0.isEmpty ? nil : $0 }
         self.replyParentMsgBody = ircMessage.tags["reply-parent-msg-body"].flatMap { $0.isEmpty ? nil : $0 }
         self.isOptimistic = false
+        self.isSystemNotice = false
+    }
+
+    /// システム通知メッセージを生成する
+    ///
+    /// モデレーションコマンドの成功・失敗等、アプリが生成する情報メッセージに使用する。
+    ///
+    /// - Parameters:
+    ///   - text: 表示する通知テキスト
+    ///   - roomId: 表示先チャンネルの room-id（省略可）
+    init(systemNotice text: String, roomId: String? = nil) {
+        self.id = UUID().uuidString
+        self.username = ""
+        self.displayName = ""
+        self.text = text
+        self.isAction = false
+        self.colorHex = nil
+        self.badges = []
+        self.emotes = []
+        self.segments = MessageSegment.segments(from: text, emotePositions: [])
+        self.roomId = roomId
+        self.receivedAt = Date()
+        self.replyParentMsgId = nil
+        self.replyParentUserLogin = nil
+        self.replyParentDisplayName = nil
+        self.replyParentMsgBody = nil
+        self.isOptimistic = false
+        self.isSystemNotice = true
     }
 }

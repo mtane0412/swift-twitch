@@ -33,8 +33,50 @@ protocol HelixAPIClientProtocol: Sendable {
     ///   - queryItems: クエリパラメータ（nil の場合はなし）
     /// - Returns: デコードされたレスポンス型 `T`
     /// - Throws: トークン未設定時は `URLError(.userAuthenticationRequired)`、
-    ///           HTTP エラー時は `URLError(.badServerResponse)`
+    ///           HTTP エラー時は `HelixAPIError`
     func get<T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?) async throws -> T
+
+    /// Helix API に POST リクエストを送信してレスポンスをデコードする
+    ///
+    /// - Parameters:
+    ///   - url: リクエスト先エンドポイント URL
+    ///   - queryItems: クエリパラメータ（nil の場合はなし）
+    ///   - body: JSON エンコードするリクエストボディ
+    /// - Returns: デコードされたレスポンス型 `T`
+    /// - Throws: `URLError(.userAuthenticationRequired)`、`HelixAPIError`
+    func post<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws -> T
+
+    /// Helix API に POST リクエストを送信する（レスポンスボディなし）
+    ///
+    /// - Parameters:
+    ///   - url: リクエスト先エンドポイント URL
+    ///   - queryItems: クエリパラメータ（nil の場合はなし）
+    ///   - body: JSON エンコードするリクエストボディ
+    /// - Throws: `URLError(.userAuthenticationRequired)`、`HelixAPIError`
+    func postNoContent<Body: Encodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws
+
+    /// Helix API に PATCH リクエストを送信する（レスポンスボディなし）
+    ///
+    /// - Parameters:
+    ///   - url: リクエスト先エンドポイント URL
+    ///   - queryItems: クエリパラメータ（nil の場合はなし）
+    ///   - body: JSON エンコードするリクエストボディ
+    /// - Throws: `URLError(.userAuthenticationRequired)`、`HelixAPIError`
+    func patch<Body: Encodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws
+
+    /// Helix API に DELETE リクエストを送信する
+    ///
+    /// - Parameters:
+    ///   - url: リクエスト先エンドポイント URL
+    ///   - queryItems: クエリパラメータ（nil の場合はなし）
+    /// - Throws: `URLError(.userAuthenticationRequired)`、`HelixAPIError`
+    func delete(url: URL, queryItems: [URLQueryItem]?) async throws
 }
 
 // MARK: - Helix API クライアント実装
@@ -72,15 +114,100 @@ actor HelixAPIClient: HelixAPIClientProtocol {
     ///   - queryItems: クエリパラメータ（nil の場合はなし）
     /// - Returns: デコードされたレスポンス型 `T`
     /// - Throws: トークン未設定時は `URLError(.userAuthenticationRequired)`、
-    ///           HTTP エラー時は `URLError(.badServerResponse)`
+    ///           HTTP エラー時は `HelixAPIError`
     func get<T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?) async throws -> T {
-        // トークンが取得できない場合（未ログイン）はリクエストしない
+        let request = try await buildRequest(url: url, queryItems: queryItems, method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// Helix API に POST リクエストを送信してレスポンスをデコードする
+    func post<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws -> T {
+        let request = try await buildRequest(url: url, queryItems: queryItems, method: "POST", body: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// Helix API に POST リクエストを送信する（レスポンスボディなし）
+    func postNoContent<Body: Encodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws {
+        let request = try await buildRequest(url: url, queryItems: queryItems, method: "POST", body: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data, allowNoContent: true)
+    }
+
+    /// Helix API に PATCH リクエストを送信する（レスポンスボディなし）
+    func patch<Body: Encodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws {
+        let request = try await buildRequest(url: url, queryItems: queryItems, method: "PATCH", body: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data, allowNoContent: true)
+    }
+
+    /// Helix API に DELETE リクエストを送信する
+    func delete(url: URL, queryItems: [URLQueryItem]?) async throws {
+        let request = try await buildRequest(url: url, queryItems: queryItems, method: "DELETE")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateResponse(response, data: data, allowNoContent: true)
+    }
+
+    // MARK: - プライベートヘルパー
+
+    /// 認証済み URLRequest を構築する（ボディなし: GET/DELETE 用）
+    ///
+    /// - Parameters:
+    ///   - url: リクエスト先 URL
+    ///   - queryItems: クエリパラメータ（nil の場合はなし）
+    ///   - method: HTTP メソッド（GET/DELETE）
+    private func buildRequest(
+        url: URL,
+        queryItems: [URLQueryItem]?,
+        method: String
+    ) async throws -> URLRequest {
         guard let token = await tokenProvider.fetchAccessToken() else {
             throw URLError(.userAuthenticationRequired)
         }
-        // Client ID 未設定の場合は AuthConfigError.missingClientID をそのまま伝播する
         let clientId = try await tokenProvider.clientID()
+        return try buildURLRequest(url: url, queryItems: queryItems, method: method, token: token, clientId: clientId)
+    }
 
+    /// 認証済み URLRequest を構築する（ボディあり: POST/PATCH 用）
+    ///
+    /// - Parameters:
+    ///   - url: リクエスト先 URL
+    ///   - queryItems: クエリパラメータ（nil の場合はなし）
+    ///   - method: HTTP メソッド（POST/PATCH）
+    ///   - body: JSON エンコードするリクエストボディ
+    private func buildRequest<Body: Encodable>(
+        url: URL,
+        queryItems: [URLQueryItem]?,
+        method: String,
+        body: Body
+    ) async throws -> URLRequest {
+        guard let token = await tokenProvider.fetchAccessToken() else {
+            throw URLError(.userAuthenticationRequired)
+        }
+        let clientId = try await tokenProvider.clientID()
+        var request = try buildURLRequest(url: url, queryItems: queryItems, method: method, token: token, clientId: clientId)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        return request
+    }
+
+    /// URLRequest の共通部分を構築する
+    private func buildURLRequest(
+        url: URL,
+        queryItems: [URLQueryItem]?,
+        method: String,
+        token: String,
+        clientId: String
+    ) throws -> URLRequest {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw URLError(.badURL)
         }
@@ -91,15 +218,43 @@ actor HelixAPIClient: HelixAPIClientProtocol {
         }
 
         var request = URLRequest(url: safeURL)
+        request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(clientId, forHTTPHeaderField: "Client-Id")
         request.timeoutInterval = Self.requestTimeout
+        return request
+    }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+    /// HTTP レスポンスのステータスコードを検証する
+    ///
+    /// - Parameters:
+    ///   - response: URLResponse
+    ///   - data: レスポンスボディ（エラーメッセージの抽出に使用）
+    ///   - allowNoContent: true の場合、204 No Content を成功とみなす
+    /// - Throws: `HelixAPIError` ステータスコードが 200/204 以外の場合
+    private func validateResponse(_ response: URLResponse, data: Data, allowNoContent: Bool = false) throws {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
-        return try JSONDecoder().decode(T.self, from: data)
+
+        let statusCode = httpResponse.statusCode
+        let isSuccess = statusCode == 200 || (allowNoContent && statusCode == 204)
+        guard isSuccess else {
+            // Helix API のエラーメッセージを抽出する（"message" フィールド）
+            let message = extractHelixErrorMessage(from: data)
+            throw HelixAPIError.from(statusCode: statusCode, message: message)
+        }
+    }
+
+    /// Helix API のエラーレスポンスボディからメッセージを抽出する
+    ///
+    /// - Parameter data: レスポンスボディ
+    /// - Returns: エラーメッセージ文字列（取得できない場合は空文字）
+    private func extractHelixErrorMessage(from data: Data) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = json["message"] as? String else {
+            return ""
+        }
+        return message
     }
 }

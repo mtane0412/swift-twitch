@@ -45,6 +45,22 @@ actor MockFollowedChannelAPIClient: HelixAPIClientProtocol {
         }
         throw URLError(.badServerResponse)
     }
+
+    func post<Body: Encodable & Sendable, T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws -> T {
+        throw URLError(.badServerResponse)
+    }
+
+    func postNoContent<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+        throw URLError(.badServerResponse)
+    }
+
+    func patch<Body: Encodable & Sendable>(url: URL, queryItems: [URLQueryItem]?, body: Body) async throws {
+        throw URLError(.badServerResponse)
+    }
+
+    func delete(url: URL, queryItems: [URLQueryItem]?) async throws {
+        throw URLError(.badServerResponse)
+    }
 }
 
 // MARK: - MockFollowedChannelAPIClient ヘルパー

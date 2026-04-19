@@ -68,6 +68,15 @@ public final class AuthState {
     /// `false` の場合、送信 UI は無効化され再ログインを促す
     var canSendChat: Bool { grantedScopes.contains("chat:edit") }
 
+    /// バン・タイムアウト操作に必要な `moderator:manage:banned_users` スコープを保有しているか
+    var canModerate: Bool { grantedScopes.contains("moderator:manage:banned_users") }
+
+    /// エモートオンリー・スロー・サブスクライバーモード等の設定に必要なスコープを保有しているか
+    var canManageChatSettings: Bool { grantedScopes.contains("moderator:manage:chat_settings") }
+
+    /// チャットクリア・メッセージ削除に必要なスコープを保有しているか
+    var canManageChatMessages: Bool { grantedScopes.contains("moderator:manage:chat_messages") }
+
     // MARK: - プライベートプロパティ
 
     private let authClient: any TwitchAuthClientProtocol
