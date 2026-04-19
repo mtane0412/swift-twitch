@@ -308,4 +308,44 @@ struct EmoteStoreTests {
 
         #expect(positions.isEmpty)
     }
+
+    // MARK: - ユーザーエモートセット管理
+
+    @Test("updateUserEmoteSets で設定した値が userAvailableEmoteSets で取得できる")
+    func testUpdateUserEmoteSets() async {
+        // 前提: サブスクユーザーのエモートセットを設定する
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+
+        // 検証: 設定したエモートセットが取得できる
+        await store.updateUserEmoteSets(Set(["0", "33", "50"]))
+        let emoteSets = await store.userAvailableEmoteSets()
+        #expect(emoteSets == Set(["0", "33", "50"]))
+    }
+
+    @Test("updateUserEmoteSets を複数回呼ぶと上書きされる")
+    func testUpdateUserEmoteSetsOverwrite() async {
+        // 前提: 最初は一般ユーザー、その後サブスクでエモートセットが増える
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+
+        await store.updateUserEmoteSets(Set(["0"]))
+        await store.updateUserEmoteSets(Set(["0", "793"]))
+
+        // 検証: 最後に設定した値が返される
+        let emoteSets = await store.userAvailableEmoteSets()
+        #expect(emoteSets == Set(["0", "793"]))
+    }
+
+    @Test("resetChannelEmotes を呼んでも userEmoteSets はリセットされない")
+    func testResetChannelEmotesDoesNotResetUserEmoteSets() async {
+        // 前提: エモートセットを設定してからチャンネルリセットを呼ぶ
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.updateUserEmoteSets(Set(["0", "33"]))
+
+        // チャンネル切替時のリセット
+        await store.resetChannelEmotes()
+
+        // 検証: ユーザーのエモートセットは保持される
+        let emoteSets = await store.userAvailableEmoteSets()
+        #expect(emoteSets == Set(["0", "33"]))
+    }
 }

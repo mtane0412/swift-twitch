@@ -152,6 +152,75 @@ struct EmoteDefinitionTests {
         #expect(emote1 != emote2)
     }
 
+    // MARK: - emote_set_id のデコード
+
+    @Test("emote_set_id を含むエモートを正しくデコードできる")
+    func testDecodeEmoteWithEmoteSetId() throws {
+        // 前提: emote_set_id を含むチャンネルエモートのサンプルレスポンス
+        let json = """
+        {
+          "data": [
+            {
+              "id": "304456832",
+              "name": "taborGrin",
+              "format": ["static"],
+              "emote_type": "subscriptions",
+              "emote_set_id": "301590448"
+            }
+          ]
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixEmotesResponse.self, from: data)
+
+        #expect(response.data.count == 1)
+        #expect(response.data[0].emoteSetId == "301590448")
+    }
+
+    @Test("emote_set_id が省略されている場合は emoteSetId が nil になる")
+    func testDecodeEmoteWithMissingEmoteSetId() throws {
+        // 前提: emote_set_id を含まないエモートのサンプルレスポンス
+        let json = """
+        {
+          "data": [
+            {
+              "id": "425618",
+              "name": "LUL",
+              "format": ["static", "animated"],
+              "emote_type": "globals"
+            }
+          ]
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixEmotesResponse.self, from: data)
+
+        #expect(response.data.count == 1)
+        #expect(response.data[0].emoteSetId == nil)
+    }
+
+    @Test("グローバルエモートの emote_set_id は '0' になる")
+    func testDecodeGlobalEmoteSetId() throws {
+        // 前提: Twitch のグローバルエモートは emote_set_id が "0"
+        let json = """
+        {
+          "data": [
+            {
+              "id": "425618",
+              "name": "LUL",
+              "format": ["static", "animated"],
+              "emote_type": "globals",
+              "emote_set_id": "0"
+            }
+          ]
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixEmotesResponse.self, from: data)
+
+        #expect(response.data[0].emoteSetId == "0")
+    }
+
     // MARK: - isAnimated computed property
 
     @Test("format に animated が含まれる場合 isAnimated が true になる")

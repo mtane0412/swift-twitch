@@ -38,6 +38,12 @@ actor EmoteStore {
     /// Helix API クライアント
     private let apiClient: any HelixAPIClientProtocol
 
+    /// ユーザーが使用可能なエモートセット ID の一覧
+    ///
+    /// USERSTATE の `emote-sets` タグから更新される。
+    /// 空の場合は USERSTATE 未受信状態（全エモートを使用可能として扱う）。
+    private var userEmoteSets: Set<String> = []
+
     // MARK: - 初期化
 
     /// EmoteStore を初期化する
@@ -179,6 +185,26 @@ actor EmoteStore {
         channelEmotes + globalEmotes
     }
 
+    /// ユーザーが使用可能なエモートセット ID を更新する
+    ///
+    /// USERSTATE の `emote-sets` タグを受信するたびに呼び出す。
+    /// チャンネル切替時は新チャンネルの USERSTATE が自動的に更新するため、
+    /// `resetChannelEmotes()` ではリセットしない。
+    ///
+    /// - Parameter sets: USERSTATE の emote-sets タグから生成した Set<String>
+    func updateUserEmoteSets(_ sets: Set<String>) {
+        userEmoteSets = sets
+    }
+
+    /// ユーザーが使用可能なエモートセット ID のスナップショットを返す
+    ///
+    /// ViewModel が使用可否を判定するためのスナップショット取得に使用する。
+    ///
+    /// - Returns: 使用可能なエモートセット ID の Set。空の場合は USERSTATE 未受信。
+    func userAvailableEmoteSets() -> Set<String> {
+        userEmoteSets
+    }
+
     /// チャンネルエモートのキャッシュをクリアする
     ///
     /// チャンネル切替時（connect 呼び出し前）に呼び出すことで、
@@ -207,6 +233,11 @@ actor EmoteStore {
     /// チャンネルエモート一覧を直接設定する（テスト用）
     func setChannelEmotes(_ emotes: [HelixEmote]) {
         channelEmotes = emotes
+    }
+
+    /// ユーザーエモートセットを直接設定する（テスト用）
+    func setUserEmoteSets(_ sets: Set<String>) {
+        userEmoteSets = sets
     }
 #endif
 }

@@ -78,6 +78,41 @@ struct TwitchUserStateTests {
         #expect(userState.badges == [])
     }
 
+    // MARK: - 正常系: emote-sets タグのパース
+
+    @Test("emote-sets タグが複数のセットIDを含む場合は Set に変換される")
+    func emoteSetsTタグが複数IDを含む場合はSetに変換される() throws {
+        // 前提: 複数のエモートセットIDを含む USERSTATE（サブスクユーザー）
+        let rawMessage = "@badges=subscriber/12;color=#1E90FF;display-name=サブスクユーザー;emote-sets=0,33,50,793;mod=0 :tmi.twitch.tv USERSTATE #testchannel"
+        let ircMessage = try #require(IRCMessageParser.parse(rawMessage), "IRCMessage のパースに失敗しました")
+
+        // 検証: emoteSets が正しく Set<String> に変換される
+        let userState = try #require(TwitchUserState(from: ircMessage), "TwitchUserState の生成に失敗しました")
+        #expect(userState.emoteSets == Set(["0", "33", "50", "793"]))
+    }
+
+    @Test("emote-sets タグがグローバルのみの場合は Set(['0']) になる")
+    func emoteSetsタグがグローバルのみの場合はSet0になる() throws {
+        // 前提: グローバルエモートセットのみの USERSTATE（未サブスクユーザー）
+        let rawMessage = "@badges=;color=;display-name=一般視聴者;emote-sets=0;mod=0 :tmi.twitch.tv USERSTATE #testchannel"
+        let ircMessage = try #require(IRCMessageParser.parse(rawMessage), "IRCMessage のパースに失敗しました")
+
+        // 検証: emoteSets が Set(["0"]) になる
+        let userState = try #require(TwitchUserState(from: ircMessage), "TwitchUserState の生成に失敗しました")
+        #expect(userState.emoteSets == Set(["0"]))
+    }
+
+    @Test("emote-sets タグが存在しない場合は空セットになる")
+    func emoteSetsタグが存在しない場合は空セットになる() throws {
+        // 前提: emote-sets タグを含まない USERSTATE（匿名接続など）
+        let rawMessage = ":tmi.twitch.tv USERSTATE #testchannel"
+        let ircMessage = try #require(IRCMessageParser.parse(rawMessage), "IRCMessage のパースに失敗しました")
+
+        // 検証: emoteSets が空セットになる
+        let userState = try #require(TwitchUserState(from: ircMessage), "TwitchUserState の生成に失敗しました")
+        #expect(userState.emoteSets.isEmpty)
+    }
+
     // MARK: - 異常系: USERSTATE 以外のコマンド
 
     @Test("PRIVMSG の IRCMessage からは nil を返す")

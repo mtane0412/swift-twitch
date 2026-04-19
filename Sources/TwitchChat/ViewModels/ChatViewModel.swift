@@ -252,6 +252,8 @@ final class ChatViewModel {
             for await userState in stream {
                 guard !Task.isCancelled else { break }
                 self.currentUserState = userState
+                // emote-sets タグを EmoteStore に反映して、エモートピッカーの使用可否判定を更新する
+                await self.emoteStore.updateUserEmoteSets(userState.emoteSets)
             }
         }
         // ROOMSTATE を購読して room-id を早期設定する（PRIVMSG より先に取得可能）
