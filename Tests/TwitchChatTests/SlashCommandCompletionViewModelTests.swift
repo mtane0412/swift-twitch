@@ -302,4 +302,21 @@ struct SlashCommandCompletionViewModelTests {
         #expect(range?.length == 1)
         #expect(range?.location == 0)
     }
+
+    @Test("絵文字を含むクエリの commandRange は Character 数基準の length を返す")
+    @MainActor
+    func testCommandRangeWithEmojiQuery() {
+        let vm = SlashCommandCompletionViewModel()
+
+        // "/🎮test" — "/" は 1 Character, "🎮" は 1 Character（UTF-16 では 2 code unit）, "test" は 4 Character
+        // 合計 6 Character、UTF-16 では 7 code unit
+        let text = "/🎮test"
+        vm.updateFromText(text, cursorPosition: text.count) // 6 Character
+
+        let range = vm.commandRange
+        #expect(range != nil)
+        // "/🎮test" は 6 Character（UTF-16 では 7 になるがそれは誤り）
+        #expect(range?.length == 6)
+        #expect(range?.location == 0)
+    }
 }
