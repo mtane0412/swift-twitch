@@ -3,6 +3,7 @@
 // MockHelixAPIClient を使ってネットワーク通信なしでモデレーション API 呼び出しを検証する
 
 import Foundation
+import os
 import Testing
 @testable import TwitchChat
 
@@ -127,10 +128,24 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
 /// テスト内で currentDate クロージャに渡す可変な日時コンテナ
 ///
 /// `@Sendable` クロージャは `var` を直接キャプチャできないため、
-/// 参照型のラッパーを使って時刻を可変に管理する
+/// 参照型のラッパーを使って時刻を可変に管理する。
+/// `OSAllocatedUnfairLock` で排他制御し、`@unchecked Sendable` の安全性を担保する
 final class DateBox: @unchecked Sendable {
-    var date: Date
-    init(_ date: Date = Date()) { self.date = date }
+    private let lock: OSAllocatedUnfairLock<Date>
+
+    var date: Date {
+        get { lock.withLock { $0 } }
+        set { lock.withLock { $0 = newValue } }
+    }
+
+    init(_ date: Date = Date()) {
+        lock = OSAllocatedUnfairLock(initialState: date)
+    }
+
+    /// 指定秒数だけ日時を進める
+    func advance(by seconds: TimeInterval) {
+        lock.withLock { $0 = $0.addingTimeInterval(seconds) }
+    }
 }
 
 // MARK: - テスト本体
@@ -379,8 +394,8 @@ struct ModerationServiceTests {
             moderatorId: moderatorID
         )
 
-        // TTL（300秒）を超える時間を経過させる
-        dateBox.date = dateBox.date.addingTimeInterval(301)
+        // TTL を超える時間を経過させる（実装定数 cacheTimeToLive + 1 秒）
+        dateBox.advance(by: ModerationService.cacheTimeToLive + 1)
 
         // 2回目: TTL 切れのため API が再度呼ばれる
         try await service.execute(

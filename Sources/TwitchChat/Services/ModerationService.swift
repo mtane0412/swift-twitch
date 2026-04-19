@@ -48,8 +48,8 @@ actor ModerationService: ModerationServiceProtocol {
     /// 現在日時を返すクロージャ（テスト時に差し替え可能）
     private let currentDate: @Sendable () -> Date
 
-    /// キャッシュの有効期間（秒）
-    private static let cacheTimeToLive: TimeInterval = 300
+    /// キャッシュの有効期間（秒）。テストから参照できるよう internal アクセスにする
+    static let cacheTimeToLive: TimeInterval = 300
 
     // MARK: - 初期化
 
@@ -126,9 +126,13 @@ actor ModerationService: ModerationServiceProtocol {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
+        let now = currentDate()
+
+        // 期限切れエントリを opportunistic pruning する（メモリ増大防止）
+        userIdCache = userIdCache.filter { now.timeIntervalSince($0.value.fetchedAt) < Self.cacheTimeToLive }
+
         // TTL 内のキャッシュエントリがあれば API を呼ばずに返す
-        if let cached = userIdCache[normalizedLogin],
-           currentDate().timeIntervalSince(cached.fetchedAt) < Self.cacheTimeToLive {
+        if let cached = userIdCache[normalizedLogin] {
             return cached.userId
         }
 
@@ -141,7 +145,7 @@ actor ModerationService: ModerationServiceProtocol {
         }
 
         // 取得したユーザーIDをキャッシュに格納する
-        userIdCache[normalizedLogin] = (userId: user.id, fetchedAt: currentDate())
+        userIdCache[normalizedLogin] = (userId: user.id, fetchedAt: now)
         return user.id
     }
 
