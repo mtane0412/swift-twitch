@@ -273,6 +273,11 @@ final class ChatViewModel {
                 self.currentUserState = userState
                 // emote-sets タグを EmoteStore に反映して、エモートピッカーの使用可否判定を更新する
                 await self.emoteStore.updateUserEmoteSets(userState.emoteSets)
+                // 再ログイン後に user:read:emotes スコープが付与された場合もフェッチを起動する
+                // fetchUserEmotes は isUserEmotesLoaded フラグで重複フェッチを防止するため安全
+                if let userId = self.authState.userId, self.authState.canReadUserEmotes {
+                    self.userEmoteFetchTask = Task { await self.emoteStore.fetchUserEmotes(userId: userId) }
+                }
             }
         }
         // ROOMSTATE を購読して room-id を早期設定する（PRIVMSG より先に取得可能）

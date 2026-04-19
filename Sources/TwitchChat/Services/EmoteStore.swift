@@ -163,6 +163,9 @@ actor EmoteStore {
             return
         }
         let task = Task {
+            #if DEBUG
+            print("[EmoteStore] fetchUserEmotes: フェッチ開始 userId=\(userId)")
+            #endif
             /// ページネーションループの上限（無限ループ防止）
             let maxPages = 100
             var accumulated: [HelixEmote] = []
@@ -190,8 +193,16 @@ actor EmoteStore {
                 self.isUserEmotesLoaded = true
                 // ユーザーエモートのロード完了をピッカーに通知する
                 self.notifyUserEmoteSetsUpdated()
+                #if DEBUG
+                print("[EmoteStore] fetchUserEmotes: フェッチ完了 \(accumulated.count)件")
+                #endif
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン・スコープ未付与時はスキップ
+            } catch HelixAPIError.unauthorized {
+                // Helix API が 401 を返した場合（スコープ不足・トークン失効）はスキップ
+                #if DEBUG
+                print("[EmoteStore] fetchUserEmotes: 401 unauthorized — user:read:emotes スコープ未付与の可能性")
+                #endif
             } catch let error as URLError where error.code == .cancelled {
                 // Task キャンセル（disconnect 等）による中断は正常系のためスキップ
             } catch is CancellationError {
