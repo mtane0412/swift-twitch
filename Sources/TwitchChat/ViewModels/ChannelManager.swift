@@ -110,7 +110,16 @@ final class ChannelManager {
             let client = factory()
             eventSubClient = client
             Task {
-                try? await client.connect()
+                do {
+                    try await client.connect()
+                } catch {
+                    // 接続失敗時は eventSubClient をリセットして次回 joinChannel で再生成できるようにする
+                    #if DEBUG
+                    print("[ChannelManager] EventSub connect 失敗: \(error) — eventSubClient をリセット")
+                    #endif
+                    eventSubClient = nil
+                    return
+                }
                 // EventSub イベント受信ループを起動する
                 await startEventSubReceiveLoop(client: client)
             }
@@ -131,8 +140,8 @@ final class ChannelManager {
     /// 該当する ChatViewModel の handleEventSubChatMessage に振り分ける。
     private func startEventSubReceiveLoop(client: any TwitchEventSubClientProtocol) async {
         eventSubReceiveTask?.cancel()
-        // Swift Concurrency: actor メソッドは actor context で実行されるため
-        // ループ内で self にアクセスするとデータ競合が発生しない
+        // @MainActor クラスのメソッドは MainActor 上で実行されるため、
+        // ループ内で self へのアクセスは MainActor により直列化される
         eventSubReceiveTask = Task { [weak self] in
             let stream = await client.chatMessageEventStream
             for await event in stream {
@@ -158,10 +167,17 @@ final class ChannelManager {
                 // subscribeChatMessage には認証済みユーザーの ID が必要
                 guard let userId = await self.authState.userId else { return }
                 guard let client = await self.eventSubClient else { return }
-                try? await client.subscribeChatMessage(
-                    broadcasterId: broadcasterId,
-                    userId: userId
-                )
+                do {
+                    try await client.subscribeChatMessage(
+                        broadcasterId: broadcasterId,
+                        userId: userId
+                    )
+                } catch {
+                    // 購読失敗は返信有効化に影響するがアプリは継続できる
+                    #if DEBUG
+                    print("[ChannelManager] EventSub subscribeChatMessage 失敗 broadcasterId=\(broadcasterId): \(error)")
+                    #endif
+                }
             }
         }
     }
@@ -179,7 +195,14 @@ final class ChannelManager {
 
         // room-id が確定済みならサブスクリプションを解除する
         if let broadcasterId = viewModel.currentRoomId {
-            try? await eventSubClient?.unsubscribeChatMessage(broadcasterId: broadcasterId)
+            do {
+                try await eventSubClient?.unsubscribeChatMessage(broadcasterId: broadcasterId)
+            } catch {
+                // 解除失敗は EventSub の 300 サブスクリプション上限に影響する可能性があるためログに残す
+                #if DEBUG
+                print("[ChannelManager] EventSub unsubscribeChatMessage 失敗 broadcasterId=\(broadcasterId): \(error)")
+                #endif
+            }
         }
 
         await viewModel.disconnect()

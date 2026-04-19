@@ -26,25 +26,6 @@ enum EventSubConnectionState: Sendable, Equatable {
     case disconnected
 }
 
-// MARK: - keepalive 設定
-
-/// EventSub keepalive タイムアウト監視の設定
-///
-/// Twitch 側から keepalive が送られてくるため、クライアントは受信タイムアウトを監視する。
-struct EventSubKeepaliveConfiguration: Sendable {
-    /// Welcome メッセージで指定された keepalive_timeout_seconds への加算余裕（秒）
-    ///
-    /// Twitch の仕様: keepalive_timeout_seconds が過ぎるまでに keepalive が届かない場合は再接続。
-    /// ここでは若干の余裕を持たせて誤タイムアウトを防ぐ。
-    let toleranceSeconds: TimeInterval
-
-    /// 本番環境向けデフォルト（5 秒の余裕）
-    static let `default` = EventSubKeepaliveConfiguration(toleranceSeconds: 5.0)
-
-    /// テスト用の極小設定（余裕なし）
-    static let fastTest = EventSubKeepaliveConfiguration(toleranceSeconds: 0.0)
-}
-
 // MARK: - プロトコル
 
 /// Twitch EventSub WebSocket クライアントの抽象化プロトコル
@@ -321,9 +302,9 @@ actor TwitchEventSubClient: TwitchEventSubClientProtocol {
                 try await webSocketClient.connect(to: currentWebSocketURL)
                 if isIntentionallyDisconnected { await webSocketClient.disconnect(); return }
 
-                // 再接続成功 → 受信ループを再起動
+                // 再接続成功 → 受信ループを再起動する
+                // .connected は Welcome メッセージ受信時に yield するため、ここでは yield しない
                 reconnectAttempt = 0
-                connectionStateContinuation?.yield(.connected)
                 receiveLoopTask = Task { await receiveLoop() }
                 return
             } catch {

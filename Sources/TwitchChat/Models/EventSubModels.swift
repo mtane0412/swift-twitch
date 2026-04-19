@@ -123,7 +123,7 @@ struct EventSubSubscriptionInfo: Decodable {
 ///
 /// notification メッセージの payload.event として受信する。
 /// 自分が送信したメッセージも含む全チャットメッセージを配信する。
-struct EventSubChatEvent: Decodable {
+struct EventSubChatEvent: Decodable, Sendable {
     /// チャンネルオーナーのユーザー ID
     let broadcasterUserId: String
 
@@ -147,7 +147,7 @@ struct EventSubChatEvent: Decodable {
 }
 
 /// EventSub チャットメッセージの本文
-struct EventSubChatMessageContent: Decodable {
+struct EventSubChatMessageContent: Decodable, Sendable {
     /// メッセージテキスト（プレーンテキスト形式）
     let text: String
 }

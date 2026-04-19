@@ -561,8 +561,10 @@ final class ChatViewModel {
         // 条件: 対応する messages エントリのテキストが一致、かつ送信時刻が 10 秒以内
         let candidates = optimisticPendingMessages.filter { candidateId, sentAt in
             guard let msg = messages.first(where: { $0.id == candidateId }) else { return false }
+            let elapsed = now.timeIntervalSince(sentAt)
             return msg.text == event.message.text
-                && abs(sentAt.timeIntervalSince(now)) < matchWindow
+                && elapsed >= 0
+                && elapsed < matchWindow
         }
 
         // 同一テキストの連投がある場合は最も古いエントリを優先（FIFO）

@@ -133,12 +133,14 @@ public final class AuthState {
             print("[AuthState] restoreSession: validateToken 成功 — login=\(validateResponse.login)")
             #endif
 
-            // chat:edit スコープ不足の場合、既存セッションを自動ログアウトして再ログインを促す
-            // （コメント投稿機能追加に伴い、古いスコープのトークンを無効扱いにする）
+            // 必須スコープが不足している場合は自動ログアウトして再ログインを促す。
+            // chat:edit: コメント投稿に必要。user:read:chat: EventSub 購読（楽観的メッセージ ID 確定）に必要。
             let scopes = validateResponse.scopes
-            if !scopes.contains("chat:edit") {
+            let requiredScopes = ["chat:edit", "user:read:chat"]
+            let missingScopes = requiredScopes.filter { !scopes.contains($0) }
+            if !missingScopes.isEmpty {
                 #if DEBUG
-                print("[AuthState] restoreSession: chat:edit スコープなし — 自動ログアウトして再ログインを要求")
+                print("[AuthState] restoreSession: 必須スコープ不足 \(missingScopes) — 自動ログアウトして再ログインを要求")
                 #endif
                 await logout()
                 return
@@ -313,15 +315,17 @@ public final class AuthState {
 
 // MARK: - テスト用メソッド
 
+#if DEBUG
 extension AuthState {
     /// テスト用: ユーザー ID を直接設定する
     ///
     /// ログインフローをバイパスして userId だけを設定するテスト専用メソッド。
-    /// 実際のログインとトークンは設定しないため、本番コードでは使用しないこと。
+    /// `#if DEBUG` でガードされており、リリースビルドでは使用不可。
     func setUserIdForTesting(_ id: String) {
         userId = id
     }
 }
+#endif
 
 // MARK: - HelixAPITokenProvider 準拠
 
