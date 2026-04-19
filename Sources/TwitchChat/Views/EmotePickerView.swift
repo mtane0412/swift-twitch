@@ -110,8 +110,8 @@ private struct EmoteSectionHeader: View {
                 .clipShape(Circle())
             }
 
-            // ProfileImageStore から displayName を動的に解決する（@Observable で自動更新）
-            Text(resolvedTitle)
+            // ProfileImageStore から displayName を body 内で直接参照して @Observable 追跡を確実にする
+            Text(section.iconUserId.flatMap { profileImageStore.displayName(for: $0) } ?? section.title)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -121,14 +121,6 @@ private struct EmoteSectionHeader: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(Color(.windowBackgroundColor))
-    }
-
-    /// iconUserId に対応する displayName を ProfileImageStore から解決する
-    ///
-    /// 未取得の場合は section.title（ownerId または "グローバル" 等）をフォールバックとして使用する。
-    private var resolvedTitle: String {
-        guard let userId = section.iconUserId else { return section.title }
-        return profileImageStore.displayName(for: userId) ?? section.title
     }
 }
 
