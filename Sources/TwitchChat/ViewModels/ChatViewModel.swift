@@ -199,6 +199,14 @@ final class ChatViewModel {
         // ユーザースコープのため接続時に1回のみ取得し、チャンネル切替時には再取得しない
         if let userId = authState.userId, authState.canReadUserEmotes {
             userEmoteFetchTask = Task { await emoteStore.fetchUserEmotes(userId: userId) }
+        } else {
+            #if DEBUG
+            if authState.userId == nil {
+                print("[ChatViewModel] ユーザーエモートフェッチをスキップ: userId が未取得（未ログイン）")
+            } else if !authState.canReadUserEmotes {
+                print("[ChatViewModel] ユーザーエモートフェッチをスキップ: user:read:emotes スコープなし（再ログインで取得可能）")
+            }
+            #endif
         }
 
         startStreamTasks()
