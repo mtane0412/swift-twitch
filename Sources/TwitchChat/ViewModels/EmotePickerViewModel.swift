@@ -168,7 +168,7 @@ final class EmotePickerViewModel {
         var ids = Set<String>()
         if let id = currentBroadcasterId { ids.insert(id) }
         for emote in channel + user {
-            if let ownerId = emote.ownerId, ownerId != "0" { ids.insert(ownerId) }
+            if let ownerId = emote.ownerId, ownerId != "0", !ownerId.isEmpty { ids.insert(ownerId) }
         }
         return Array(ids)
     }
@@ -231,11 +231,11 @@ final class EmotePickerViewModel {
                 otherEmotes.append(emote)
             } else if let ownerId = emote.ownerId, ownerId == currentBroadcasterId {
                 currentChannelEmotes.append(emote)
-            } else if let ownerId = emote.ownerId, ownerId != "0" {
+            } else if let ownerId = emote.ownerId, ownerId != "0", !ownerId.isEmpty {
                 if subscribedByOwnerId[ownerId] == nil { subscribedOwnerIds.append(ownerId) }
                 subscribedByOwnerId[ownerId, default: []].append(emote)
             } else {
-                // ownerId なし / "0" エモートは global セクションで処理するため seen から除外する
+                // ownerId なし / "0" / 空文字エモートは global セクションで処理するため seen から除外する
                 seen.remove(emote.id)
                 otherEmotes.append(emote)
             }
@@ -244,6 +244,10 @@ final class EmotePickerViewModel {
     }
 
     /// 分類済みエモートから EmotePickerSection 配列を組み立てる（空セクションは除外）
+    ///
+    /// `fetchUsers()` 完了後に呼ぶことで `displayName` が確定した状態で判定できる。
+    /// displayName が取得できない ownerId（API が返さないサービスアカウント等）のエモートは
+    /// 数字 ID のセクションを作らず global セクションにまとめる。
     private func assembleSections(
         classified: (currentChannel: [HelixEmote], hype: [HelixEmote],
                      subscribedOwnerIds: [String], subscribedByOwnerId: [String: [HelixEmote]],
@@ -252,6 +256,8 @@ final class EmotePickerViewModel {
         seen: inout Set<String>
     ) -> [EmotePickerSection] {
         var sections: [EmotePickerSection] = []
+        // displayName が未取得の ownerId のエモートを一時的にここに集めて global に送る
+        var unnamedOwnerEmotes: [HelixEmote] = []
 
         if !classified.currentChannel.isEmpty {
             sections.append(EmotePickerSection(
@@ -262,10 +268,15 @@ final class EmotePickerViewModel {
         for ownerId in classified.subscribedOwnerIds {
             let emotes = classified.subscribedByOwnerId[ownerId] ?? []
             guard !emotes.isEmpty else { continue }
+            guard let name = profileImageStore.displayName(for: ownerId) else {
+                // displayName 未取得（サービスアカウント等で API がユーザーを返さない）→ global へ
+                for emote in emotes { seen.remove(emote.id) }
+                unnamedOwnerEmotes.append(contentsOf: emotes)
+                continue
+            }
             sections.append(EmotePickerSection(
                 id: "channel-\(ownerId)", kind: .subscribedChannel(ownerId: ownerId),
-                title: profileImageStore.displayName(for: ownerId) ?? ownerId,
-                iconUserId: ownerId, emotes: emotes
+                title: name, iconUserId: ownerId, emotes: emotes
             ))
         }
         if !classified.hype.isEmpty {
@@ -273,8 +284,8 @@ final class EmotePickerViewModel {
                 id: "hype", kind: .hypeTrain, title: "HYPE", iconUserId: nil, emotes: classified.hype
             ))
         }
-        // ownerId なし特殊エモート（リワード・プライム等）は global セクションにまとめて常に末尾に配置する
-        let globalEmotes = (classified.other + global).filter { seen.insert($0.id).inserted }
+        // ownerId なし / 空文字 / displayName 未取得エモートは global セクションにまとめて末尾に配置する
+        let globalEmotes = (unnamedOwnerEmotes + classified.other + global).filter { seen.insert($0.id).inserted }
         if !globalEmotes.isEmpty {
             sections.append(EmotePickerSection(
                 id: "global", kind: .global, title: "グローバル", iconUserId: nil, emotes: globalEmotes

@@ -11,19 +11,24 @@ struct EmotePickerViewModelTests {
     // MARK: - テストヘルパー
 
     /// テスト用エモートストアと ProfileImageStore を含む環境を生成する
+    ///
+    /// - Parameter profileImageUsers: ProfileImageStore モックが返すユーザーデータ（subscribedChannel セクションに displayName が必要な場合に指定）
     @MainActor
     private func makeEnvironment(
         channelEmotes: [HelixEmote] = [],
         userEmotes: [HelixEmote] = [],
         globalEmotes: [HelixEmote] = [],
-        currentBroadcasterId: String? = nil
+        currentBroadcasterId: String? = nil,
+        profileImageUsers: [HelixUserData] = []
     ) async -> (store: EmoteStore, profileImageStore: ProfileImageStore, viewModel: EmotePickerViewModel) {
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
         await store.setChannelEmotes(channelEmotes)
         await store.setUserEmotes(userEmotes)
         await store.setGlobalEmotes(globalEmotes)
 
-        let profileImageStore = ProfileImageStore(apiClient: MockProfileImageAPIClient())
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers(profileImageUsers)
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
@@ -102,9 +107,13 @@ struct EmotePickerViewModelTests {
     @Test("USERSTATE のみ更新されてもセクションは再構築されない（エモートデータが変わっていない場合）")
     @MainActor
     func testUserStateOnlyUpdateDoesNotRebuildSections() async throws {
-        // 前提: subscribedChannel セクションが 1 つある状態
+        // 前提: subscribedChannel セクションが 1 つある状態（ownerId "11111" の displayName を設定）
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            HelixUserData(id: "11111", login: "sub_ch", displayName: "サブチャンネル11111", profileImageUrl: nil)
+        ])
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
-        let profileImageStore = ProfileImageStore(apiClient: MockProfileImageAPIClient())
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
@@ -169,7 +178,12 @@ struct EmotePickerViewModelTests {
     func testStaleRefreshDoesNotOverwriteNewerResult() async throws {
         // 前提: 初回は空、その後エモートが追加される
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
-        let profileImageStore = ProfileImageStore(apiClient: MockProfileImageAPIClient())
+        let mockClient = MockProfileImageAPIClient()
+        // ownerId "77777" の displayName を設定して subscribedChannel セクションが作られるようにする
+        await mockClient.setUsers([
+            HelixUserData(id: "77777", login: "レースチャンネル", displayName: "レースチャンネル", profileImageUrl: nil)
+        ])
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
@@ -286,7 +300,11 @@ struct EmotePickerViewModelTests {
         let emoteA2 = HelixEmote(id: "a2", name: "チャンネルAエモート2", format: ["static"], emoteType: "subscriptions", emoteSetId: "1", ownerId: "aaaa")
         let emoteB1 = HelixEmote(id: "b1", name: "チャンネルBエモート1", format: ["static"], emoteType: "subscriptions", emoteSetId: "2", ownerId: "bbbb")
         let (_, _, viewModel) = await makeEnvironment(
-            userEmotes: [emoteA1, emoteA2, emoteB1]
+            userEmotes: [emoteA1, emoteA2, emoteB1],
+            profileImageUsers: [
+                HelixUserData(id: "aaaa", login: "channel_a", displayName: "チャンネルA", profileImageUrl: nil),
+                HelixUserData(id: "bbbb", login: "channel_b", displayName: "チャンネルB", profileImageUrl: nil)
+            ]
         )
 
         await viewModel.loadEmotes()
@@ -375,7 +393,10 @@ struct EmotePickerViewModelTests {
             channelEmotes: [.チャンネルエモートHype],
             userEmotes: [hypeEmote, rewardEmote, subEmote],
             globalEmotes: [.グローバルエモートLUL],
-            currentBroadcasterId: currentBroadcasterId
+            currentBroadcasterId: currentBroadcasterId,
+            profileImageUsers: [
+                HelixUserData(id: "222", login: "sub_channel", displayName: "サブチャンネル", profileImageUrl: nil)
+            ]
         )
 
         await viewModel.loadEmotes()
@@ -699,5 +720,75 @@ struct EmotePickerViewModelTests {
         )
         // 検証: ユーザーエモートでないためemoteSetId チェックが適用される
         #expect(viewModel.isAvailable(targetEmote) == false)
+    }
+
+    // MARK: - ownerId の異常値ハンドリング
+
+    @Test("ownerId が空文字のユーザーエモートは global セクションに分類され subscribedChannel セクションは作成されない")
+    @MainActor
+    func testEmptyOwnerIdEmoteGoesToGlobalSection() async {
+        // 前提: ownerId が空文字（Twitch API が "" を返す場合）のエモート
+        let emptyOwnerEmote = HelixEmote(
+            id: "emote_empty_owner",
+            name: "空オーナーエモート",
+            format: ["static"],
+            emoteType: "subscriptions",
+            emoteSetId: "999",
+            ownerId: ""
+        )
+        let (_, _, viewModel) = await makeEnvironment(userEmotes: [emptyOwnerEmote])
+
+        await viewModel.loadEmotes()
+
+        // 検証: subscribedChannel セクションが作成されないこと（空文字 ownerId で named section を作らない）
+        let subscribedSection = viewModel.filteredSections.first {
+            if case .subscribedChannel = $0.kind { return true }
+            return false
+        }
+        #expect(subscribedSection == nil)
+
+        // 検証: emote が global セクションに含まれること
+        let globalSection = viewModel.filteredSections.first(where: { $0.kind == .global })
+        #expect(globalSection?.emotes.contains(where: { $0.id == emptyOwnerEmote.id }) == true)
+    }
+
+    @Test("API にユーザーが存在しない ownerId のエモートは global セクションに分類される（数字 ID のセクションを作らない）")
+    @MainActor
+    func testUnresolvableOwnerIdGoesToGlobalSection() async {
+        // 前提: ownerId "784555479" を持つエモート、モック API がユーザーを返さない
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([]) // API はユーザーを返さない（存在しない broadcaster ID）
+
+        // stubbedEmotes: [] でグローバルエモートエンドポイントが空配列を返すように設定
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
+        await store.setUserEmotes([
+            HelixEmote(
+                id: "emote_unknown_owner",
+                name: "不明オーナーエモート",
+                format: ["static"],
+                emoteType: "subscriptions",
+                emoteSetId: "777",
+                ownerId: "784555479"
+            )
+        ])
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
+        let viewModel = EmotePickerViewModel(
+            emoteStore: store,
+            profileImageStore: profileImageStore,
+            currentBroadcasterId: nil
+        )
+
+        await viewModel.loadEmotes()
+
+        // 検証: subscribedChannel セクションが作成されないこと
+        let subscribedSection = viewModel.filteredSections.first {
+            if case .subscribedChannel = $0.kind { return true }
+            return false
+        }
+        #expect(subscribedSection == nil)
+
+        // 検証: emote が global セクションに含まれること（数字 ID のセクションに隔離されない）
+        let globalSection = viewModel.filteredSections.first(where: { $0.kind == .global })
+        #expect(globalSection?.emotes.contains(where: { $0.id == "emote_unknown_owner" }) == true)
     }
 }

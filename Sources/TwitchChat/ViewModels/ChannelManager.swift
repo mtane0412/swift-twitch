@@ -122,7 +122,7 @@ final class ChannelManager {
         let userEmotes = await preloadEmoteStore.userEmotesSnapshot()
         var ids = Set<String>()
         for emote in userEmotes {
-            if let ownerId = emote.ownerId, ownerId != "0" { ids.insert(ownerId) }
+            if let ownerId = emote.ownerId, ownerId != "0", !ownerId.isEmpty { ids.insert(ownerId) }
         }
         guard !ids.isEmpty else { return }
         await profileImageStore.fetchUsers(userIds: Array(ids))
