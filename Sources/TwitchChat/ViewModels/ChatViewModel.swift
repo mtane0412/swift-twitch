@@ -271,11 +271,20 @@ final class ChatViewModel {
             for await userState in stream {
                 guard !Task.isCancelled else { break }
                 self.currentUserState = userState
-                // emote-sets タグを EmoteStore に反映して、エモートピッカーの使用可否判定を更新する
+                // emote-sets 変化を先に取得してからストアを更新する
+                let previousEmoteSets = await self.emoteStore.userAvailableEmoteSets()
                 await self.emoteStore.updateUserEmoteSets(userState.emoteSets)
-                // 再ログイン後に user:read:emotes スコープが付与された場合もフェッチを起動する
-                // fetchUserEmotes は isUserEmotesLoaded フラグで重複フェッチを防止するため安全
                 if let userId = self.authState.userId, self.authState.canReadUserEmotes {
+                    // emote-sets が実際に変化した場合（サブスク追加/終了）はユーザーエモートを再フェッチ
+                    // nil → 値 は初回 USERSTATE のため変化とみなさず、フェッチは connect() 時のタスクに任せる
+                    if let previous = previousEmoteSets, previous != userState.emoteSets {
+                        #if DEBUG
+                        print("[ChatViewModel] emote-sets 変化を検出 — ユーザーエモートを再フェッチ")
+                        #endif
+                        await self.emoteStore.resetUserEmotes()
+                    }
+                    // 未ロード・再ログイン後・emote-sets 変化後のいずれもここで起動
+                    // isUserEmotesLoaded フラグが内部でガードするため重複フェッチなし
                     self.userEmoteFetchTask = Task { await self.emoteStore.fetchUserEmotes(userId: userId) }
                 }
             }
