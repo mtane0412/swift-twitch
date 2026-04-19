@@ -170,36 +170,11 @@ actor EmoteStore {
             #if DEBUG
             print("[EmoteStore] fetchUserEmotes: フェッチ開始 userId=\(userId)")
             #endif
-            /// ページネーションループの上限（無限ループ防止）
-            let maxPages = 100
-            var accumulated: [HelixEmote] = []
-            var cursor: String?
-            var pageCount = 0
             do {
-                repeat {
-                    var queryItems: [URLQueryItem] = [URLQueryItem(name: "user_id", value: userId)]
-                    if let after = cursor {
-                        queryItems.append(URLQueryItem(name: "after", value: after))
-                    }
-                    let response: HelixUserEmotesResponse = try await self.apiClient.get(
-                        url: Self.helixUserEmotesURL,
-                        queryItems: queryItems
-                    )
-                    accumulated += response.data
-                    // ページ取得ごとにピッカーを段階更新して最初のページから即座に表示する
-                    self.userEmotes = accumulated
-                    self.notifyUserEmoteSetsUpdated()
-                    cursor = response.cursor.flatMap { $0.isEmpty ? nil : $0 }
-                    pageCount += 1
-                    if pageCount >= maxPages {
-                        assertionFailure("ユーザーエモートページネーションが上限 \(maxPages) ページに達しました")
-                        break
-                    }
-                } while cursor != nil
-                // 全ページ完了後に再フェッチ防止フラグを立てる
+                let accumulated = try await self.performUserEmotesFetch(userId: userId)
                 self.isUserEmotesLoaded = true
                 #if DEBUG
-                print("[EmoteStore] fetchUserEmotes: フェッチ完了 \(accumulated.count)件（\(pageCount)ページ）")
+                print("[EmoteStore] fetchUserEmotes: フェッチ完了 \(accumulated.count)件")
                 #endif
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン・スコープ未付与時はスキップ
@@ -222,6 +197,41 @@ actor EmoteStore {
         userEmotesTask = task
         await task.value
         userEmotesTask = nil
+    }
+
+    /// ユーザーエモートの cursor ページネーションフェッチを実行して全エモートを返す
+    ///
+    /// ページ取得ごとに `userEmotes` を更新してピッカーの段階表示を有効にする。
+    ///
+    /// - Parameter userId: 認証済みユーザーの Twitch ユーザー ID
+    /// - Returns: 全ページから収集した HelixEmote 配列
+    private func performUserEmotesFetch(userId: String) async throws -> [HelixEmote] {
+        /// ページネーションループの上限（無限ループ防止）
+        let maxPages = 100
+        var accumulated: [HelixEmote] = []
+        var cursor: String?
+        var pageCount = 0
+        repeat {
+            var queryItems: [URLQueryItem] = [URLQueryItem(name: "user_id", value: userId)]
+            if let after = cursor {
+                queryItems.append(URLQueryItem(name: "after", value: after))
+            }
+            let response: HelixUserEmotesResponse = try await self.apiClient.get(
+                url: Self.helixUserEmotesURL,
+                queryItems: queryItems
+            )
+            accumulated += response.data
+            // ページ取得ごとにピッカーを段階更新して最初のページから即座に表示する
+            self.userEmotes = accumulated
+            self.notifyUserEmoteSetsUpdated()
+            cursor = response.cursor.flatMap { $0.isEmpty ? nil : $0 }
+            pageCount += 1
+            if pageCount >= maxPages {
+                assertionFailure("ユーザーエモートページネーションが上限 \(maxPages) ページに達しました")
+                break
+            }
+        } while cursor != nil
+        return accumulated
     }
 
     /// エモート名でエモートを検索する
