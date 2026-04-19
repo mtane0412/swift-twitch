@@ -34,6 +34,32 @@ struct EmotePickerViewModelTests {
 
     // MARK: - loadEmotes / セクション構築
 
+    @Test("loadEmotes はセクション構築前にオーナーIDの表示名をフェッチしてセクションタイトルに反映する")
+    @MainActor
+    func testLoadEmotesPrefetchesDisplayNames() async {
+        // 前提: ownerId "12345" を持つユーザーエモート、モック API が displayName "テストチャンネル" を返す
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            HelixUserData(id: "12345", login: "test_ch", displayName: "テストチャンネル", profileImageUrl: nil)
+        ])
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
+        await store.setUserEmotes([
+            HelixEmote(id: "emote1", name: "testEmote", format: ["static"], emoteType: "subscriptions", emoteSetId: "999", ownerId: "12345")
+        ])
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
+        let viewModel = EmotePickerViewModel(
+            emoteStore: store,
+            profileImageStore: profileImageStore,
+            currentBroadcasterId: nil
+        )
+
+        await viewModel.loadEmotes()
+
+        // 検証: subscribedChannel セクションのタイトルが ownerId でなく displayName になっている
+        let subscribedSection = viewModel.filteredSections.first { $0.kind == .subscribedChannel(ownerId: "12345") }
+        #expect(subscribedSection?.title == "テストチャンネル")
+    }
+
     @Test("グローバルエモートのみのとき global セクションだけが返る")
     @MainActor
     func testLoadEmotesGlobalOnly() async {

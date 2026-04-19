@@ -86,9 +86,11 @@ final class EmotePickerViewModel {
         userEmoteSets = await emoteStore.userAvailableEmoteSets()
         userEmoteIds  = await emoteStore.userEmoteIdSet()
 
+        // セクション構築前にオーナーIDの表示名を事前フェッチして初回レンダリングで即座に表示する
+        await profileImageStore.fetchUsers(userIds: collectOwnerIds(channel: channel, user: user))
+
         allSections = buildSections(channel: channel, user: user, global: global)
         applyFilter()
-        scheduleOwnerDisplayNameFetch(for: allSections)
     }
 
     /// ピッカー表示中に USERSTATE が届いた場合にエモートの使用可否をリアルタイムで更新する
@@ -134,6 +136,18 @@ final class EmotePickerViewModel {
     }
 
     // MARK: - プライベートメソッド
+
+    /// チャンネル・ユーザーエモートからセクションオーナー ID を収集する
+    ///
+    /// - Returns: currentBroadcasterId を含む、重複なし・"0" 除外済みの ownerId 配列
+    private func collectOwnerIds(channel: [HelixEmote], user: [HelixEmote]) -> [String] {
+        var ids = Set<String>()
+        if let id = currentBroadcasterId { ids.insert(id) }
+        for emote in channel + user {
+            if let ownerId = emote.ownerId, ownerId != "0" { ids.insert(ownerId) }
+        }
+        return Array(ids)
+    }
 
     /// セクション内の subscribedChannel / currentChannel の ownerId に対して
     /// ProfileImageStore の表示名・アイコンフェッチを非同期でスケジュールする
