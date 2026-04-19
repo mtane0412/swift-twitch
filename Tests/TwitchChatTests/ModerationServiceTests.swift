@@ -51,11 +51,15 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
     /// 最後に delete に渡されたクエリパラメータ
     private(set) var lastDeleteQueryItems: [URLQueryItem]?
 
+    /// get が呼ばれた回数
+    private(set) var getCallCount = 0
+
     // MARK: - HelixAPIClientProtocol 実装
 
     func get<T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?) async throws -> T {
         if shouldThrowUnauthorized { throw HelixAPIError.unauthorized }
         if shouldThrowForbidden { throw HelixAPIError.forbidden("テスト用権限エラー") }
+        getCallCount += 1
 
         // GET /users のシミュレート
         if T.self == HelixUsersResponse.self {
@@ -116,6 +120,17 @@ actor MockModerationAPIClient: HelixAPIClientProtocol {
     func setUnauthorized(_ value: Bool) {
         shouldThrowUnauthorized = value
     }
+}
+
+// MARK: - テスト用ヘルパー
+
+/// テスト内で currentDate クロージャに渡す可変な日時コンテナ
+///
+/// `@Sendable` クロージャは `var` を直接キャプチャできないため、
+/// 参照型のラッパーを使って時刻を可変に管理する
+final class DateBox: @unchecked Sendable {
+    var date: Date
+    init(_ date: Date = Date()) { self.date = date }
 }
 
 // MARK: - テスト本体
@@ -321,6 +336,161 @@ struct ModerationServiceTests {
 
         let queryItems = await mock.lastDeleteQueryItems
         #expect(queryItems?.contains(URLQueryItem(name: "message_id", value: "メッセージID_abc123")) == true)
+    }
+
+    // MARK: - ユーザーIDキャッシュ
+
+    @Test("同一ユーザーへの2回目呼び出しでAPIが1回だけ呼ばれること")
+    func testSameUserCallsAPIOnlyOnce() async throws {
+        let mock = MockModerationAPIClient()
+        await mock.addUser(id: "ユーザーID_001", login: "あらし太郎")
+        let service = ModerationService(apiClient: mock)
+
+        // 1回目: API を呼んでキャッシュに格納する
+        try await service.execute(
+            command: .ban(username: "あらし太郎", reason: "荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+        // 2回目: キャッシュからユーザーIDを取得する（API は呼ばれない）
+        try await service.execute(
+            command: .ban(username: "あらし太郎", reason: "2回目の荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+
+        // GET /users の呼び出しは1回のみであること
+        let getCallCount = await mock.getCallCount
+        #expect(getCallCount == 1)
+    }
+
+    @Test("TTL期限切れ後はAPIが再度呼ばれること")
+    func testCacheExpiredAfterTTL() async throws {
+        let mock = MockModerationAPIClient()
+        await mock.addUser(id: "ユーザーID_001", login: "あらし太郎")
+        // 現在時刻を制御できるクロージャを使って初期化する
+        let dateBox = DateBox()
+        let service = ModerationService(apiClient: mock, currentDate: { dateBox.date })
+
+        // 1回目: キャッシュに格納する
+        try await service.execute(
+            command: .ban(username: "あらし太郎", reason: "荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+
+        // TTL（300秒）を超える時間を経過させる
+        dateBox.date = dateBox.date.addingTimeInterval(301)
+
+        // 2回目: TTL 切れのため API が再度呼ばれる
+        try await service.execute(
+            command: .ban(username: "あらし太郎", reason: "再度の荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+
+        // GET /users が2回呼ばれていること
+        let getCallCount = await mock.getCallCount
+        #expect(getCallCount == 2)
+    }
+
+    @Test("大文字小文字が異なるログイン名でキャッシュがヒットすること")
+    func testCacheHitWithDifferentCase() async throws {
+        let mock = MockModerationAPIClient()
+        // Twitch ユーザー名は ASCII 英数字小文字。モックには正規化後の小文字で登録する
+        await mock.addUser(id: "ユーザーID_001", login: "trolluser")
+        let service = ModerationService(apiClient: mock)
+
+        // 大文字混在で1回目（正規化されて "trolluser" としてキャッシュに格納される）
+        try await service.execute(
+            command: .ban(username: "TrollUser", reason: "荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+        // 小文字で2回目（キャッシュヒット）
+        try await service.execute(
+            command: .ban(username: "trolluser", reason: "再度の荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+
+        let getCallCount = await mock.getCallCount
+        #expect(getCallCount == 1)
+    }
+
+    @Test("前後空白付きのログイン名でキャッシュがヒットすること")
+    func testCacheHitWithWhitespacePadding() async throws {
+        let mock = MockModerationAPIClient()
+        await mock.addUser(id: "ユーザーID_001", login: "あらし太郎")
+        let service = ModerationService(apiClient: mock)
+
+        // 前後空白付きで1回目（正規化されてキャッシュに格納）
+        try await service.execute(
+            command: .ban(username: "  あらし太郎  ", reason: "荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+        // 空白なしで2回目（キャッシュヒット）
+        try await service.execute(
+            command: .ban(username: "あらし太郎", reason: "再度の荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+
+        let getCallCount = await mock.getCallCount
+        #expect(getCallCount == 1)
+    }
+
+    @Test("異なるユーザーはそれぞれAPIが呼ばれること")
+    func testDifferentUsersEachCallAPI() async throws {
+        let mock = MockModerationAPIClient()
+        await mock.addUser(id: "ユーザーID_001", login: "あらし太郎")
+        await mock.addUser(id: "ユーザーID_002", login: "スパマー花子")
+        let service = ModerationService(apiClient: mock)
+
+        // 別々のユーザーにコマンドを実行する
+        try await service.execute(
+            command: .ban(username: "あらし太郎", reason: "荒らし行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+        try await service.execute(
+            command: .ban(username: "スパマー花子", reason: "スパム行為"),
+            broadcasterId: broadcasterID,
+            moderatorId: moderatorID
+        )
+
+        // それぞれのユーザーで1回ずつ、合計2回 API が呼ばれること
+        let getCallCount = await mock.getCallCount
+        #expect(getCallCount == 2)
+    }
+
+    @Test("存在しないユーザーはキャッシュされないこと")
+    func testNotFoundUserIsNotCached() async throws {
+        let mock = MockModerationAPIClient()
+        // ユーザーを登録しない（存在しないユーザーをシミュレート）
+        let service = ModerationService(apiClient: mock)
+
+        // 1回目: notFound エラーが throw される
+        await #expect(throws: HelixAPIError.notFound) {
+            try await service.execute(
+                command: .ban(username: "存在しないユーザー", reason: nil),
+                broadcasterId: broadcasterID,
+                moderatorId: moderatorID
+            )
+        }
+        // 2回目: キャッシュされていないため再度 API が呼ばれる
+        await #expect(throws: HelixAPIError.notFound) {
+            try await service.execute(
+                command: .ban(username: "存在しないユーザー", reason: nil),
+                broadcasterId: broadcasterID,
+                moderatorId: moderatorID
+            )
+        }
+
+        // notFound はキャッシュしないため2回 API が呼ばれていること
+        let getCallCount = await mock.getCallCount
+        #expect(getCallCount == 2)
     }
 
     // MARK: - エラー伝播
