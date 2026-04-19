@@ -622,4 +622,44 @@ struct EmoteStoreTests {
 
         #expect(ids.isEmpty)
     }
+
+    // MARK: - userEmotesSnapshot
+
+    @Test("userEmotesSnapshot はユーザーエモートが未設定の場合に空配列を返す")
+    func testUserEmotesSnapshotEmpty() async {
+        // 前提: ユーザーエモートが設定されていない
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+
+        let snapshot = await store.userEmotesSnapshot()
+
+        // 検証: ユーザーエモート未設定のため空配列
+        #expect(snapshot.isEmpty)
+    }
+
+    @Test("userEmotesSnapshot は現在のユーザーエモート一覧を返す")
+    func testUserEmotesSnapshotReturnsCurrentEmotes() async {
+        // 前提: ユーザーエモートを直接設定済み
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setUserEmotes([.ユーザーエモート別チャンネルSub, .ユーザーエモートBits])
+
+        let snapshot = await store.userEmotesSnapshot()
+
+        // 検証: 設定したユーザーエモートが全件返る
+        #expect(snapshot.count == 2)
+        #expect(snapshot.contains(where: { $0.id == HelixEmote.ユーザーエモート別チャンネルSub.id }))
+        #expect(snapshot.contains(where: { $0.id == HelixEmote.ユーザーエモートBits.id }))
+    }
+
+    @Test("userEmotesSnapshot は resetUserEmotes 後に空配列を返す")
+    func testUserEmotesSnapshotAfterReset() async {
+        // 前提: ユーザーエモートを設定してからリセット
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setUserEmotes([.ユーザーエモート別チャンネルSub])
+        await store.resetUserEmotes()
+
+        let snapshot = await store.userEmotesSnapshot()
+
+        // 検証: リセット後はスナップショットが空
+        #expect(snapshot.isEmpty)
+    }
 }

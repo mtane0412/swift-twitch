@@ -99,6 +99,8 @@ actor EmoteStore {
                 self.isGlobalLoaded = true
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
+            } catch HelixAPIError.unauthorized {
+                // Helix API が 401 を返した場合（トークン失効等）は次回接続時に再取得する
             } catch let error as URLError where error.code == .cancelled {
                 // Task キャンセル（disconnect 等）による中断は正常系のためスキップ
             } catch is CancellationError {
@@ -132,6 +134,8 @@ actor EmoteStore {
             notifyUserEmoteSetsUpdated()
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はスキップ
+        } catch HelixAPIError.unauthorized {
+            // Helix API が 401 を返した場合（トークン失効等）はスキップ
         } catch let error as URLError where error.code == .cancelled {
             // Task キャンセル（disconnect 等）による中断は正常系のためスキップ
         } catch is CancellationError {
@@ -310,6 +314,16 @@ actor EmoteStore {
         Set(userEmotes.map(\.id))
     }
 
+    /// 現在のユーザーエモート一覧のスナップショットを返す
+    ///
+    /// `ChannelManager` が新しい `ChatViewModel` のエモートストアにユーザーエモートを
+    /// シードする際に使用する。スナップショットはプリロード完了分のみを含む。
+    ///
+    /// - Returns: 現在のユーザーエモート一覧（未ロードの場合は空配列）
+    func userEmotesSnapshot() -> [HelixEmote] {
+        userEmotes
+    }
+
     /// ユーザーが使用可能なエモートセット ID を更新する
     ///
     /// USERSTATE の `emote-sets` タグを受信するたびに呼び出す。
@@ -405,6 +419,19 @@ actor EmoteStore {
         userEmotesTask = nil
     }
 
+    /// ユーザーエモート一覧を直接設定する
+    ///
+    /// `ChannelManager` が新規接続チャンネルの `ChatViewModel` にプリロード済み
+    /// ユーザーエモートをシードするために使用する。
+    /// `isUserEmotesLoaded` を `true` に設定するため、その後の `fetchUserEmotes` は
+    /// emote-sets 変化がない限りスキップされる。
+    ///
+    /// - Parameter emotes: シードするユーザーエモート一覧
+    func setUserEmotes(_ emotes: [HelixEmote]) {
+        userEmotes = emotes
+        isUserEmotesLoaded = true
+    }
+
     // MARK: - テスト用メソッド
 
 #if DEBUG
@@ -417,12 +444,6 @@ actor EmoteStore {
     /// チャンネルエモート一覧を直接設定する（テスト用）
     func setChannelEmotes(_ emotes: [HelixEmote]) {
         channelEmotes = emotes
-    }
-
-    /// ユーザーエモート一覧を直接設定する（テスト用）
-    func setUserEmotes(_ emotes: [HelixEmote]) {
-        userEmotes = emotes
-        isUserEmotesLoaded = true
     }
 
     /// ユーザーエモートセットを直接設定する（テスト用）

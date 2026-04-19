@@ -75,6 +75,8 @@ actor BadgeStore {
                 self.isGlobalLoaded = true
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
+            } catch HelixAPIError.unauthorized {
+                // Helix API が 401 を返した場合（トークン失効等）は次回接続時に再取得する
             } catch is AuthConfigError {
                 // Client ID 未設定（開発環境・テスト実行時）は正常状態のためスキップ
             } catch {
@@ -102,6 +104,8 @@ actor BadgeStore {
             channelBadges = Self.buildMapping(from: response.data)
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はスキップ
+        } catch HelixAPIError.unauthorized {
+            // Helix API が 401 を返した場合（トークン失効等）はスキップ
         } catch {
             // 設定不備・サーバーエラー等の恒久エラーは診断できるよう記録する
             assertionFailure("チャンネルバッジフェッチ失敗（channelId: \(channelId)）: \(error)")
