@@ -258,4 +258,109 @@ struct EmoteDefinitionTests {
         let emote = HelixEmote(id: "112291", name: "KEKHeim", format: ["static"], emoteType: "globals")
         #expect(emote.isAnimated == false)
     }
+
+    // MARK: - owner_id のデコード
+
+    @Test("owner_id を含むエモートを正しくデコードできる")
+    func testDecodeEmoteWithOwnerId() throws {
+        // 前提: /helix/chat/emotes/user レスポンスに含まれる owner_id フィールド
+        let json = """
+        {
+          "data": [
+            {
+              "id": "emotesv2_hypetrain_test",
+              "name": "Hypeトレインエモート",
+              "format": ["static"],
+              "emote_type": "hypetrain",
+              "emote_set_id": "77777",
+              "owner_id": "11111111"
+            }
+          ]
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixEmotesResponse.self, from: data)
+
+        #expect(response.data.count == 1)
+        #expect(response.data[0].ownerId == "11111111")
+    }
+
+    @Test("owner_id が省略されている場合は ownerId が nil になる")
+    func testDecodeEmoteWithMissingOwnerId() throws {
+        // 前提: グローバル・チャンネルエモート等 owner_id を含まないエンドポイントのレスポンス
+        let json = """
+        {
+          "data": [
+            {
+              "id": "425618",
+              "name": "LUL",
+              "format": ["static", "animated"],
+              "emote_type": "globals"
+            }
+          ]
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixEmotesResponse.self, from: data)
+
+        #expect(response.data.count == 1)
+        #expect(response.data[0].ownerId == nil)
+    }
+
+    // MARK: - HelixUserEmotesResponse のデコード
+
+    @Test("HelixUserEmotesResponse を cursor あり で正しくデコードできる")
+    func testDecodeUserEmotesResponseWithCursor() throws {
+        // 前提: /helix/chat/emotes/user の複数ページある場合のレスポンス
+        let json = """
+        {
+          "data": [
+            {
+              "id": "emotesv2_sub_other_channel",
+              "name": "他チャンネルサブスクエモート",
+              "format": ["static"],
+              "emote_type": "subscriptions",
+              "emote_set_id": "99999",
+              "owner_id": "12345678"
+            }
+          ],
+          "pagination": {
+            "cursor": "eyJiIjpudWxsLCJhIjp7Ik9mZnNldCI6MX19"
+          }
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixUserEmotesResponse.self, from: data)
+
+        #expect(response.data.count == 1)
+        #expect(response.data[0].name == "他チャンネルサブスクエモート")
+        #expect(response.data[0].ownerId == "12345678")
+        #expect(response.cursor == "eyJiIjpudWxsLCJhIjp7Ik9mZnNldCI6MX19")
+    }
+
+    @Test("HelixUserEmotesResponse を cursor なし（最終ページ）で正しくデコードできる")
+    func testDecodeUserEmotesResponseWithoutCursor() throws {
+        // 前提: /helix/chat/emotes/user の最終ページ（cursor フィールドなし）
+        let json = """
+        {
+          "data": [
+            {
+              "id": "emotesv2_bits_test",
+              "name": "ビッツ応援エモート",
+              "format": ["static", "animated"],
+              "emote_type": "bitstier",
+              "emote_set_id": "88888",
+              "owner_id": "87654321"
+            }
+          ]
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixUserEmotesResponse.self, from: data)
+
+        #expect(response.data.count == 1)
+        #expect(response.data[0].name == "ビッツ応援エモート")
+        #expect(response.data[0].emoteType == "bitstier")
+        #expect(response.cursor == nil)
+    }
 }

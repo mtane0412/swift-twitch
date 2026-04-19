@@ -390,6 +390,46 @@ struct ChannelManagerTests {
         #expect(disconnected == true)
     }
 
+    // MARK: - ユーザーエモートプリロード
+
+    @Test("joinChannel でプリロード済みユーザーエモートが ChatViewModel のエモートストアにシードされる")
+    func testJoinChannelSeedsPreloadedUserEmotes() async throws {
+        // 前提: プリロードエモートストアにユーザーエモートを設定済み
+        let preloadStore = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await preloadStore.setUserEmotes([.ユーザーエモート別チャンネルSub])
+        let manager = ChannelManager(
+            authState: AuthState(),
+            makeIRCClient: { MockTwitchIRCClient() },
+            preloadEmoteStore: preloadStore
+        )
+
+        // 操作: チャンネルに参加する
+        await manager.joinChannel("haishinsha1")
+
+        // 検証: 新しく作成された ChatViewModel のエモートストアにプリロードエモートが含まれること
+        let viewModel = try #require(manager.channels["haishinsha1"])
+        let allEmotes = await viewModel.emoteStore.allEmotes()
+        #expect(allEmotes.contains(where: { $0.id == HelixEmote.ユーザーエモート別チャンネルSub.id }))
+    }
+
+    @Test("プリロードエモートが空の場合 joinChannel 後の ChatViewModel のエモートストアにもユーザーエモートなし")
+    func testJoinChannelWithEmptyPreloadHasNoUserEmotes() async throws {
+        // 前提: プリロードエモートストアにユーザーエモートが設定されていない
+        let preloadStore = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        let manager = ChannelManager(
+            authState: AuthState(),
+            makeIRCClient: { MockTwitchIRCClient() },
+            preloadEmoteStore: preloadStore
+        )
+
+        await manager.joinChannel("haishinsha1")
+
+        // 検証: プリロードなしのため ChatViewModel のエモートストアにユーザーエモートがない
+        let viewModel = try #require(manager.channels["haishinsha1"])
+        let userEmoteIdSet = await viewModel.emoteStore.userEmoteIdSet()
+        #expect(userEmoteIdSet.isEmpty)
+    }
+
     @Test("roomId 確定時に ChatViewModel の onRoomIdConfirmed コールバックがセットされている")
     func testRoomIdConfirmedCallbackIsConfigured() async throws {
         // 前提: MockTwitchIRCClient と MockTwitchEventSubClient を使う

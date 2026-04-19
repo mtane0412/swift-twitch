@@ -35,6 +35,15 @@ final class ChannelManager {
 
     private let authState: AuthState
     private let apiClient: any HelixAPIClientProtocol
+
+    /// ログイン時にユーザーエモートを事前取得するストア
+    ///
+    /// 各チャンネルの `ChatViewModel` が持つ個別のエモートストアとは別に、
+    /// アプリ起動・ログイン時にユーザーエモートをフェッチしておくために使用する。
+    /// `joinChannel` で新しい `ChatViewModel` を作成する際にスナップショットをシードする
+    /// ことで、エモートピッカーが即座に使用可能エモートを表示できるようになる。
+    private let preloadEmoteStore: EmoteStore
+
     /// IRC クライアントファクトリ（テスト時にモックを注入するために使用）
     private let makeIRCClient: @MainActor () -> any TwitchIRCClientProtocol
 
@@ -60,7 +69,9 @@ final class ChannelManager {
     /// - Parameter authState: 認証状態（IRC 接続と Helix API 呼び出しに使用）
     init(authState: AuthState) {
         self.authState = authState
-        self.apiClient = HelixAPIClient(tokenProvider: authState)
+        let helixClient = HelixAPIClient(tokenProvider: authState)
+        self.apiClient = helixClient
+        self.preloadEmoteStore = EmoteStore(apiClient: helixClient)
         self.makeIRCClient = { TwitchIRCClient() }
         self.makeEventSubClient = { [authState] in
             TwitchEventSubClient(apiClient: HelixAPIClient(tokenProvider: authState))
@@ -73,18 +84,34 @@ final class ChannelManager {
     ///   - authState: 認証状態
     ///   - makeIRCClient: IRC クライアントを生成するファクトリクロージャ
     ///   - makeEventSubClient: EventSub クライアントを生成するファクトリクロージャ（nil で EventSub 無効化）
+    ///   - preloadEmoteStore: ユーザーエモートプリロード用ストア（nil の場合はデフォルトを生成）
     init(
         authState: AuthState,
         makeIRCClient: @escaping @MainActor () -> any TwitchIRCClientProtocol,
-        makeEventSubClient: (@MainActor () -> any TwitchEventSubClientProtocol)? = nil
+        makeEventSubClient: (@MainActor () -> any TwitchEventSubClientProtocol)? = nil,
+        preloadEmoteStore: EmoteStore? = nil
     ) {
         self.authState = authState
-        self.apiClient = HelixAPIClient(tokenProvider: authState)
+        let helixClient = HelixAPIClient(tokenProvider: authState)
+        self.apiClient = helixClient
+        self.preloadEmoteStore = preloadEmoteStore ?? EmoteStore(apiClient: helixClient)
         self.makeIRCClient = makeIRCClient
         self.makeEventSubClient = makeEventSubClient
     }
 
     // MARK: - 公開メソッド
+
+    /// ログイン時・アプリ起動時にユーザーエモートを事前取得する
+    ///
+    /// プリロードストアでユーザーエモートをフェッチしておくことで、`joinChannel` 呼び出し時に
+    /// 新しい `ChatViewModel` のエモートストアへ即座にシードできるようにする。
+    /// `user:read:emotes` スコープがない場合や未ログイン時はスキップする。
+    ///
+    /// `TwitchChatApp` のログイン検知（`.loggedIn` 状態遷移・セッション復元）から呼び出す。
+    func preloadUserEmotes() async {
+        guard let userId = authState.userId, authState.canReadUserEmotes else { return }
+        await preloadEmoteStore.fetchUserEmotes(userId: userId)
+    }
 
     /// 指定チャンネルに参加する
     ///
@@ -104,6 +131,14 @@ final class ChannelManager {
         // 新規接続
         let ircClient = makeIRCClient()
         let viewModel = ChatViewModel(ircClient: ircClient, authState: authState, apiClient: apiClient)
+
+        // プリロード済みユーザーエモートをシードして初回ピッカー表示を高速化する
+        // connect() より前にシードすることで、USERSTATE 到着前からエモートが利用可能になる
+        let userEmotesSnapshot = await preloadEmoteStore.userEmotesSnapshot()
+        if !userEmotesSnapshot.isEmpty {
+            await viewModel.emoteStore.setUserEmotes(userEmotesSnapshot)
+        }
+
         channels[normalized] = viewModel
         channelOrder.append(normalized)
         selectedChannel = normalized
@@ -150,7 +185,7 @@ final class ChannelManager {
         eventSubReceiveTask = Task { [weak self] in
             let stream = await client.chatMessageEventStream
             for await event in stream {
-                await self?.routeEventSubChatMessage(event)
+                self?.routeEventSubChatMessage(event)
             }
         }
     }
@@ -170,8 +205,8 @@ final class ChannelManager {
             guard let self else { return }
             Task {
                 // subscribeChatMessage には認証済みユーザーの ID が必要
-                guard let userId = await self.authState.userId else { return }
-                guard let client = await self.eventSubClient else { return }
+                guard let userId = self.authState.userId else { return }
+                guard let client = self.eventSubClient else { return }
                 do {
                     try await client.subscribeChatMessage(
                         broadcasterId: broadcasterId,
@@ -280,5 +315,9 @@ final class ChannelManager {
             await client.disconnect()
         }
         eventSubClient = nil
+
+        // プリロードストアをリセットして次回ログイン時に再フェッチできるようにする
+        await preloadEmoteStore.cancelUserEmotesFetch()
+        await preloadEmoteStore.resetUserEmotes()
     }
 }

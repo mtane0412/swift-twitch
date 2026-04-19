@@ -38,7 +38,8 @@ struct TwitchChatApp: App {
                     await authState.restoreSession()
                     if case .loggedIn = authState.status {
                         followedStreamStore.startAutoRefresh()
-                        // フォロー中全チャンネルを起動時に一回取得してキャッシュする
+                        // フォロー中全チャンネルとユーザーエモートを並行で事前取得する
+                        Task { await channelManager.preloadUserEmotes() }
                         await followedChannelStore.fetchAll()
                     }
                 }
@@ -46,6 +47,7 @@ struct TwitchChatApp: App {
                     switch newStatus {
                     case .loggedIn:
                         followedStreamStore.startAutoRefresh()
+                        Task { await channelManager.preloadUserEmotes() }
                         Task { await followedChannelStore.fetchAll() }
                     case .loggedOut:
                         followedStreamStore.stopAutoRefresh()

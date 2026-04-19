@@ -77,6 +77,12 @@ public final class AuthState {
     /// チャットクリア・メッセージ削除に必要なスコープを保有しているか
     var canManageChatMessages: Bool { grantedScopes.contains("moderator:manage:chat_messages") }
 
+    /// ユーザーが使用可能なエモート取得に必要な `user:read:emotes` スコープを保有しているか
+    ///
+    /// `false` の場合、`/helix/chat/emotes/user` の呼び出しをスキップする（graceful degradation）。
+    /// 旧トークンユーザーは再ログイン後にスコープが付与される。
+    var canReadUserEmotes: Bool { grantedScopes.contains("user:read:emotes") }
+
     // MARK: - プライベートプロパティ
 
     private let authClient: any TwitchAuthClientProtocol

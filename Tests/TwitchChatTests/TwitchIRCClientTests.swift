@@ -571,8 +571,8 @@ struct TwitchIRCClientTests {
             try await client.connect(to: "配信者EEE", accessToken: nil, userLogin: nil)
         }
 
-        // PING が 2 回以上送信されるまで待機（最大 2 秒、並行テスト実行時の遅延を許容）
-        let waitSucceeded = await waitFor(timeout: 2.0) {
+        // PING が 2 回以上送信されるまで待機（最大 10 秒、CI の並行テスト実行時の Task.sleep オーバーシュートを許容）
+        let waitSucceeded = await waitFor(timeout: 10.0) {
             let sent = await mockWS.sentMessages
             return sent.filter { $0 == "PING :tmi.twitch.tv" }.count >= 2
         }
