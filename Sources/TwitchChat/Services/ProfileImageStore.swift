@@ -33,6 +33,9 @@ final class ProfileImageStore {
     /// userId → profileImageUrl のキャッシュ
     private var profileImageUrls: [String: URL] = [:]
 
+    /// userId → displayName のキャッシュ（エモートピッカーのセクションヘッダーに使用）
+    private var displayNames: [String: String] = [:]
+
     /// login → userId のマッピング（userId フェッチ時にもログイン名から参照できるよう記録する）
     private var loginToUserId: [String: String] = [:]
 
@@ -92,6 +95,14 @@ final class ProfileImageStore {
         loginToUserId[login.lowercased()]
     }
 
+    /// 指定ユーザーIDの表示名（display_name）を取得する
+    ///
+    /// - Parameter userId: Twitch ユーザーID
+    /// - Returns: 表示名（未取得またはユーザーが存在しない場合は `nil`）
+    func displayName(for userId: String) -> String? {
+        displayNames[userId]
+    }
+
     /// 複数ユーザーのプロフィール画像URLを一括取得する
     ///
     /// - Parameter userIds: 取得対象の Twitch ユーザーID 一覧
@@ -139,6 +150,7 @@ final class ProfileImageStore {
     /// ログアウト時など、データを消去したい場合に使用する
     func clear() {
         profileImageUrls = [:]
+        displayNames = [:]
         loginToUserId = [:]
         fetchedUserIds = []
         fetchedLogins = []
@@ -185,6 +197,7 @@ final class ProfileImageStore {
                 fetchedLogins.insert(userData.login.lowercased())
                 // login → userId の対応を記録してログイン名から参照できるようにする
                 loginToUserId[userData.login.lowercased()] = userData.id
+                displayNames[userData.id] = userData.displayName
                 if let url = userData.profileImageUrl {
                     profileImageUrls[userData.id] = url
                 }

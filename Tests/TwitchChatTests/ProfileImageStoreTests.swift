@@ -336,4 +336,60 @@ struct ProfileImageStoreTests {
         #expect(store.profileImageUrl(forLogin: "yoshiox") == nil)
         #expect(store.userId(forLogin: "yoshiox") == nil)
     }
+
+    // MARK: - displayName キャッシュ
+
+    @Test("fetchUsers 後に displayName(for:) がユーザーの表示名を返す")
+    func testDisplayNameIsStoredAfterFetch() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "shroud", displayName: "Shroud")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(userIds: ["111111"])
+
+        // 検証: フェッチ後に displayName が取得できる
+        #expect(store.displayName(for: "111111") == "Shroud")
+    }
+
+    @Test("fetchUsers(logins:) 後にも displayName(for:) が表示名を返す")
+    func testDisplayNameIsStoredAfterFetchByLogin() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "222222", login: "pokimane", displayName: "Pokimane")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(logins: ["pokimane"])
+
+        // 検証: ログイン名でフェッチした場合も displayName が取得できる
+        #expect(store.displayName(for: "222222") == "Pokimane")
+    }
+
+    @Test("displayName(for:) は未フェッチのユーザーID に対して nil を返す")
+    func testDisplayNameReturnsNilForUnknownUser() {
+        let mockClient = MockProfileImageAPIClient()
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        // 検証: 未取得ユーザーは nil
+        #expect(store.displayName(for: "999999") == nil)
+    }
+
+    @Test("clear() 後は displayName も nil になる")
+    func testDisplayNameClearedAfterClear() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "shroud", displayName: "Shroud")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(userIds: ["111111"])
+        #expect(store.displayName(for: "111111") == "Shroud")
+
+        store.clear()
+
+        // 検証: クリア後は displayName も nil
+        #expect(store.displayName(for: "111111") == nil)
+    }
 }

@@ -1,23 +1,24 @@
 // EmotePickerViewModel.swift
 // エモートピッカー用 ViewModel
-// EmoteStore からエモート一覧を取得し、検索クエリに応じてフィルタリングする
+// EmoteStore からエモート一覧を取得し、チャンネルごとのセクションに分類してフィルタリングする
 
 import Foundation
 import Observation
 
 /// エモートピッカー用 ViewModel
 ///
-/// - `loadEmotes()` 呼び出しで EmoteStore から全エモートを取得する
-/// - `searchQuery` を変更すると即座に `filteredEmotes` がフィルタリングされる
-/// - フィルタリングは大文字小文字非区別の部分一致
+/// - `loadEmotes()` 呼び出しで EmoteStore から全エモートを取得し、チャンネルごとにセクション分けする
+/// - `searchQuery` を変更すると即座に `filteredSections` がフィルタリングされる
+/// - フィルタリングは大文字小文字非区別の部分一致（全セクションを横断）
+/// - セクション順: このチャンネル → 購読中の他チャンネル（API 取得順）→ HYPE → その他 → グローバル
 @Observable
 @MainActor
 final class EmotePickerViewModel {
 
     // MARK: - 公開プロパティ
 
-    /// フィルタリング済みエモート一覧（UI へのバインディング用）
-    private(set) var filteredEmotes: [HelixEmote] = []
+    /// フィルタリング済みセクション一覧（UI へのバインディング用）
+    private(set) var filteredSections: [EmotePickerSection] = []
 
     /// 検索クエリ（空文字の場合は全件表示）
     var searchQuery: String = "" {
@@ -29,15 +30,20 @@ final class EmotePickerViewModel {
 
     // MARK: - プライベートプロパティ
 
-    /// フィルタ前の全エモート一覧
-    private var allEmotes: [HelixEmote] = []
+    /// フィルタ前の全セクション一覧
+    private var allSections: [EmotePickerSection] = []
 
     /// エモート定義ストア
     private let emoteStore: EmoteStore
 
+    /// プロフィール画像・表示名ストア（セクションヘッダー用）
+    private let profileImageStore: ProfileImageStore
+
+    /// 現在視聴中のチャンネルの broadcaster_id
+    private let currentBroadcasterId: String?
+
     /// ユーザーが使用可能なエモートセット ID のスナップショット
     ///
-    /// `loadEmotes()` 呼び出し時に EmoteStore からスナップショットを取得する。
     /// - `nil`: USERSTATE 未受信（全エモートを使用可能として扱う）
     /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
     private var userEmoteSets: Set<String>?
@@ -51,24 +57,50 @@ final class EmotePickerViewModel {
 
     /// EmotePickerViewModel を初期化する
     ///
-    /// - Parameter emoteStore: エモート定義ストア
-    init(emoteStore: EmoteStore) {
+    /// - Parameters:
+    ///   - emoteStore: エモート定義ストア
+    ///   - profileImageStore: プロフィール画像・表示名ストア
+    ///   - currentBroadcasterId: 現在視聴中のチャンネルの broadcaster_id（未接続時は nil）
+    init(
+        emoteStore: EmoteStore,
+        profileImageStore: ProfileImageStore,
+        currentBroadcasterId: String?
+    ) {
         self.emoteStore = emoteStore
+        self.profileImageStore = profileImageStore
+        self.currentBroadcasterId = currentBroadcasterId
     }
 
     // MARK: - 公開メソッド
 
-    /// EmoteStore から全エモートを取得してフィルタを適用する
+    /// EmoteStore から全エモートを取得してセクションに分類し、フィルタを適用する
     ///
     /// グローバルエモートのフェッチを待ってからスナップショットを取得することで、
     /// 接続直後にピッカーを開いても「エモートが見つかりません」にならないようにする。
     /// ピッカーが表示されるタイミング（.task モディファイア）で呼び出す。
     func loadEmotes() async {
         await emoteStore.fetchGlobalEmotes()
-        allEmotes = await emoteStore.allEmotes()
+        let channel = await emoteStore.channelEmotesSnapshot()
+        let user    = await emoteStore.userEmotesSnapshot()
+        let global  = await emoteStore.globalEmotesSnapshot()
         userEmoteSets = await emoteStore.userAvailableEmoteSets()
-        userEmoteIds = await emoteStore.userEmoteIdSet()
+        userEmoteIds  = await emoteStore.userEmoteIdSet()
+
+        allSections = buildSections(channel: channel, user: user, global: global)
         applyFilter()
+
+        // ownerId からチャンネル名・アイコンを非同期で解決（ProfileImageStore が @Observable なので自動更新）
+        let ownerIds = allSections.compactMap { section -> String? in
+            switch section.kind {
+            case .subscribedChannel(let ownerId): return ownerId
+            case .currentChannel: return currentBroadcasterId
+            default: return nil
+            }
+        }
+        let uniqueOwnerIds = Array(Set(ownerIds))
+        if !uniqueOwnerIds.isEmpty {
+            Task { await self.profileImageStore.fetchUsers(userIds: uniqueOwnerIds) }
+        }
     }
 
     /// ピッカー表示中に USERSTATE が届いた場合にエモートの使用可否をリアルタイムで更新する
@@ -81,11 +113,14 @@ final class EmotePickerViewModel {
             await emoteStore.waitForNextUserEmoteSetsUpdate()
             guard !Task.isCancelled else { break }
             userEmoteSets = await emoteStore.userAvailableEmoteSets()
-            userEmoteIds = await emoteStore.userEmoteIdSet()
-            // allEmotes はエモート定義が変わった場合のみ更新（再フィルタコストを抑える）
-            let newAllEmotes = await emoteStore.allEmotes()
-            if newAllEmotes != allEmotes {
-                allEmotes = newAllEmotes
+            userEmoteIds  = await emoteStore.userEmoteIdSet()
+            // エモート定義が変わった場合のみセクションを再構築（再フィルタコストを抑える）
+            let channel = await emoteStore.channelEmotesSnapshot()
+            let user    = await emoteStore.userEmotesSnapshot()
+            let global  = await emoteStore.globalEmotesSnapshot()
+            let newSections = buildSections(channel: channel, user: user, global: global)
+            if newSections != allSections {
+                allSections = newSections
             }
             applyFilter()
         }
@@ -102,7 +137,6 @@ final class EmotePickerViewModel {
     /// - Parameter emote: 判定対象のエモート
     /// - Returns: 使用可能な場合は true
     func isAvailable(_ emote: HelixEmote) -> Bool {
-        // ユーザーエモートは /helix/chat/emotes/user から取得済みのため常に使用可能
         if userEmoteIds.contains(emote.id) { return true }
         guard let sets = userEmoteSets else { return true }
         guard let emoteSetId = emote.emoteSetId else { return true }
@@ -111,15 +145,126 @@ final class EmotePickerViewModel {
 
     // MARK: - プライベートメソッド
 
-    /// 現在の searchQuery に基づいて filteredEmotes を更新する
+    /// チャンネル / ユーザー / グローバルエモートからセクション配列を構築する
     ///
-    /// - 空クエリの場合は全件返す
-    /// - 大文字小文字を区別しない部分一致でフィルタリングする
+    /// - Parameters:
+    ///   - channel: チャンネルエモート一覧
+    ///   - user: ユーザーエモート一覧
+    ///   - global: グローバルエモート一覧
+    /// - Returns: 並び順が確定したセクション配列
+    private func buildSections(
+        channel: [HelixEmote],
+        user: [HelixEmote],
+        global: [HelixEmote]
+    ) -> [EmotePickerSection] {
+        var seen = Set<String>()
+        let classified = classifyEmotes(channel: channel, user: user, seen: &seen)
+        return assembleSections(classified: classified, global: global, seen: &seen)
+    }
+
+    /// エモートをセクション種別ごとに分類して中間構造を返す
+    ///
+    /// 分類ルール（優先順位）:
+    /// 1. `emoteType == "hypetrain"` → `hypeTrain` セクション
+    /// 2. `ownerId == currentBroadcasterId` → `currentChannel` セクション（channelEmotes 含む）
+    /// 3. `ownerId != nil` → `subscribedChannel(ownerId)` セクション（ビッツエモート含む）
+    /// 4. `ownerId == nil` かつ hypetrain 以外 → `other` セクション
+    private func classifyEmotes(
+        channel: [HelixEmote],
+        user: [HelixEmote],
+        seen: inout Set<String>
+    ) -> (currentChannel: [HelixEmote], hype: [HelixEmote],
+          subscribedOwnerIds: [String], subscribedByOwnerId: [String: [HelixEmote]],
+          other: [HelixEmote]) {
+        var currentChannelEmotes: [HelixEmote] = []
+        var hypeEmotes: [HelixEmote] = []
+        // ownerId → 出現順を保持するため OrderedDictionary の代わりに配列＋辞書で管理
+        var subscribedOwnerIds: [String] = []
+        var subscribedByOwnerId: [String: [HelixEmote]] = [:]
+        var otherEmotes: [HelixEmote] = []
+
+        for emote in channel where seen.insert(emote.id).inserted {
+            currentChannelEmotes.append(emote)
+        }
+        for emote in user where seen.insert(emote.id).inserted {
+            if emote.emoteType == "hypetrain" {
+                hypeEmotes.append(emote)
+            } else if let ownerId = emote.ownerId, ownerId == currentBroadcasterId {
+                currentChannelEmotes.append(emote)
+            } else if let ownerId = emote.ownerId {
+                if subscribedByOwnerId[ownerId] == nil { subscribedOwnerIds.append(ownerId) }
+                subscribedByOwnerId[ownerId, default: []].append(emote)
+            } else {
+                otherEmotes.append(emote)
+            }
+        }
+        return (currentChannelEmotes, hypeEmotes, subscribedOwnerIds, subscribedByOwnerId, otherEmotes)
+    }
+
+    /// 分類済みエモートから EmotePickerSection 配列を組み立てる（空セクションは除外）
+    private func assembleSections(
+        classified: (currentChannel: [HelixEmote], hype: [HelixEmote],
+                     subscribedOwnerIds: [String], subscribedByOwnerId: [String: [HelixEmote]],
+                     other: [HelixEmote]),
+        global: [HelixEmote],
+        seen: inout Set<String>
+    ) -> [EmotePickerSection] {
+        var sections: [EmotePickerSection] = []
+
+        if !classified.currentChannel.isEmpty {
+            sections.append(EmotePickerSection(
+                id: "current", kind: .currentChannel, title: "このチャンネル",
+                iconUserId: currentBroadcasterId, emotes: classified.currentChannel
+            ))
+        }
+        for ownerId in classified.subscribedOwnerIds {
+            let emotes = classified.subscribedByOwnerId[ownerId] ?? []
+            guard !emotes.isEmpty else { continue }
+            sections.append(EmotePickerSection(
+                id: "channel-\(ownerId)", kind: .subscribedChannel(ownerId: ownerId),
+                title: profileImageStore.displayName(for: ownerId) ?? ownerId,
+                iconUserId: ownerId, emotes: emotes
+            ))
+        }
+        if !classified.hype.isEmpty {
+            sections.append(EmotePickerSection(
+                id: "hype", kind: .hypeTrain, title: "HYPE", iconUserId: nil, emotes: classified.hype
+            ))
+        }
+        if !classified.other.isEmpty {
+            sections.append(EmotePickerSection(
+                id: "other", kind: .other, title: "その他", iconUserId: nil, emotes: classified.other
+            ))
+        }
+        let globalEmotes = global.filter { seen.insert($0.id).inserted }
+        if !globalEmotes.isEmpty {
+            sections.append(EmotePickerSection(
+                id: "global", kind: .global, title: "グローバル", iconUserId: nil, emotes: globalEmotes
+            ))
+        }
+        return sections
+    }
+
+    /// 現在の searchQuery に基づいて filteredSections を更新する
+    ///
+    /// - 空クエリの場合は全セクションを返す
+    /// - 大文字小文字を区別しない部分一致でエモート名をフィルタする
+    /// - ヒットするエモートが 0 件のセクションは除外する
     private func applyFilter() {
         guard !searchQuery.isEmpty else {
-            filteredEmotes = allEmotes
+            filteredSections = allSections
             return
         }
-        filteredEmotes = allEmotes.filter { $0.name.localizedCaseInsensitiveContains(searchQuery) }
+        filteredSections = allSections.compactMap { section in
+            let matched = section.emotes.filter { $0.name.localizedCaseInsensitiveContains(searchQuery) }
+            guard !matched.isEmpty else { return nil }
+            return EmotePickerSection(
+                id: section.id,
+                kind: section.kind,
+                title: section.title,
+                iconUserId: section.iconUserId,
+                emotes: matched
+            )
+        }
     }
 }

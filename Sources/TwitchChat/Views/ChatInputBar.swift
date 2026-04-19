@@ -13,6 +13,8 @@ import SwiftUI
 struct ChatInputBar: View {
     var viewModel: ChatViewModel
     var authState: AuthState
+    /// プロフィール画像・表示名ストア（エモートピッカーのセクションヘッダー用）
+    var profileImageStore: ProfileImageStore
 
     /// 入力テキスト（下書き）
     @State private var draft: String = ""
@@ -29,9 +31,10 @@ struct ChatInputBar: View {
     /// / スラッシュコマンド補完の状態管理 ViewModel
     @State private var slashCommandCompletionVM: SlashCommandCompletionViewModel
 
-    init(viewModel: ChatViewModel, authState: AuthState) {
+    init(viewModel: ChatViewModel, authState: AuthState, profileImageStore: ProfileImageStore) {
         self.viewModel = viewModel
         self.authState = authState
+        self.profileImageStore = profileImageStore
         self._mentionCompletionVM = State(
             initialValue: MentionCompletionViewModel(mentionStore: viewModel.mentionStore)
         )
@@ -151,7 +154,11 @@ struct ChatInputBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel("エモートピッカーを開く")
             .popover(isPresented: $showEmotePicker, arrowEdge: .bottom) {
-                EmotePickerView(emoteStore: viewModel.emoteStore) { emoteName in
+                EmotePickerView(
+                    emoteStore: viewModel.emoteStore,
+                    profileImageStore: profileImageStore,
+                    currentBroadcasterId: viewModel.currentRoomId
+                ) { emoteName in
                     insertEmote(emoteName)
                     showEmotePicker = false
                 }

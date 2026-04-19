@@ -65,7 +65,7 @@ struct ContentView: View {
                         }
                     )
                 } else if let viewModel = channelManager.selectedViewModel {
-                    ChatDetailView(viewModel: viewModel, authState: authState)
+                    ChatDetailView(viewModel: viewModel, authState: authState, profileImageStore: profileImageStore)
                 } else {
                     // タブ0個の初期状態: チャンネル名入力フォームを直接表示
                     ChannelSearchView(
