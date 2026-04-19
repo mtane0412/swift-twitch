@@ -174,10 +174,13 @@ final class EmotePickerViewModel {
     ///
     /// 分類ルール（優先順位）:
     /// 1. `emoteType == "hypetrain"` → `hypeTrain` セクション
-    /// 2. `ownerId == currentBroadcasterId` → `currentChannel` セクション（channelEmotes 含む）
-    /// 3. `ownerId != nil && ownerId != "0"` → `subscribedChannel(ownerId)` セクション（ビッツエモート含む）
-    /// 4. それ以外（`ownerId == nil` または `ownerId == "0"` かつ hypetrain 以外）→ global セクションに送る
+    /// 2. `emoteType == "globals"` → global セクションに送る（ownerId があっても優先）
+    /// 3. `ownerId == currentBroadcasterId` → `currentChannel` セクション（channelEmotes 含む）
+    /// 4. `ownerId != nil && ownerId != "0"` → `subscribedChannel(ownerId)` セクション（ビッツエモート含む）
+    /// 5. それ以外（`ownerId == nil` または `ownerId == "0"` かつ hypetrain 以外）→ global セクションに送る
     ///
+    /// - Note: `/helix/chat/emotes/user` は Kappa 等の globals タイプエモートを
+    ///   ownerId 付きで返すことがある。emoteType で先に判定して global に振り分ける。
     /// - Note: `owner_id: "0"` は Twitch 自身が所有するグローバル系エモートを示すため、
     ///   表示名を解決できないチャンネルセクションを作らず global にまとめる。
     private func classifyEmotes(
@@ -200,14 +203,17 @@ final class EmotePickerViewModel {
         for emote in user where seen.insert(emote.id).inserted {
             if emote.emoteType == "hypetrain" {
                 hypeEmotes.append(emote)
+            } else if emote.emoteType == "globals" {
+                // globals タイプは ownerId があっても global セクションへ送る
+                seen.remove(emote.id)
+                otherEmotes.append(emote)
             } else if let ownerId = emote.ownerId, ownerId == currentBroadcasterId {
                 currentChannelEmotes.append(emote)
             } else if let ownerId = emote.ownerId, ownerId != "0" {
                 if subscribedByOwnerId[ownerId] == nil { subscribedOwnerIds.append(ownerId) }
                 subscribedByOwnerId[ownerId, default: []].append(emote)
             } else {
-                // ownerId なしエモートは global セクションで処理するため seen から除外する
-                // （assembleSections で global スナップショットと合算して dedup する）
+                // ownerId なし / "0" エモートは global セクションで処理するため seen から除外する
                 seen.remove(emote.id)
                 otherEmotes.append(emote)
             }
