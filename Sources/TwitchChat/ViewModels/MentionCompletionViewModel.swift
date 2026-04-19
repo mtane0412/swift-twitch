@@ -125,7 +125,7 @@ final class MentionCompletionViewModel {
             return nil
         }
 
-        // 文字数ベースのインデックス（isWhitespace チェック用）
+        // Character 数インデックス（isWhitespace チェックおよび NSRange の location として使用）
         let atCharIndex = textUpToCursor.distance(from: textUpToCursor.startIndex, to: atRange.lowerBound)
 
         // @ の直前が空白または文頭であることを確認（メールアドレス等の誤検出防止）
@@ -144,16 +144,11 @@ final class MentionCompletionViewModel {
             return nil
         }
 
-        // Character 数オフセットを計算（nsViewRange が Character 数基準を期待するため）
-        let atCharLocation = textUpToCursor.distance(
-            from: textUpToCursor.startIndex,
-            to: atRange.lowerBound
-        )
-        // "@" は 1 Character、afterAt も Character 数で計算する
+        // "@" は 1 Character、afterAt も Character 数で計算する（atCharIndex を再利用）
         let tokenCharLength = 1 + afterAt.count
 
         return MentionTokenInfo(
-            atCharLocation: atCharLocation,
+            atCharLocation: atCharIndex,
             query: afterAt,
             tokenCharLength: tokenCharLength
         )
