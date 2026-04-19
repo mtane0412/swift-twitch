@@ -42,6 +42,11 @@ final class EmotePickerViewModel {
     /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
     private var userEmoteSets: Set<String>?
 
+    /// `/helix/chat/emotes/user` から取得したユーザーエモートの ID セット
+    ///
+    /// このセットに含まれるエモートは USERSTATE の emoteSetId チェックによらず常に使用可能。
+    private var userEmoteIds: Set<String> = []
+
     // MARK: - 初期化
 
     /// EmotePickerViewModel を初期化する
@@ -62,6 +67,7 @@ final class EmotePickerViewModel {
         await emoteStore.fetchGlobalEmotes()
         allEmotes = await emoteStore.allEmotes()
         userEmoteSets = await emoteStore.userAvailableEmoteSets()
+        userEmoteIds = await emoteStore.userEmoteIdSet()
         applyFilter()
     }
 
@@ -75,18 +81,29 @@ final class EmotePickerViewModel {
             await emoteStore.waitForNextUserEmoteSetsUpdate()
             guard !Task.isCancelled else { break }
             userEmoteSets = await emoteStore.userAvailableEmoteSets()
+            userEmoteIds = await emoteStore.userEmoteIdSet()
+            // allEmotes はエモート定義が変わった場合のみ更新（再フィルタコストを抑える）
+            let newAllEmotes = await emoteStore.allEmotes()
+            if newAllEmotes != allEmotes {
+                allEmotes = newAllEmotes
+            }
+            applyFilter()
         }
     }
 
     /// エモートがユーザーにとって使用可能かどうかを返す
     ///
-    /// - `userEmoteSets` が `nil`（USERSTATE 未受信）の場合は全て true
-    /// - `emote.emoteSetId` が nil の場合は安全側に倒して true
-    /// - それ以外は emoteSetId が userEmoteSets に含まれるか判定する
+    /// 判定優先順位:
+    /// 1. `/helix/chat/emotes/user` から取得したユーザーエモート ID に含まれる場合は常に true
+    /// 2. `userEmoteSets` が `nil`（USERSTATE 未受信）の場合は全て true
+    /// 3. `emote.emoteSetId` が nil の場合は安全側に倒して true
+    /// 4. それ以外は emoteSetId が userEmoteSets に含まれるか判定する
     ///
     /// - Parameter emote: 判定対象のエモート
     /// - Returns: 使用可能な場合は true
     func isAvailable(_ emote: HelixEmote) -> Bool {
+        // ユーザーエモートは /helix/chat/emotes/user から取得済みのため常に使用可能
+        if userEmoteIds.contains(emote.id) { return true }
         guard let sets = userEmoteSets else { return true }
         guard let emoteSetId = emote.emoteSetId else { return true }
         return sets.contains(emoteSetId)

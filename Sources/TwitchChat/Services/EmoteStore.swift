@@ -21,6 +21,9 @@ actor EmoteStore {
     /// Helix チャンネルエモートエンドポイント
     private static let helixChannelEmotesURL = URL(string: "https://api.twitch.tv/helix/chat/emotes")!
 
+    /// Helix ユーザーエモートエンドポイント
+    private static let helixUserEmotesURL = URL(string: "https://api.twitch.tv/helix/chat/emotes/user")!
+
     // MARK: - 状態
 
     /// グローバルエモート一覧
@@ -29,11 +32,22 @@ actor EmoteStore {
     /// チャンネルエモート一覧
     private var channelEmotes: [HelixEmote] = []
 
+    /// ユーザーが使用可能なエモート一覧（/helix/chat/emotes/user から取得）
+    ///
+    /// サブスクしている他チャンネルのエモート・ビッツエモート・Hypeトレインエモート等を含む。
+    private var userEmotes: [HelixEmote] = []
+
     /// グローバルエモート取得済みフラグ
     private var isGlobalLoaded = false
 
+    /// ユーザーエモート取得済みフラグ
+    private var isUserEmotesLoaded = false
+
     /// 進行中のグローバルエモートフェッチタスク（並行重複排除用）
     private var globalEmotesTask: Task<Void, Never>?
+
+    /// 進行中のユーザーエモートフェッチタスク（並行重複排除用）
+    private var userEmotesTask: Task<Void, Never>?
 
     /// Helix API クライアント
     private let apiClient: any HelixAPIClientProtocol
@@ -128,15 +142,77 @@ actor EmoteStore {
         }
     }
 
+    /// ユーザーが使用可能なエモート定義をフェッチする
+    ///
+    /// `/helix/chat/emotes/user` エンドポイントを使用してサブスク中の他チャンネルエモート、
+    /// ビッツエモート、Hypeトレインエモート等を取得する。cursor ベースのページネーションに対応。
+    ///
+    /// - Parameter userId: 認証済みユーザーの Twitch ユーザー ID（数字のみ）
+    ///
+    /// - Note: `user:read:emotes` スコープが必要。スコープ未付与の場合はスキップする。
+    /// トークン未設定（未ログイン）の場合もスキップする。
+    func fetchUserEmotes(userId: String) async {
+        // Twitch の user_id は ASCII 十進数のみで構成される（URLパラメータインジェクション対策）
+        guard !userId.isEmpty, userId.allSatisfy({ $0.isASCII && $0.isNumber }) else { return }
+        guard !isUserEmotesLoaded else { return }
+        // 進行中タスクがあれば完了を待って返す（TOCTOU 防止）
+        if let existing = userEmotesTask {
+            await existing.value
+            return
+        }
+        let task = Task {
+            /// ページネーションループの上限（無限ループ防止）
+            let maxPages = 100
+            var accumulated: [HelixEmote] = []
+            var cursor: String?
+            var pageCount = 0
+            do {
+                repeat {
+                    var queryItems: [URLQueryItem] = [URLQueryItem(name: "user_id", value: userId)]
+                    if let after = cursor {
+                        queryItems.append(URLQueryItem(name: "after", value: after))
+                    }
+                    let response: HelixUserEmotesResponse = try await self.apiClient.get(
+                        url: Self.helixUserEmotesURL,
+                        queryItems: queryItems
+                    )
+                    accumulated += response.data
+                    cursor = response.cursor.flatMap { $0.isEmpty ? nil : $0 }
+                    pageCount += 1
+                    if pageCount >= maxPages {
+                        assertionFailure("ユーザーエモートページネーションが上限 \(maxPages) ページに達しました")
+                        break
+                    }
+                } while cursor != nil
+                self.userEmotes = accumulated
+                self.isUserEmotesLoaded = true
+            } catch let error as URLError where error.code == .userAuthenticationRequired {
+                // 未ログイン・スコープ未付与時はスキップ
+            } catch let error as URLError where error.code == .cancelled {
+                // Task キャンセル（disconnect 等）による中断は正常系のためスキップ
+            } catch is CancellationError {
+                // Swift concurrency のキャンセル伝播は正常系のためスキップ
+            } catch is AuthConfigError {
+                // Client ID 未設定（開発環境・テスト実行時）は正常状態のためスキップ
+            } catch {
+                // 設定不備・サーバーエラー等の恒久エラーは診断できるよう記録する
+                assertionFailure("ユーザーエモートフェッチ失敗（userId: \(userId)）: \(error)")
+            }
+        }
+        userEmotesTask = task
+        await task.value
+        userEmotesTask = nil
+    }
+
     /// エモート名でエモートを検索する
     ///
-    /// チャンネルエモートを優先し、見つからない場合はグローバルエモートを検索する。
+    /// チャンネルエモートを優先し、次にユーザーエモート、最後にグローバルエモートを検索する。
     /// 大文字小文字を区別する完全一致で検索する（Twitch エモート名は大文字小文字を区別するため）。
     ///
     /// - Parameter name: エモート名（例: "LUL", "PogChamp"）
     /// - Returns: 見つかった HelixEmote、存在しない場合は nil
     func emote(byName name: String) -> HelixEmote? {
-        (channelEmotes + globalEmotes).first(where: { $0.name == name })
+        allEmotes().first(where: { $0.name == name })
     }
 
     /// テキスト内のエモート名を検索し、EmotePosition 配列を返す
@@ -149,7 +225,7 @@ actor EmoteStore {
     /// - Returns: 検出されたエモートの位置情報（startIndex 昇順）
     func emotePositions(in text: String) -> [EmotePosition] {
         guard !text.isEmpty else { return [] }
-        let allEmotes = channelEmotes + globalEmotes
+        let allEmotes = allEmotes()
         guard !allEmotes.isEmpty else { return [] }
 
         var positions: [EmotePosition] = []
@@ -187,10 +263,35 @@ actor EmoteStore {
 
     /// ピッカー用エモート一覧を返す
     ///
-    /// チャンネルエモートを先頭に、グローバルエモートをその後に並べて返す。
-    /// チャンネル固有エモートをより目立たせるための順序。
+    /// チャンネルエモート → ユーザーエモート → グローバルエモートの優先順で並べ、
+    /// ID ベースの重複排除を行って返す。
+    ///
+    /// - チャンネル固有エモートが最優先（現在視聴中チャンネル）
+    /// - ユーザーエモートはサブスク中の他チャンネル・ビッツ・Hype等
+    /// - グローバルエモートは最後尾
     func allEmotes() -> [HelixEmote] {
-        channelEmotes + globalEmotes
+        var seen = Set<String>()
+        var result: [HelixEmote] = []
+        for emote in channelEmotes where seen.insert(emote.id).inserted {
+            result.append(emote)
+        }
+        for emote in userEmotes where seen.insert(emote.id).inserted {
+            result.append(emote)
+        }
+        for emote in globalEmotes where seen.insert(emote.id).inserted {
+            result.append(emote)
+        }
+        return result
+    }
+
+    /// ユーザーエモートの ID セットを返す
+    ///
+    /// `EmotePickerViewModel` が使用可否を判定するために使用する。
+    /// `/helix/chat/emotes/user` から取得したエモートのIDのみ含む。
+    ///
+    /// - Returns: ユーザーエモートの ID の Set
+    func userEmoteIdSet() -> Set<String> {
+        Set(userEmotes.map(\.id))
     }
 
     /// ユーザーが使用可能なエモートセット ID を更新する
@@ -271,6 +372,23 @@ actor EmoteStore {
         globalEmotesTask = nil
     }
 
+    /// ユーザーエモートのキャッシュをクリアする
+    ///
+    /// disconnect / ログアウト時に呼び出すことで、前回接続時のエモートを持ち越さないようにする。
+    /// チャンネル切替時は呼び出し不要（ユーザーエモートはユーザースコープのため）。
+    func resetUserEmotes() {
+        userEmotes = []
+        isUserEmotesLoaded = false
+    }
+
+    /// 進行中のユーザーエモートフェッチタスクをキャンセルする
+    ///
+    /// disconnect 時に呼び出すことで、不要なネットワークリクエストを中断できる
+    func cancelUserEmotesFetch() {
+        userEmotesTask?.cancel()
+        userEmotesTask = nil
+    }
+
     // MARK: - テスト用メソッド
 
 #if DEBUG
@@ -283,6 +401,12 @@ actor EmoteStore {
     /// チャンネルエモート一覧を直接設定する（テスト用）
     func setChannelEmotes(_ emotes: [HelixEmote]) {
         channelEmotes = emotes
+    }
+
+    /// ユーザーエモート一覧を直接設定する（テスト用）
+    func setUserEmotes(_ emotes: [HelixEmote]) {
+        userEmotes = emotes
+        isUserEmotesLoaded = true
     }
 
     /// ユーザーエモートセットを直接設定する（テスト用）

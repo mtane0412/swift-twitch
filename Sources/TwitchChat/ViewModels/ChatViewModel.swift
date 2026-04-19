@@ -95,6 +95,11 @@ final class ChatViewModel {
     /// チャンネルエモートフェッチタスク（切断時にキャンセル）
     private var channelEmoteFetchTask: Task<Void, Never>?
 
+    /// ユーザーエモートフェッチタスク（切断時にキャンセル）
+    ///
+    /// ユーザーエモートはユーザースコープのため接続時に1回のみフェッチ（チャンネル切替時は再取得不要）
+    private var userEmoteFetchTask: Task<Void, Never>?
+
     /// NOTICE 受信ループタスク（切断時にキャンセル）
     private var noticeReceiveTask: Task<Void, Never>?
 
@@ -190,6 +195,12 @@ final class ChatViewModel {
         globalBadgeFetchTask = Task { await badgeStore.fetchGlobalBadges() }
         globalEmoteFetchTask = Task { await emoteStore.fetchGlobalEmotes() }
 
+        // ユーザーエモートを並行フェッチ（user:read:emotes スコープがある場合のみ）
+        // ユーザースコープのため接続時に1回のみ取得し、チャンネル切替時には再取得しない
+        if let userId = authState.userId, authState.canReadUserEmotes {
+            userEmoteFetchTask = Task { await emoteStore.fetchUserEmotes(userId: userId) }
+        }
+
         startStreamTasks()
 
         do {
@@ -278,11 +289,14 @@ final class ChatViewModel {
         channelBadgeFetchTask?.cancel()
         globalEmoteFetchTask?.cancel()
         channelEmoteFetchTask?.cancel()
+        userEmoteFetchTask?.cancel()
         // BadgeStore / EmoteStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
         await badgeStore.cancelGlobalFetch()
         await emoteStore.cancelGlobalFetch()
-        // disconnect 時にユーザーエモートセットをリセットし、前回接続の情報を持ち越さない
+        await emoteStore.cancelUserEmotesFetch()
+        // disconnect 時にユーザーエモートセット・ユーザーエモートをリセットし、前回接続の情報を持ち越さない
         await emoteStore.resetUserEmoteSets()
+        await emoteStore.resetUserEmotes()
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil

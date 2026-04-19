@@ -218,4 +218,53 @@ struct EmotePickerViewModelTests {
         // 検証: emoteSetId 不明なエモートは安全側に倒して使用可能
         #expect(viewModel.isAvailable(viewModel.filteredEmotes[0]) == true)
     }
+
+    // MARK: - ユーザーエモート使用可否判定
+
+    @Test("ユーザーエモートは emoteSetId が userEmoteSets に含まれなくても常に使用可能")
+    @MainActor
+    func testUserEmoteIsAlwaysAvailable() async throws {
+        // 前提: USERSTATE はグローバルセット "0" のみ（別チャンネルのセットは未保有）
+        // しかし /helix/chat/emotes/user から取得したエモートはサブスク済みのため使用可能
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([])
+        await store.setUserEmoteSets(Set(["0"]))
+        await store.setUserEmotes([
+            HelixEmote(id: "user_sub_1", name: "別チャンネルSub", format: ["static"], emoteType: "subscriptions", emoteSetId: "999999")
+        ])
+
+        let viewModel = EmotePickerViewModel(emoteStore: store)
+        await viewModel.loadEmotes()
+
+        // 検証: ユーザーエモートは userEmoteSets に関係なく使用可能
+        let targetEmote = try #require(
+            viewModel.filteredEmotes.first(where: { $0.name == "別チャンネルSub" }),
+            "テスト対象エモートが filteredEmotes に見つかりません"
+        )
+        #expect(viewModel.isAvailable(targetEmote) == true)
+    }
+
+    @Test("ユーザーエモートでないチャンネルエモートは従来通り emoteSetId で判定する")
+    @MainActor
+    func testNonUserEmoteUsesEmoteSetIdCheck() async throws {
+        // 前提: チャンネルエモートだが userEmotes には含まれていない（未サブスク）
+        // グローバルセット "0" のみ保持
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([])
+        await store.setUserEmoteSets(Set(["0"]))
+        await store.setChannelEmotes([
+            HelixEmote(id: "ch_unsub", name: "未サブスクエモート", format: ["static"], emoteType: "subscriptions", emoteSetId: "55555")
+        ])
+        // ユーザーエモートは空（このチャンネルにはサブスクしていない）
+
+        let viewModel = EmotePickerViewModel(emoteStore: store)
+        await viewModel.loadEmotes()
+
+        // 検証: ユーザーエモートでないエモートは emoteSetId チェックが適用される
+        let targetEmote = try #require(
+            viewModel.filteredEmotes.first(where: { $0.name == "未サブスクエモート" }),
+            "テスト対象エモートが filteredEmotes に見つかりません"
+        )
+        #expect(viewModel.isAvailable(targetEmote) == false)
+    }
 }
