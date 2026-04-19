@@ -43,7 +43,7 @@ actor EmoteStore {
     /// USERSTATE の `emote-sets` タグから更新される。
     /// - `nil`: USERSTATE 未受信（全エモートを使用可能として扱う）
     /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
-    private var userEmoteSets: Set<String>? = nil
+    private var userEmoteSets: Set<String>?
 
     // MARK: - 初期化
 

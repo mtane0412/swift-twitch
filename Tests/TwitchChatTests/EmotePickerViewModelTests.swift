@@ -131,7 +131,8 @@ struct EmotePickerViewModelTests {
     @Test("userEmoteSets が nil の場合（USERSTATE 未受信）は全エモートが使用可能")
     @MainActor
     func testIsAvailableWhenUserEmoteSetsNil() async {
-        // 前提: USERSTATE を受信していない状態（userEmoteSets が nil）
+        // 前提: USERSTATE を受信していない状態（updateUserEmoteSets を一度も呼んでいない）
+        // setGlobalEmotes を先に呼んで isGlobalLoaded=true にし、API 呼び出しをスキップする
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
         await store.setGlobalEmotes([
             HelixEmote(id: "1", name: "LUL", format: ["static"], emoteType: "globals", emoteSetId: "0"),
@@ -141,7 +142,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(emoteStore: store)
         await viewModel.loadEmotes()
 
-        // 検証: USERSTATE 未受信時は全エモートが使用可能
+        // 検証: USERSTATE 未受信（userEmoteSets が nil）のため全エモートが使用可能
         #expect(viewModel.isAvailable(viewModel.filteredEmotes[0]) == true)
         #expect(viewModel.isAvailable(viewModel.filteredEmotes[1]) == true)
     }
@@ -167,7 +168,9 @@ struct EmotePickerViewModelTests {
     @MainActor
     func testIsAvailableSubscriptionEmoteNotSubscribed() async {
         // 前提: グローバルセット "0" のみ保持している（未サブスク視聴者）
+        // setGlobalEmotes を先に呼んで isGlobalLoaded=true にし、API 呼び出しをスキップする
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([])
         await store.setUserEmoteSets(Set(["0"]))
         await store.setChannelEmotes([
             HelixEmote(id: "2", name: "配信者サブスクエモート", format: ["static"], emoteType: "subscriptions", emoteSetId: "12345")
@@ -184,7 +187,9 @@ struct EmotePickerViewModelTests {
     @MainActor
     func testIsAvailableSubscriptionEmoteSubscribed() async {
         // 前提: チャンネルのエモートセット "12345" を保持している（サブスク済み視聴者）
+        // setGlobalEmotes を先に呼んで isGlobalLoaded=true にし、API 呼び出しをスキップする
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([])
         await store.setUserEmoteSets(Set(["0", "12345"]))
         await store.setChannelEmotes([
             HelixEmote(id: "2", name: "配信者サブスクエモート", format: ["static"], emoteType: "subscriptions", emoteSetId: "12345")
