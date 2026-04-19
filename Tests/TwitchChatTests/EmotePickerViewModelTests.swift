@@ -752,14 +752,13 @@ struct EmotePickerViewModelTests {
         #expect(globalSection?.emotes.contains(where: { $0.id == emptyOwnerEmote.id }) == true)
     }
 
-    @Test("API にユーザーが存在しない ownerId のエモートは global セクションに分類される（数字 ID のセクションを作らない）")
+    @Test("API がユーザーを返さない ownerId のエモートは subscribedChannel セクションに分類され ownerId が仮タイトルになる")
     @MainActor
-    func testUnresolvableOwnerIdGoesToGlobalSection() async {
+    func testUnresolvableOwnerIdCreatesSubscribedSectionWithOwnerIdTitle() async {
         // 前提: ownerId "784555479" を持つエモート、モック API がユーザーを返さない
         let mockClient = MockProfileImageAPIClient()
-        await mockClient.setUsers([]) // API はユーザーを返さない（存在しない broadcaster ID）
+        await mockClient.setUsers([]) // API はユーザーを返さない
 
-        // stubbedEmotes: [] でグローバルエモートエンドポイントが空配列を返すように設定
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
         await store.setUserEmotes([
             HelixEmote(
@@ -780,15 +779,19 @@ struct EmotePickerViewModelTests {
 
         await viewModel.loadEmotes()
 
-        // 検証: subscribedChannel セクションが作成されないこと
+        // 検証: subscribedChannel セクションが作成されること（API が返さなくても誤分類しない）
         let subscribedSection = viewModel.filteredSections.first {
-            if case .subscribedChannel = $0.kind { return true }
+            if case .subscribedChannel(let id) = $0.kind { return id == "784555479" }
             return false
         }
-        #expect(subscribedSection == nil)
+        #expect(subscribedSection != nil)
 
-        // 検証: emote が global セクションに含まれること（数字 ID のセクションに隔離されない）
+        // 検証: タイトルが ownerId にフォールバックしていること（displayName / login 未取得のため）
+        #expect(subscribedSection?.title == "784555479")
+        #expect(subscribedSection?.emotes.contains(where: { $0.id == "emote_unknown_owner" }) == true)
+
+        // 検証: global セクションにはそのエモートが含まれていないこと
         let globalSection = viewModel.filteredSections.first(where: { $0.kind == .global })
-        #expect(globalSection?.emotes.contains(where: { $0.id == "emote_unknown_owner" }) == true)
+        #expect(globalSection?.emotes.contains(where: { $0.id == "emote_unknown_owner" }) != true)
     }
 }

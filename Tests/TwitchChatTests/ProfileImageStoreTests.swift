@@ -392,4 +392,57 @@ struct ProfileImageStoreTests {
         // 検証: クリア後は displayName も nil
         #expect(store.displayName(for: "111111") == nil)
     }
+
+    // MARK: - login(for:) - userId からログイン名取得
+
+    @Test("fetchUsers(userIds:) 後に login(for:) でログイン名を取得できる")
+    func testLoginForUserIdAfterFetch() async {
+        // 前提: userId "784555479" のユーザーを API が返す
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "784555479", login: "yoshiox_ch", displayName: "よしおっくす", profileImageUrl: nil)
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(userIds: ["784555479"])
+
+        // 検証: userId → login が取得できる
+        #expect(store.login(for: "784555479") == "yoshiox_ch")
+    }
+
+    @Test("未フェッチの userId に対して login(for:) は nil を返す")
+    func testLoginForUserIdReturnsNilWhenNotFetched() {
+        let store = ProfileImageStore(apiClient: MockProfileImageAPIClient())
+
+        #expect(store.login(for: "784555479") == nil)
+    }
+
+    @Test("fetchUsers(logins:) 後も login(for:) でログイン名を取得できる")
+    func testLoginForUserIdAfterLoginFetch() async {
+        // login でフェッチした場合も userId → login マッピングが作られること
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "537206155", login: "another_ch", displayName: "AnotherChannel", profileImageUrl: nil)
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        await store.fetchUsers(logins: ["another_ch"])
+
+        #expect(store.login(for: "537206155") == "another_ch")
+    }
+
+    @Test("clear() 後は login(for:) も nil になる")
+    func testLoginClearedAfterClear() async {
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "111111", login: "shroud", displayName: "Shroud")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+        await store.fetchUsers(userIds: ["111111"])
+        #expect(store.login(for: "111111") == "shroud")
+
+        store.clear()
+
+        #expect(store.login(for: "111111") == nil)
+    }
 }

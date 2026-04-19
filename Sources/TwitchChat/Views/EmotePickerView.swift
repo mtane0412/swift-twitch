@@ -110,8 +110,8 @@ private struct EmoteSectionHeader: View {
                 .clipShape(Circle())
             }
 
-            // ProfileImageStore から displayName を body 内で直接参照して @Observable 追跡を確実にする
-            Text(section.iconUserId.flatMap { profileImageStore.displayName(for: $0) } ?? section.title)
+            // displayName → login → section.title の順でヘッダーテキストを決定する（@Observable で自動更新）
+            Text(section.iconUserId.flatMap { profileImageStore.displayName(for: $0) ?? profileImageStore.login(for: $0) } ?? section.title)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
