@@ -10,8 +10,7 @@ import Foundation
 /// - `currentChannel`: 現在視聴中のチャンネルのエモート
 /// - `subscribedChannel`: 購読中の他チャンネルのエモート（ビッツエモートを含む）
 /// - `hypeTrain`: ハイプトレインエモート（チャンネル横断の HYPE 枠）
-/// - `other`: ownerId を持たないその他の特殊エモート（リワード・プライム等）
-/// - `global`: Twitch グローバルエモート
+/// - `global`: Twitch グローバルエモート（ownerId なし特殊エモートを含む）
 struct EmotePickerSection: Identifiable, Equatable, Sendable {
 
     // MARK: - セクション種別
@@ -24,9 +23,7 @@ struct EmotePickerSection: Identifiable, Equatable, Sendable {
         case subscribedChannel(ownerId: String)
         /// ハイプトレインエモート（チャンネル横断の HYPE 枠）
         case hypeTrain
-        /// ownerId を持たないその他の特殊エモート（リワード・プライム・ターボ等）
-        case other
-        /// Twitch グローバルエモート
+        /// Twitch グローバルエモート（リワード・プライム等の ownerId なしエモートを含む）
         case global
     }
 
@@ -37,7 +34,6 @@ struct EmotePickerSection: Identifiable, Equatable, Sendable {
     /// - `currentChannel`: "current"
     /// - `subscribedChannel(ownerId)`: "channel-{ownerId}"
     /// - `hypeTrain`: "hype"
-    /// - `other`: "other"
     /// - `global`: "global"
     let id: String
 

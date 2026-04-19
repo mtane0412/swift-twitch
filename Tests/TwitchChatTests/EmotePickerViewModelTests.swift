@@ -177,10 +177,10 @@ struct EmotePickerViewModelTests {
         #expect(subSections.allSatisfy { !$0.emotes.contains(where: { $0.id == hypeEmote.id }) })
     }
 
-    @Test("ownerId が nil かつ hypetrain でないエモートは other セクションに分類される")
+    @Test("ownerId が nil かつ hypetrain でないエモートは global セクションにまとめられる")
     @MainActor
-    func testEmotesWithNilOwnerIdGoToOtherSection() async {
-        // 前提: ownerId なしのエモート
+    func testEmotesWithNilOwnerIdGoToGlobalSection() async {
+        // 前提: ownerId なしのエモート（リワード等）
         let rewardEmote = HelixEmote(
             id: "reward_1",
             name: "チャンネルポイントエモート",
@@ -192,13 +192,14 @@ struct EmotePickerViewModelTests {
 
         await viewModel.loadEmotes()
 
-        // 検証: other セクションにエモートが入る
-        let otherSection = viewModel.filteredSections.first(where: { $0.kind == .other })
-        #expect(otherSection != nil)
-        #expect(otherSection?.emotes.contains(where: { $0.id == rewardEmote.id }) == true)
+        // 検証: global セクションに ownerId なしエモートがまとめられる（other セクションは生成されない）
+        let globalSection = viewModel.filteredSections.first(where: { $0.kind == .global })
+        #expect(globalSection != nil)
+        #expect(globalSection?.emotes.contains(where: { $0.id == rewardEmote.id }) == true)
+        #expect(viewModel.filteredSections.count == 1)
     }
 
-    @Test("セクションの並び順は currentChannel → subscribedChannel → hypeTrain → other → global")
+    @Test("セクションの並び順は currentChannel → subscribedChannel → hypeTrain → global")
     @MainActor
     func testSectionOrdering() async {
         // 前提: 全種類のセクションが生成される組み合わせ
@@ -215,10 +216,11 @@ struct EmotePickerViewModelTests {
 
         await viewModel.loadEmotes()
 
-        // 検証: セクションが正しい順序で並ぶ（currentChannel → subscribedChannel → hypeTrain → other → global）
+        // 検証: セクションが正しい順序で並ぶ（currentChannel → subscribedChannel → hypeTrain → global）
+        // ownerId なしエモートは global セクションにまとめられる
         let kinds = viewModel.filteredSections.map(\.kind)
-        guard kinds.count == 5 else {
-            Issue.record("セクション数が期待値と異なります（期待: 5, 実際: \(kinds.count)）")
+        guard kinds.count == 4 else {
+            Issue.record("セクション数が期待値と異なります（期待: 4, 実際: \(kinds.count)）")
             return
         }
         #expect(kinds[0] == .currentChannel)
@@ -226,8 +228,7 @@ struct EmotePickerViewModelTests {
             Issue.record("2番目のセクションが subscribedChannel ではありません: \(kinds[1])")
         }
         #expect(kinds[2] == .hypeTrain)
-        #expect(kinds[3] == .other)
-        #expect(kinds[4] == .global)
+        #expect(kinds[3] == .global)
     }
 
     @Test("同じ ID のエモートはセクション間で重複しない")

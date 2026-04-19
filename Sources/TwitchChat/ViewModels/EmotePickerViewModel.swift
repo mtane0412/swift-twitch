@@ -195,6 +195,9 @@ final class EmotePickerViewModel {
                 if subscribedByOwnerId[ownerId] == nil { subscribedOwnerIds.append(ownerId) }
                 subscribedByOwnerId[ownerId, default: []].append(emote)
             } else {
+                // ownerId なしエモートは global セクションで処理するため seen から除外する
+                // （assembleSections で global スナップショットと合算して dedup する）
+                seen.remove(emote.id)
                 otherEmotes.append(emote)
             }
         }
@@ -231,12 +234,8 @@ final class EmotePickerViewModel {
                 id: "hype", kind: .hypeTrain, title: "HYPE", iconUserId: nil, emotes: classified.hype
             ))
         }
-        if !classified.other.isEmpty {
-            sections.append(EmotePickerSection(
-                id: "other", kind: .other, title: "その他", iconUserId: nil, emotes: classified.other
-            ))
-        }
-        let globalEmotes = global.filter { seen.insert($0.id).inserted }
+        // ownerId なし特殊エモート（リワード・プライム等）は global セクションにまとめて常に末尾に配置する
+        let globalEmotes = (classified.other + global).filter { seen.insert($0.id).inserted }
         if !globalEmotes.isEmpty {
             sections.append(EmotePickerSection(
                 id: "global", kind: .global, title: "グローバル", iconUserId: nil, emotes: globalEmotes
