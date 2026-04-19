@@ -88,19 +88,7 @@ final class EmotePickerViewModel {
 
         allSections = buildSections(channel: channel, user: user, global: global)
         applyFilter()
-
-        // ownerId からチャンネル名・アイコンを非同期で解決（ProfileImageStore が @Observable なので自動更新）
-        let ownerIds = allSections.compactMap { section -> String? in
-            switch section.kind {
-            case .subscribedChannel(let ownerId): return ownerId
-            case .currentChannel: return currentBroadcasterId
-            default: return nil
-            }
-        }
-        let uniqueOwnerIds = Array(Set(ownerIds))
-        if !uniqueOwnerIds.isEmpty {
-            Task { await self.profileImageStore.fetchUsers(userIds: uniqueOwnerIds) }
-        }
+        scheduleOwnerDisplayNameFetch(for: allSections)
     }
 
     /// ピッカー表示中に USERSTATE が届いた場合にエモートの使用可否をリアルタイムで更新する
@@ -121,6 +109,8 @@ final class EmotePickerViewModel {
             let newSections = buildSections(channel: channel, user: user, global: global)
             if newSections != allSections {
                 allSections = newSections
+                // 新規セクションの ownerId に対して表示名・アイコンを解決する
+                scheduleOwnerDisplayNameFetch(for: allSections)
             }
             applyFilter()
         }
@@ -145,6 +135,24 @@ final class EmotePickerViewModel {
 
     // MARK: - プライベートメソッド
 
+    /// セクション内の subscribedChannel / currentChannel の ownerId に対して
+    /// ProfileImageStore の表示名・アイコンフェッチを非同期でスケジュールする
+    ///
+    /// ProfileImageStore は内部でキャッシュ済み ID をスキップするため、
+    /// 重複フェッチは発生しない。
+    private func scheduleOwnerDisplayNameFetch(for sections: [EmotePickerSection]) {
+        let ownerIds = sections.compactMap { section -> String? in
+            switch section.kind {
+            case .subscribedChannel(let ownerId): return ownerId
+            case .currentChannel: return currentBroadcasterId
+            default: return nil
+            }
+        }
+        let uniqueOwnerIds = Array(Set(ownerIds))
+        guard !uniqueOwnerIds.isEmpty else { return }
+        Task { await self.profileImageStore.fetchUsers(userIds: uniqueOwnerIds) }
+    }
+
     /// チャンネル / ユーザー / グローバルエモートからセクション配列を構築する
     ///
     /// - Parameters:
@@ -167,8 +175,11 @@ final class EmotePickerViewModel {
     /// 分類ルール（優先順位）:
     /// 1. `emoteType == "hypetrain"` → `hypeTrain` セクション
     /// 2. `ownerId == currentBroadcasterId` → `currentChannel` セクション（channelEmotes 含む）
-    /// 3. `ownerId != nil` → `subscribedChannel(ownerId)` セクション（ビッツエモート含む）
-    /// 4. `ownerId == nil` かつ hypetrain 以外 → `other` セクション
+    /// 3. `ownerId != nil && ownerId != "0"` → `subscribedChannel(ownerId)` セクション（ビッツエモート含む）
+    /// 4. それ以外（`ownerId == nil` または `ownerId == "0"` かつ hypetrain 以外）→ global セクションに送る
+    ///
+    /// - Note: `owner_id: "0"` は Twitch 自身が所有するグローバル系エモートを示すため、
+    ///   表示名を解決できないチャンネルセクションを作らず global にまとめる。
     private func classifyEmotes(
         channel: [HelixEmote],
         user: [HelixEmote],
@@ -191,7 +202,7 @@ final class EmotePickerViewModel {
                 hypeEmotes.append(emote)
             } else if let ownerId = emote.ownerId, ownerId == currentBroadcasterId {
                 currentChannelEmotes.append(emote)
-            } else if let ownerId = emote.ownerId {
+            } else if let ownerId = emote.ownerId, ownerId != "0" {
                 if subscribedByOwnerId[ownerId] == nil { subscribedOwnerIds.append(ownerId) }
                 subscribedByOwnerId[ownerId, default: []].append(emote)
             } else {
