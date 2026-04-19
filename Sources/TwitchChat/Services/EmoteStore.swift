@@ -182,6 +182,9 @@ actor EmoteStore {
                         queryItems: queryItems
                     )
                     accumulated += response.data
+                    // ページ取得ごとにピッカーを段階更新して最初のページから即座に表示する
+                    self.userEmotes = accumulated
+                    self.notifyUserEmoteSetsUpdated()
                     cursor = response.cursor.flatMap { $0.isEmpty ? nil : $0 }
                     pageCount += 1
                     if pageCount >= maxPages {
@@ -189,12 +192,10 @@ actor EmoteStore {
                         break
                     }
                 } while cursor != nil
-                self.userEmotes = accumulated
+                // 全ページ完了後に再フェッチ防止フラグを立てる
                 self.isUserEmotesLoaded = true
-                // ユーザーエモートのロード完了をピッカーに通知する
-                self.notifyUserEmoteSetsUpdated()
                 #if DEBUG
-                print("[EmoteStore] fetchUserEmotes: フェッチ完了 \(accumulated.count)件")
+                print("[EmoteStore] fetchUserEmotes: フェッチ完了 \(accumulated.count)件（\(pageCount)ページ）")
                 #endif
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン・スコープ未付与時はスキップ
