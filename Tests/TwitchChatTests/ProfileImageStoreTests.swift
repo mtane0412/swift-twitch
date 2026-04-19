@@ -63,6 +63,53 @@ actor MockProfileImageAPIClient: HelixAPIClientProtocol {
     }
 }
 
+/// フェッチを一時停止・再開できる Helix API クライアントモック（インフライト待機テスト専用）
+private actor ControllableMockAPIClient: HelixAPIClientProtocol {
+    var usersToReturn: [HelixUserData] = []
+    private var fetchContinuation: CheckedContinuation<Void, Never>?
+    /// get() が API を呼び出してブロック中の場合 true
+    private(set) var isFetching = false
+
+    func setUsers(_ users: [HelixUserData]) { usersToReturn = users }
+
+    /// ブロックしている get() 呼び出しを再開する
+    func resume() {
+        fetchContinuation?.resume()
+        fetchContinuation = nil
+    }
+
+    func get<T: Decodable & Sendable>(url: URL, queryItems: [URLQueryItem]?) async throws -> T {
+        // 最初の呼び出しは resume() が来るまでブロックする
+        isFetching = true
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            fetchContinuation = cont
+        }
+        isFetching = false
+        let requestedIds = queryItems?.filter { $0.name == "id" }.compactMap(\.value) ?? []
+        let filtered = usersToReturn.filter { requestedIds.contains($0.id) }
+        guard let result = HelixUsersResponse(data: filtered) as? T else {
+            throw URLError(.badServerResponse)
+        }
+        return result
+    }
+
+    func post<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws -> T { throw URLError(.badServerResponse) }
+
+    func postNoContent<Body: Encodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws { throw URLError(.badServerResponse) }
+
+    func patch<Body: Encodable & Sendable>(
+        url: URL, queryItems: [URLQueryItem]?, body: Body
+    ) async throws { throw URLError(.badServerResponse) }
+
+    func delete(url: URL, queryItems: [URLQueryItem]?) async throws {
+        throw URLError(.badServerResponse)
+    }
+}
+
 // MARK: - テストデータファクトリ
 
 /// テスト用ユーザーデータを生成する
@@ -444,5 +491,39 @@ struct ProfileImageStoreTests {
         store.clear()
 
         #expect(store.login(for: "111111") == nil)
+    }
+
+    // MARK: - インフライト ID の待機
+
+    @Test("フェッチ中の ID を再要求すると完了まで待機して displayName を取得できる")
+    func testFetchUsersWaitsForInflightAndReturnsDisplayName() async {
+        // 前提: モックは最初の get() 呼び出しを resume() されるまでブロックする
+        let mockClient = ControllableMockAPIClient()
+        await mockClient.setUsers([
+            makeHelixUser(id: "784555479", login: "yoshiox_ch", displayName: "よしおっくす")
+        ])
+        let store = ProfileImageStore(apiClient: mockClient)
+
+        // バックグラウンドでフェッチ開始（モックがブロックするので API 呼び出しで停止する）
+        let backgroundTask = Task { await store.fetchUsers(userIds: ["784555479"]) }
+
+        // バックグラウンドタスクが API を呼ぶ（= inFlightUserIds に追加される）まで待つ
+        while !(await mockClient.isFetching) { await Task.yield() }
+
+        // モックを解放するタスク（デッドロック防止のため並行実行）
+        let resumeTask = Task {
+            await Task.yield()
+            await mockClient.resume()
+        }
+
+        // 同じ ID を再要求する
+        // 現行実装: インフライト ID をスキップして即座に返る（displayName は nil）
+        // 修正後: インフライト完了を待ってから返る（displayName は "よしおっくす"）
+        await store.fetchUsers(userIds: ["784555479"])
+
+        // この時点で displayName が確実に取得できていること
+        #expect(store.displayName(for: "784555479") == "よしおっくす")
+
+        _ = await (backgroundTask.value, resumeTask.value)
     }
 }

@@ -124,16 +124,23 @@ final class ProfileImageStore {
         // fetchedUserIds でフェッチ済み（URL が nil のユーザーを含む）を除外し、
         // @MainActor の await サスペンション中に別タスクが同じ ID を重複リクエストする問題を防ぐ
         let newUserIds = userIds.filter { !fetchedUserIds.contains($0) && !inFlightUserIds.contains($0) }
-        guard !newUserIds.isEmpty else { return }
 
-        // フェッチ中フラグを設定し、完了後に必ず解除する
-        inFlightUserIds.formUnion(newUserIds)
-        defer { inFlightUserIds.subtract(newUserIds) }
+        if !newUserIds.isEmpty {
+            // フェッチ中フラグを設定し、完了後に必ず解除する
+            inFlightUserIds.formUnion(newUserIds)
+            defer { inFlightUserIds.subtract(newUserIds) }
 
-        // Helix API の100件制限に合わせてチャンク分割してリクエスト
-        let chunks = newUserIds.chunked(into: Self.maxIdsPerRequest)
-        for chunk in chunks {
-            await fetchChunk(userIds: chunk)
+            // Helix API の100件制限に合わせてチャンク分割してリクエスト
+            let chunks = newUserIds.chunked(into: Self.maxIdsPerRequest)
+            for chunk in chunks {
+                await fetchChunk(userIds: chunk)
+            }
+        }
+
+        // 並行タスクがフェッチ中の ID がある場合はそれらの完了を待つ
+        // これにより呼び出し元は fetchUsers 返却後に確実に displayName を参照できる
+        while userIds.contains(where: { inFlightUserIds.contains($0) }) {
+            await Task.yield()
         }
     }
 
