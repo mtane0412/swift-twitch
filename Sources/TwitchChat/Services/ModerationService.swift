@@ -109,9 +109,13 @@ actor ModerationService: ModerationServiceProtocol {
     /// - Returns: Twitch ユーザー ID
     /// - Throws: `HelixAPIError.notFound` ユーザーが存在しない場合
     private func resolveUserId(login: String) async throws -> String {
+        // Twitch ユーザー名は英数字小文字のため、大文字混在や前後空白を正規化する
+        let normalizedLogin = login
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         let response: HelixUsersResponse = try await apiClient.get(
             url: Self.usersURL,
-            queryItems: [URLQueryItem(name: "login", value: login)]
+            queryItems: [URLQueryItem(name: "login", value: normalizedLogin)]
         )
         guard let user = response.data.first else {
             throw HelixAPIError.notFound

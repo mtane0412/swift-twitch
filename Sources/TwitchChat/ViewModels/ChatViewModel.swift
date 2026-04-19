@@ -299,8 +299,10 @@ final class ChatViewModel {
         if currentRoomId == nil {
             currentRoomId = message.roomId
         }
-        // @メンション補完の候補リストを更新する
-        mentionStore.recordUser(username: message.username, displayName: message.displayName)
+        // @メンション補完の候補リストを更新する（システム通知は空ユーザー名なので除外する）
+        if !message.username.isEmpty {
+            mentionStore.recordUser(username: message.username, displayName: message.displayName)
+        }
         messages.append(message)
         if messages.count > Self.maxMessages {
             messages.removeFirst(messages.count - Self.maxMessages)
@@ -480,7 +482,7 @@ final class ChatViewModel {
         case .slow(let seconds): return "スローモードを有効にしました（\(seconds ?? 30)秒）"
         case .slowOff: return "スローモードを無効にしました"
         case .subscribers(let enabled): return enabled ? "サブスクライバーモードを有効にしました" : "サブスクライバーモードを無効にしました"
-        case .followers(let duration): return duration.map { "フォロワーモードを有効にしました（\($0)日）" } ?? "フォロワーモードを有効にしました"
+        case .followers(let duration): return duration.map { "フォロワーモードを有効にしました（\($0)分）" } ?? "フォロワーモードを有効にしました"
         case .followersOff: return "フォロワーモードを無効にしました"
         case .uniqueChat(let enabled): return enabled ? "ユニークチャットモードを有効にしました" : "ユニークチャットモードを無効にしました"
         case .clear: return "チャットをクリアしました"

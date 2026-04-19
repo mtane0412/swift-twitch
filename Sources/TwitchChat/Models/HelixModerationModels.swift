@@ -73,10 +73,15 @@ struct HelixChatSettingsRequest: Encodable, Sendable {
     }
 
     /// slow_mode のみ設定するイニシャライザ
+    ///
+    /// - Parameter waitTime: スローモード待機秒数。Helix API の有効範囲は 3〜120 秒。
+    ///   指定がない場合はデフォルトの 30 秒を使用する。範囲外の値は自動的にクランプする
     static func slow(enabled: Bool, waitTime: Int?) -> Self {
-        Self(
+        // Helix API の slow_mode_wait_time は 3〜120 秒に制限されている
+        let clampedWaitTime = enabled ? max(3, min(120, waitTime ?? 30)) : nil
+        return Self(
             emoteMode: nil,
-            slowMode: enabled, slowModeWaitTime: enabled ? (waitTime ?? 30) : nil,
+            slowMode: enabled, slowModeWaitTime: clampedWaitTime,
             subscriberMode: nil,
             followerMode: nil, followerModeDuration: nil,
             uniqueChatMode: nil

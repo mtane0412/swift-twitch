@@ -58,11 +58,11 @@ enum ChatCommandParser {
         switch commandName {
         case "emoteonly":   return .emoteOnly(enabled: true)
         case "emoteonlyoff": return .emoteOnly(enabled: false)
-        case "slow":        return .slow(seconds: parseOptionalInt(from: args))
+        case "slow":        return parseOptionalIntCommand(args: args, commandName: commandName) { .slow(seconds: $0) }
         case "slowoff":     return .slowOff
         case "subscribers": return .subscribers(enabled: true)
         case "subscribersoff": return .subscribers(enabled: false)
-        case "followers":   return .followers(duration: parseOptionalInt(from: args))
+        case "followers":   return parseOptionalIntCommand(args: args, commandName: commandName) { .followers(duration: $0) }
         case "followersoff": return .followersOff
         case "uniquechat":  return .uniqueChat(enabled: true)
         case "uniquechatoff": return .uniqueChat(enabled: false)
@@ -95,9 +95,10 @@ enum ChatCommandParser {
     private static func parseBan(args: String) -> ChatCommand {
         let trimmed = args.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return .unknown(command: "ban", args: args) }
-        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+        // 空要素を除外して分割し、連続する空白でも正しくパースする
+        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
         let username = String(parts[0])
-        let reason = parts.count > 1 ? String(parts[1]) : nil
+        let reason = parts.count > 1 ? parts[1...].joined(separator: " ") : nil
         return .ban(username: username, reason: reason)
     }
 
@@ -107,11 +108,15 @@ enum ChatCommandParser {
     private static func parseTimeout(args: String) -> ChatCommand {
         let trimmed = args.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return .unknown(command: "timeout", args: args) }
-        let parts = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
+        // 空要素を除外して分割し、連続する空白でも正しくパースする
+        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
         guard parts.count >= 2 else { return .unknown(command: "timeout", args: args) }
         let username = String(parts[0])
-        guard let duration = Int(parts[1]) else { return .unknown(command: "timeout", args: args) }
-        let reason = parts.count > 2 ? String(parts[2]) : nil
+        // Helix API の上限は 1,209,600 秒（2週間）
+        guard let duration = Int(parts[1]), (1...1_209_600).contains(duration) else {
+            return .unknown(command: "timeout", args: args)
+        }
+        let reason = parts.count > 2 ? parts[2...].joined(separator: " ") : nil
         return .timeout(username: username, duration: duration, reason: reason)
     }
 
@@ -124,12 +129,28 @@ enum ChatCommandParser {
         return trimmed.split(separator: " ").first.map(String.init) ?? trimmed
     }
 
-    /// 先頭の数値引数をパースする（slow/followers 用）
+    /// 省略可能な整数引数を受け付けるコマンドをパースする（slow/followers 用）
     ///
-    /// - Parameter args: 引数文字列（空文字列または数値を含む）
-    /// - Returns: 数値。空文字または非数値の場合は nil
-    private static func parseOptionalInt(from args: String) -> Int? {
-        guard !args.isEmpty else { return nil }
-        return args.split(separator: " ").first.flatMap { Int($0) }
+    /// - 引数なし → `makeCommand(nil)` を返す（デフォルト値で有効化）
+    /// - 有効な整数 → `makeCommand(value)` を返す
+    /// - 無効な文字列 → `.unknown` を返す（ユーザー入力ミスを早期にフィードバックする）
+    ///
+    /// - Parameters:
+    ///   - args: コマンド名を除いた引数文字列
+    ///   - commandName: エラー表示に使用するコマンド名
+    ///   - makeCommand: 整数値（または nil）を受け取って ChatCommand を生成するクロージャ
+    private static func parseOptionalIntCommand(
+        args: String,
+        commandName: String,
+        makeCommand: (Int?) -> ChatCommand
+    ) -> ChatCommand {
+        let trimmedArgs = args.trimmingCharacters(in: .whitespaces)
+        // 引数なしの場合はデフォルト値で有効化
+        if trimmedArgs.isEmpty { return makeCommand(nil) }
+        // 先頭トークンを整数としてパース。非数値の場合は .unknown を返す
+        guard let value = trimmedArgs.split(separator: " ").first.flatMap({ Int($0) }) else {
+            return .unknown(command: commandName, args: args)
+        }
+        return makeCommand(value)
     }
 }

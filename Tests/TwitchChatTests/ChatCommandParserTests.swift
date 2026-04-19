@@ -208,4 +208,51 @@ struct ChatCommandParserTests {
     func testDeleteCommandWithoutId() {
         #expect(ChatCommandParser.parse("/delete") == .unknown(command: "delete", args: ""))
     }
+
+    // MARK: - /timeout 範囲チェック
+
+    @Test("/timeout で秒数が0以下は unknown になること")
+    func testTimeoutCommandWithZeroDuration() {
+        // 0秒以下はHelix APIの下限（1秒）を下回るため不正
+        #expect(ChatCommandParser.parse("/timeout あらし太郎 0") == .unknown(command: "timeout", args: "あらし太郎 0"))
+    }
+
+    @Test("/timeout で秒数が上限（1,209,600秒=2週間）を超える場合は unknown になること")
+    func testTimeoutCommandWithExceedingDuration() {
+        // 1,209,600秒（2週間）を超えるとHelix APIが400を返すため、パース層で弾く
+        #expect(ChatCommandParser.parse("/timeout あらし太郎 1209601") == .unknown(command: "timeout", args: "あらし太郎 1209601"))
+    }
+
+    @Test("/timeout で秒数が上限ちょうど（1,209,600秒）は正常にパースされること")
+    func testTimeoutCommandWithMaxDuration() {
+        #expect(ChatCommandParser.parse("/timeout あらし太郎 1209600") == .timeout(username: "あらし太郎", duration: 1_209_600, reason: nil))
+    }
+
+    // MARK: - 無効な引数の early return
+
+    @Test("/slow に数値でない引数を渡すと unknown になること")
+    func testSlowCommandWithInvalidArg() {
+        // 無効な引数は「引数なし（デフォルト30秒）」として扱わず、明示的にエラーにする
+        #expect(ChatCommandParser.parse("/slow abc") == .unknown(command: "slow", args: "abc"))
+    }
+
+    @Test("/followers に数値でない引数を渡すと unknown になること")
+    func testFollowersCommandWithInvalidArg() {
+        // 無効な引数は「引数なし（デフォルト）」として扱わず、明示的にエラーにする
+        #expect(ChatCommandParser.parse("/followers 10days") == .unknown(command: "followers", args: "10days"))
+    }
+
+    // MARK: - 連続する空白の正規化
+
+    @Test("/ban で連続する空白が含まれても正しくパースされること")
+    func testBanCommandWithMultipleSpaces() {
+        // 「ユーザー名  理由」（二重スペース）でも正しくパースできること
+        #expect(ChatCommandParser.parse("/ban あらし太郎  荒らし行為") == .ban(username: "あらし太郎", reason: "荒らし行為"))
+    }
+
+    @Test("/timeout で連続する空白が含まれても正しくパースされること")
+    func testTimeoutCommandWithMultipleSpaces() {
+        // 「ユーザー名  秒数  理由」（二重スペース）でも正しくパースできること
+        #expect(ChatCommandParser.parse("/timeout あらし太郎  600  スパム") == .timeout(username: "あらし太郎", duration: 600, reason: "スパム"))
+    }
 }

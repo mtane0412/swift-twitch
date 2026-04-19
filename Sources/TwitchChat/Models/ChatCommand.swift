@@ -5,7 +5,7 @@
 /// チャット入力から解析したコマンドを表す enum
 ///
 /// - Note: `ChatCommandParser.parse(_:)` によって生成される
-enum ChatCommand: Equatable {
+enum ChatCommand: Equatable, Sendable {
 
     // MARK: - IRC 経由コマンド
 
