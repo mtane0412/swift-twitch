@@ -138,6 +138,7 @@ enum ChatCommandParser {
     /// - Parameters:
     ///   - args: コマンド名を除いた引数文字列
     ///   - commandName: エラー表示に使用するコマンド名
+    ///   - validRange: 許容する整数値の範囲。指定した場合、範囲外の値は `.unknown` を返す。`nil` の場合は範囲チェックを行わない
     ///   - makeCommand: 整数値（または nil）を受け取って ChatCommand を生成するクロージャ
     private static func parseOptionalIntCommand(
         args: String,
