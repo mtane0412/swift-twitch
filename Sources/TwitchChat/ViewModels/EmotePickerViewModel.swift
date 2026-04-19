@@ -80,20 +80,10 @@ final class EmotePickerViewModel {
     /// ピッカーが表示されるタイミング（.task モディファイア）で呼び出す。
     func loadEmotes() async {
         await emoteStore.fetchGlobalEmotes()
-        let channel = await emoteStore.channelEmotesSnapshot()
-        let user    = await emoteStore.userEmotesSnapshot()
-        let global  = await emoteStore.globalEmotesSnapshot()
-        userEmoteSets = await emoteStore.userAvailableEmoteSets()
-        userEmoteIds  = await emoteStore.userEmoteIdSet()
-
-        // セクション構築前にオーナーIDの表示名を事前フェッチして初回レンダリングで即座に表示する
-        await profileImageStore.fetchUsers(userIds: collectOwnerIds(channel: channel, user: user))
-
-        allSections = buildSections(channel: channel, user: user, global: global)
-        applyFilter()
+        await refreshSections()
     }
 
-    /// ピッカー表示中に USERSTATE が届いた場合にエモートの使用可否をリアルタイムで更新する
+    /// ピッカー表示中にエモートセットや USERSTATE が更新された場合にセクションをリアルタイムで再構築する
     ///
     /// View の `.task` モディファイアから呼び出す。View が消えると `.task` が
     /// このメソッドのタスクをキャンセルし、`waitForNextUserEmoteSetsUpdate` が
@@ -102,19 +92,7 @@ final class EmotePickerViewModel {
         while !Task.isCancelled {
             await emoteStore.waitForNextUserEmoteSetsUpdate()
             guard !Task.isCancelled else { break }
-            userEmoteSets = await emoteStore.userAvailableEmoteSets()
-            userEmoteIds  = await emoteStore.userEmoteIdSet()
-            // エモート定義が変わった場合のみセクションを再構築（再フィルタコストを抑える）
-            let channel = await emoteStore.channelEmotesSnapshot()
-            let user    = await emoteStore.userEmotesSnapshot()
-            let global  = await emoteStore.globalEmotesSnapshot()
-            let newSections = buildSections(channel: channel, user: user, global: global)
-            if newSections != allSections {
-                allSections = newSections
-                // 新規セクションの ownerId に対して表示名・アイコンを解決する
-                scheduleOwnerDisplayNameFetch(for: allSections)
-            }
-            applyFilter()
+            await refreshSections()
         }
     }
 
@@ -137,6 +115,22 @@ final class EmotePickerViewModel {
 
     // MARK: - プライベートメソッド
 
+    /// エモートストアのスナップショットを取得し、表示名を事前フェッチしてからセクションを再構築する
+    ///
+    /// `loadEmotes()` と `observeUserEmoteSetsUpdates()` の共通ロジック。
+    /// 表示名フェッチを await することで、セクション構築時点で displayName が確定し
+    /// 初回レンダリングから正しいチャンネル名が表示される。
+    private func refreshSections() async {
+        let channel = await emoteStore.channelEmotesSnapshot()
+        let user    = await emoteStore.userEmotesSnapshot()
+        let global  = await emoteStore.globalEmotesSnapshot()
+        userEmoteSets = await emoteStore.userAvailableEmoteSets()
+        userEmoteIds  = await emoteStore.userEmoteIdSet()
+        await profileImageStore.fetchUsers(userIds: collectOwnerIds(channel: channel, user: user))
+        allSections = buildSections(channel: channel, user: user, global: global)
+        applyFilter()
+    }
+
     /// チャンネル・ユーザーエモートからセクションオーナー ID を収集する
     ///
     /// - Returns: currentBroadcasterId を含む、重複なし・"0" 除外済みの ownerId 配列
@@ -147,24 +141,6 @@ final class EmotePickerViewModel {
             if let ownerId = emote.ownerId, ownerId != "0" { ids.insert(ownerId) }
         }
         return Array(ids)
-    }
-
-    /// セクション内の subscribedChannel / currentChannel の ownerId に対して
-    /// ProfileImageStore の表示名・アイコンフェッチを非同期でスケジュールする
-    ///
-    /// ProfileImageStore は内部でキャッシュ済み ID をスキップするため、
-    /// 重複フェッチは発生しない。
-    private func scheduleOwnerDisplayNameFetch(for sections: [EmotePickerSection]) {
-        let ownerIds = sections.compactMap { section -> String? in
-            switch section.kind {
-            case .subscribedChannel(let ownerId): return ownerId
-            case .currentChannel: return currentBroadcasterId
-            default: return nil
-            }
-        }
-        let uniqueOwnerIds = Array(Set(ownerIds))
-        guard !uniqueOwnerIds.isEmpty else { return }
-        Task { await self.profileImageStore.fetchUsers(userIds: uniqueOwnerIds) }
     }
 
     /// チャンネル / ユーザー / グローバルエモートからセクション配列を構築する

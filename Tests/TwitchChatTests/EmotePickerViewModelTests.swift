@@ -60,6 +60,45 @@ struct EmotePickerViewModelTests {
         #expect(subscribedSection?.title == "テストチャンネル")
     }
 
+    @Test("エモートセット更新後にセクションタイトルが displayName に更新される")
+    @MainActor
+    func testRefreshSectionsUpdatesDisplayNamesOnEmoteSetUpdate() async throws {
+        // 前提: ownerId "99999" を持つユーザーエモート、モック API が displayName "更新チャンネル" を返す
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            HelixUserData(id: "99999", login: "update_ch", displayName: "更新チャンネル", profileImageUrl: nil)
+        ])
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
+        let viewModel = EmotePickerViewModel(
+            emoteStore: store,
+            profileImageStore: profileImageStore,
+            currentBroadcasterId: nil
+        )
+
+        // 初回ロード（ユーザーエモートなし）
+        await viewModel.loadEmotes()
+        #expect(viewModel.filteredSections.isEmpty)
+
+        // observer タスクを開始し、waitForNextUserEmoteSetsUpdate() に到達するまで yield する
+        let observeTask = Task { await viewModel.observeUserEmoteSetsUpdates() }
+        for _ in 0..<5 { await Task.yield() }
+
+        // エモートセット更新をシミュレート（新たにユーザーエモートが追加される）
+        await store.setUserEmotes([
+            HelixEmote(id: "new_emote", name: "newEmote", format: ["static"], emoteType: "subscriptions", emoteSetId: "888", ownerId: "99999")
+        ])
+        await store.notifyUserEmoteSetsUpdatedForTest()
+
+        // 更新処理（refreshSections + displayName fetch）が完了するまで待つ
+        try await Task.sleep(for: .milliseconds(100))
+        observeTask.cancel()
+
+        // 検証: 新しい subscribedChannel セクションが displayName で表示される
+        let subscribedSection = viewModel.filteredSections.first { $0.kind == .subscribedChannel(ownerId: "99999") }
+        #expect(subscribedSection?.title == "更新チャンネル")
+    }
+
     @Test("グローバルエモートのみのとき global セクションだけが返る")
     @MainActor
     func testLoadEmotesGlobalOnly() async {

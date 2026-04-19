@@ -480,5 +480,10 @@ actor EmoteStore {
     func setUserEmoteSets(_ sets: Set<String>) {
         userEmoteSets = sets
     }
+
+    /// エモートセット更新通知をテストから手動発火する（テスト用）
+    func notifyUserEmoteSetsUpdatedForTest() {
+        notifyUserEmoteSetsUpdated()
+    }
 #endif
 }
