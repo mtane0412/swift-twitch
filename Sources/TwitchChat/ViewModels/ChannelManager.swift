@@ -185,7 +185,7 @@ final class ChannelManager {
         eventSubReceiveTask = Task { [weak self] in
             let stream = await client.chatMessageEventStream
             for await event in stream {
-                await self?.routeEventSubChatMessage(event)
+                self?.routeEventSubChatMessage(event)
             }
         }
     }
@@ -205,8 +205,8 @@ final class ChannelManager {
             guard let self else { return }
             Task {
                 // subscribeChatMessage には認証済みユーザーの ID が必要
-                guard let userId = await self.authState.userId else { return }
-                guard let client = await self.eventSubClient else { return }
+                guard let userId = self.authState.userId else { return }
+                guard let client = self.eventSubClient else { return }
                 do {
                     try await client.subscribeChatMessage(
                         broadcasterId: broadcasterId,
