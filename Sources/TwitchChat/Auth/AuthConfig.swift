@@ -33,6 +33,7 @@ enum AuthConfig {
     /// - `chat:read`: IRC チャット読み取り（認証接続に使用）
     /// - `chat:edit`: IRC チャット書き込み（コメント投稿に使用）
     /// - `user:read:follows`: フォロー中の配信中ストリーム一覧取得に使用
+    /// - `user:read:chat`: EventSub `channel.chat.message` 購読（楽観的 UI の ID 確定に使用）
     /// - `moderator:manage:banned_users`: バン・タイムアウト操作（Helix API /moderation/bans）
     /// - `moderator:manage:chat_settings`: エモートオンリー・スロー・サブスクライバーモード等
     /// - `moderator:manage:chat_messages`: チャットクリア・メッセージ削除
@@ -40,6 +41,7 @@ enum AuthConfig {
         "chat:read",
         "chat:edit",
         "user:read:follows",
+        "user:read:chat",
         "moderator:manage:banned_users",
         "moderator:manage:chat_settings",
         "moderator:manage:chat_messages"

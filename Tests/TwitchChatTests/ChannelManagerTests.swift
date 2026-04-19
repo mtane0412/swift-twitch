@@ -348,4 +348,143 @@ struct ChannelManagerTests {
 
         #expect(manager.channelOrder == ["haishinsha3", "haishinsha1", "haishinsha2"])
     }
+
+    // MARK: - EventSub 組み込み
+
+    @Test("joinChannel 時に EventSub クライアントが接続される")
+    func testJoinChannelStartsEventSub() async throws {
+        // 前提: MockTwitchEventSubClient を注入できる ChannelManager を作成する
+        let mockEventSub = MockTwitchEventSubClient()
+        let manager = ChannelManager(
+            authState: AuthState(),
+            makeIRCClient: { MockTwitchIRCClient() },
+            makeEventSubClient: { mockEventSub }
+        )
+
+        // 操作: チャンネルに参加する
+        await manager.joinChannel("haishinsha1")
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+        // 検証: EventSub の connect() が呼ばれている
+        let connectCount = await mockEventSub.connectCallCount
+        #expect(connectCount == 1)
+    }
+
+    @Test("disconnectAll 時に EventSub クライアントが切断される")
+    func testDisconnectAllStopsEventSub() async throws {
+        // 前提: EventSub 接続済みの状態
+        let mockEventSub = MockTwitchEventSubClient()
+        let manager = ChannelManager(
+            authState: AuthState(),
+            makeIRCClient: { MockTwitchIRCClient() },
+            makeEventSubClient: { mockEventSub }
+        )
+        await manager.joinChannel("haishinsha1")
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+        // 操作: 全チャンネルから切断する
+        await manager.disconnectAll()
+
+        // 検証: EventSub の disconnect() が呼ばれている
+        let disconnected = await mockEventSub.disconnectCalled
+        #expect(disconnected == true)
+    }
+
+    @Test("roomId 確定時に ChatViewModel の onRoomIdConfirmed コールバックがセットされている")
+    func testRoomIdConfirmedCallbackIsConfigured() async throws {
+        // 前提: MockTwitchIRCClient と MockTwitchEventSubClient を使う
+        let mockIRC = MockTwitchIRCClient()
+        let mockEventSub = MockTwitchEventSubClient()
+        let manager = ChannelManager(
+            authState: AuthState(),
+            makeIRCClient: { mockIRC },
+            makeEventSubClient: { mockEventSub }
+        )
+
+        // チャンネルに参加する
+        await manager.joinChannel("haishinsha1")
+        try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+
+        // 検証: 対応する ChatViewModel に onRoomIdConfirmed コールバックがセットされている
+        let viewModel = manager.channels["haishinsha1"]
+        #expect(viewModel?.onRoomIdConfirmed != nil)
+    }
+
+    @Test("roomId 確定時に EventSub のサブスクリプションが登録される（ログイン済み）")
+    func testRoomIdConfirmedTriggersEventSubSubscriptionWhenLoggedIn() async throws {
+        // 前提: MockTwitchIRCClient と MockTwitchEventSubClient を使う
+        // AuthState のユーザー ID を直接設定してログイン済み状態をシミュレートする
+        let mockIRC = MockTwitchIRCClient()
+        let mockEventSub = MockTwitchEventSubClient()
+        let authState = AuthState()
+        // テスト用に userId を直接設定する（実際のログインフローをバイパス）
+        await authState.setUserIdForTesting("テストユーザーID-12345")
+        let manager = ChannelManager(
+            authState: authState,
+            makeIRCClient: { mockIRC },
+            makeEventSubClient: { mockEventSub }
+        )
+
+        // チャンネルに参加して IRC 接続状態にする
+        await manager.joinChannel("haishinsha1")
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+        // ROOMSTATE で room-id を確定させる（ViewModel の onRoomIdConfirmed が呼ばれるはず）
+        await mockIRC.sendRoomState(roomId: "配信者ID-12345")
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+        // 検証: EventSub の subscribeChatMessage が呼ばれている
+        let subscribeCount = await mockEventSub.subscribeChatMessageCallCount
+        #expect(subscribeCount >= 1)
+    }
+}
+
+// MARK: - MockTwitchEventSubClient
+
+/// EventSub クライアントのテスト用モック
+actor MockTwitchEventSubClient: TwitchEventSubClientProtocol {
+    let chatMessageEventStream: AsyncStream<EventSubChatEvent>
+    let connectionStateStream: AsyncStream<EventSubConnectionState>
+
+    private var chatContinuation: AsyncStream<EventSubChatEvent>.Continuation?
+    private var stateContinuation: AsyncStream<EventSubConnectionState>.Continuation?
+
+    private(set) var connectCallCount = 0
+    private(set) var disconnectCalled = false
+    private(set) var subscribeChatMessageCallCount = 0
+    private(set) var unsubscribeChatMessageCallCount = 0
+    private(set) var sessionId: String? = "mock-session-id"
+
+    init() {
+        var chatCont: AsyncStream<EventSubChatEvent>.Continuation?
+        self.chatMessageEventStream = AsyncStream { chatCont = $0 }
+        self.chatContinuation = chatCont
+
+        var stateCont: AsyncStream<EventSubConnectionState>.Continuation?
+        self.connectionStateStream = AsyncStream { stateCont = $0 }
+        self.stateContinuation = stateCont
+    }
+
+    func connect() async throws {
+        connectCallCount += 1
+        stateContinuation?.yield(.connected)
+    }
+
+    func disconnect() async {
+        disconnectCalled = true
+        stateContinuation?.yield(.disconnected)
+    }
+
+    func subscribeChatMessage(broadcasterId: String, userId: String) async throws {
+        subscribeChatMessageCallCount += 1
+    }
+
+    func unsubscribeChatMessage(broadcasterId: String) async throws {
+        unsubscribeChatMessageCallCount += 1
+    }
+
+    /// テスト用に chatMessage イベントを流し込む
+    func sendChatMessageEvent(_ event: EventSubChatEvent) {
+        chatContinuation?.yield(event)
+    }
 }

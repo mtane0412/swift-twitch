@@ -191,6 +191,35 @@ struct ChatMessage: Sendable, Identifiable {
         self.isSystemNotice = false
     }
 
+    /// 楽観的 UI メッセージの ID を EventSub で受信した本物の message ID で差し替えた新しいインスタンスを生成する
+    ///
+    /// Twitch IRC は自分のメッセージをエコーバックしないため、送信直後は楽観的 UI メッセージとして
+    /// ローカル UUID が割り当てられる。EventSub `channel.chat.message` で本物の ID を受信した際に
+    /// このイニシャライザで差し替えることで、返信機能が有効化される。
+    ///
+    /// - Parameters:
+    ///   - original: 差し替え元の楽観的 UI メッセージ
+    ///   - realId: EventSub から受信した本物の message ID
+    init(confirming original: ChatMessage, withRealId realId: String) {
+        self.id = realId
+        self.username = original.username
+        self.displayName = original.displayName
+        self.text = original.text
+        self.isAction = original.isAction
+        self.colorHex = original.colorHex
+        self.badges = original.badges
+        self.emotes = original.emotes
+        self.segments = original.segments
+        self.roomId = original.roomId
+        self.receivedAt = original.receivedAt
+        self.replyParentMsgId = original.replyParentMsgId
+        self.replyParentUserLogin = original.replyParentUserLogin
+        self.replyParentDisplayName = original.replyParentDisplayName
+        self.replyParentMsgBody = original.replyParentMsgBody
+        self.isOptimistic = false
+        self.isSystemNotice = original.isSystemNotice
+    }
+
     /// システム通知メッセージを生成する
     ///
     /// モデレーションコマンドの成功・失敗等、アプリが生成する情報メッセージに使用する。

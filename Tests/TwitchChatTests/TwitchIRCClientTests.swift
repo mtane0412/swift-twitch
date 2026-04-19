@@ -54,7 +54,11 @@ actor MockWebSocketClient: WebSocketClientProtocol {
         }
     }
 
+    /// disconnect() の呼び出し回数（reconnect 検証用）
+    private(set) var disconnectCallCount = 0
+
     func disconnect() async {
+        disconnectCallCount += 1
         isConnected = false
         if pendingReceiveContinuations.isEmpty {
             // receive() が待機中でない（メッセージ処理中に disconnect が呼ばれた）場合、

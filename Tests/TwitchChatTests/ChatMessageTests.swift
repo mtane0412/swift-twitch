@@ -479,4 +479,70 @@ struct ChatMessageTests {
         // 検証: replyParentMsgId が nil になる
         #expect(chatMessage.replyParentMsgId == nil)
     }
+
+    // MARK: - confirming init（EventSub ID 差し替え）
+
+    @Test("confirming init で id が本物の message ID に差し替わる")
+    func confirmingInitDiffersId() {
+        // 前提: 楽観的 UI メッセージを生成する（ローカル UUID を持つ）
+        let optimistic = ChatMessage(
+            localUsername: "testuseraccount",
+            text: "こんにちは！EventSubテスト"
+        )
+        // 楽観的メッセージは isOptimistic: true で、ローカル UUID を持つ
+        #expect(optimistic.isOptimistic == true)
+        let localId = optimistic.id
+
+        // 操作: EventSub で受信した本物の message ID で差し替える
+        let realMessageId = "cc106a7e-1a9f-4c07-8c4b-f5f7a0a87c15"
+        let confirmed = ChatMessage(confirming: optimistic, withRealId: realMessageId)
+
+        // 検証: id が本物の message ID に差し替わっている
+        #expect(confirmed.id == realMessageId)
+        #expect(confirmed.id != localId)
+    }
+
+    @Test("confirming init で isOptimistic が false になる")
+    func confirmingInitSetsIsOptimisticFalse() {
+        // 前提: 楽観的 UI メッセージ（isOptimistic: true）
+        let optimistic = ChatMessage(
+            localUsername: "testuseraccount",
+            text: "返信テスト用メッセージ"
+        )
+        #expect(optimistic.isOptimistic == true)
+
+        // 操作: 本物の ID で差し替える
+        let confirmed = ChatMessage(confirming: optimistic, withRealId: "real-msg-id-xyz")
+
+        // 検証: isOptimistic が false になり、返信ボタンが有効化される
+        #expect(confirmed.isOptimistic == false)
+    }
+
+    @Test("confirming init で他のフィールドがすべて保持される")
+    func confirmingInitPreservesOtherFields() {
+        // 前提: フィールドを指定して楽観的メッセージを生成する
+        let optimistic = ChatMessage(
+            localUsername: "testuseraccount",
+            displayName: "テストユーザー",
+            text: "フィールド保持テスト",
+            isAction: true,
+            roomId: "部屋ID-12345",
+            colorHex: "#FF4500",
+            badges: [],
+            replyParentMsgId: "親メッセージ-id-abc"
+        )
+
+        // 操作: 本物の ID で差し替える
+        let confirmed = ChatMessage(confirming: optimistic, withRealId: "real-msg-confirmed")
+
+        // 検証: id と isOptimistic 以外のフィールドがすべて保持される
+        #expect(confirmed.username == "testuseraccount")
+        #expect(confirmed.displayName == "テストユーザー")
+        #expect(confirmed.text == "フィールド保持テスト")
+        #expect(confirmed.isAction == true)
+        #expect(confirmed.roomId == "部屋ID-12345")
+        #expect(confirmed.colorHex == "#FF4500")
+        #expect(confirmed.replyParentMsgId == "親メッセージ-id-abc")
+        #expect(confirmed.isSystemNotice == false)
+    }
 }

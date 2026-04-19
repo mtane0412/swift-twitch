@@ -643,13 +643,13 @@ struct ChatViewModelTests {
                 refreshToken: "テスト用リフレッシュトークン",
                 expiresIn: 14400,
                 tokenType: "bearer",
-                scope: ["chat:read", "chat:edit"]
+                scope: ["chat:read", "chat:edit", "user:read:chat"]
             ),
             validateResponse: TwitchValidateResponse(
                 clientId: "testclientid",
                 login: userLogin,
                 userId: "12345",
-                scopes: ["chat:read", "chat:edit"],
+                scopes: ["chat:read", "chat:edit", "user:read:chat"],
                 expiresIn: 14400
             )
         )
@@ -1049,5 +1049,111 @@ struct ChatViewModelTests {
         await #expect(throws: ChatSendError.roomIdNotAvailable) {
             try await viewModel.sendMessage("/ban あらし太郎")
         }
+    }
+
+    // MARK: - EventSub ID 差し替え（handleEventSubChatMessage）
+
+    @Test("EventSub イベントで楽観的メッセージの ID が本物の message ID に差し替わる")
+    func eventSubイベントで楽観的メッセージのIDが差し替わる() async throws {
+        // 前提: 認証接続済みの状態でメッセージを送信して楽観的メッセージを追加する
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "testuseraccount")
+        try await viewModel.sendMessage("EventSubテストメッセージ")
+        await waitFor { viewModel.messages.count >= 1 }
+
+        let optimistic = try #require(viewModel.messages.first)
+        #expect(optimistic.isOptimistic == true)
+        let localId = optimistic.id
+
+        // 操作: EventSub イベントで本物の ID を通知する
+        let event = EventSubChatEvent(
+            broadcasterUserId: "12826",
+            broadcasterUserLogin: "testchannel",
+            chatterUserId: "142672450",
+            chatterUserLogin: "testuseraccount",
+            messageId: "real-eventsub-msg-id-abc123",
+            message: EventSubChatMessageContent(text: "EventSubテストメッセージ")
+        )
+        viewModel.handleEventSubChatMessage(event)
+
+        // 検証: messages 配列の楽観的メッセージが本物の ID に差し替わっている
+        let confirmed = try #require(viewModel.messages.first)
+        #expect(confirmed.id == "real-eventsub-msg-id-abc123")
+        #expect(confirmed.id != localId)
+        #expect(confirmed.isOptimistic == false)
+    }
+
+    @Test("EventSub イベントで isOptimistic が false になり返信ボタンが有効化される")
+    func eventSubイベントでisOptimisticがfalseになる() async throws {
+        // 前提: 認証接続済みの状態でメッセージを送信する
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "testuseraccount")
+        try await viewModel.sendMessage("返信テスト用メッセージ")
+        await waitFor { viewModel.messages.count >= 1 }
+
+        // 前提: 楽観的メッセージが isOptimistic: true になっている
+        #expect(viewModel.messages.first?.isOptimistic == true)
+
+        // 操作: EventSub イベントで ID を確定させる
+        let event = EventSubChatEvent(
+            broadcasterUserId: "12826",
+            broadcasterUserLogin: "testchannel",
+            chatterUserId: "142672450",
+            chatterUserLogin: "testuseraccount",
+            messageId: "real-msg-id-for-reply",
+            message: EventSubChatMessageContent(text: "返信テスト用メッセージ")
+        )
+        viewModel.handleEventSubChatMessage(event)
+
+        // 検証: isOptimistic が false になっている（返信ボタン有効化）
+        #expect(viewModel.messages.first?.isOptimistic == false)
+    }
+
+    @Test("他人のメッセージの EventSub イベントは楽観的メッセージを差し替えない")
+    func 他人のメッセージのEventSubイベントは楽観的メッセージを差し替えない() async throws {
+        // 前提: 認証接続済みの状態でメッセージを送信する
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "testuseraccount")
+        try await viewModel.sendMessage("自分のメッセージ")
+        await waitFor { viewModel.messages.count >= 1 }
+
+        let localId = viewModel.messages.first?.id
+
+        // 操作: 他人（異なるログイン名）の EventSub イベントを通知する
+        let event = EventSubChatEvent(
+            broadcasterUserId: "12826",
+            broadcasterUserLogin: "testchannel",
+            chatterUserId: "999999",
+            chatterUserLogin: "otheruser",  // 自分とは異なるユーザー
+            messageId: "other-user-msg-id",
+            message: EventSubChatMessageContent(text: "自分のメッセージ")
+        )
+        viewModel.handleEventSubChatMessage(event)
+
+        // 検証: 楽観的メッセージの ID は差し替わっていない
+        #expect(viewModel.messages.first?.id == localId)
+        #expect(viewModel.messages.first?.isOptimistic == true)
+    }
+
+    @Test("テキストが一致しない EventSub イベントは楽観的メッセージを差し替えない")
+    func テキストが一致しないEventSubイベントは楽観的メッセージを差し替えない() async throws {
+        // 前提: 認証接続済みの状態でメッセージを送信する
+        let (viewModel, _) = try await makeConnectedViewModel(userLogin: "testuseraccount")
+        try await viewModel.sendMessage("送信したメッセージA")
+        await waitFor { viewModel.messages.count >= 1 }
+
+        let localId = viewModel.messages.first?.id
+
+        // 操作: テキストが異なる EventSub イベントを通知する
+        let event = EventSubChatEvent(
+            broadcasterUserId: "12826",
+            broadcasterUserLogin: "testchannel",
+            chatterUserId: "142672450",
+            chatterUserLogin: "testuseraccount",
+            messageId: "different-text-msg-id",
+            message: EventSubChatMessageContent(text: "全く別のメッセージB")  // テキスト不一致
+        )
+        viewModel.handleEventSubChatMessage(event)
+
+        // 検証: 楽観的メッセージの ID は差し替わっていない
+        #expect(viewModel.messages.first?.id == localId)
+        #expect(viewModel.messages.first?.isOptimistic == true)
     }
 }
