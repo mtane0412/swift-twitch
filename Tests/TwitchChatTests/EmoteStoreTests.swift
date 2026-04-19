@@ -313,11 +313,12 @@ struct EmoteStoreTests {
 
     @Test("updateUserEmoteSets で設定した値が userAvailableEmoteSets で取得できる")
     func testUpdateUserEmoteSets() async {
-        // 前提: サブスクユーザーのエモートセットを設定する
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
 
-        // 検証: 設定したエモートセットが取得できる
+        // 操作: サブスクユーザーのエモートセットを設定する
         await store.updateUserEmoteSets(Set(["0", "33", "50"]))
+
+        // 検証: 設定したエモートセットが取得できる
         let emoteSets = await store.userAvailableEmoteSets()
         #expect(emoteSets == Set(["0", "33", "50"]))
     }
@@ -333,6 +334,16 @@ struct EmoteStoreTests {
         // 検証: 最後に設定した値が返される
         let emoteSets = await store.userAvailableEmoteSets()
         #expect(emoteSets == Set(["0", "793"]))
+    }
+
+    @Test("USERSTATE 未受信の場合は userAvailableEmoteSets が nil を返す")
+    func testUserAvailableEmoteSetsNilBeforeUserState() async {
+        // 前提: updateUserEmoteSets を一度も呼んでいない初期状態
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+
+        // 検証: USERSTATE 未受信は nil（全エモート使用可能として扱う）
+        let emoteSets = await store.userAvailableEmoteSets()
+        #expect(emoteSets == nil)
     }
 
     @Test("resetChannelEmotes を呼んでも userEmoteSets はリセットされない")

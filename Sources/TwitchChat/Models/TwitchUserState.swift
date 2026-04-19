@@ -29,8 +29,8 @@ struct TwitchUserState: Sendable, Equatable {
     /// ユーザーが使用可能なエモートセット ID の一覧
     ///
     /// USERSTATE の `emote-sets` タグをカンマ区切りで分割した Set<String>。
-    /// グローバルエモートセット "0" は常に含まれる。
-    /// タグが存在しない場合は空セット。
+    /// タグが存在してグローバルエモートにアクセスできる場合は "0" が含まれる。
+    /// タグが存在しない場合、または空文字の場合は空セットになる。
     let emoteSets: Set<String>
 
     /// IRCMessage から TwitchUserState を生成する

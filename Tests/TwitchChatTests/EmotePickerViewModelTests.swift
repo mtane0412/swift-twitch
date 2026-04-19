@@ -128,10 +128,10 @@ struct EmotePickerViewModelTests {
 
     // MARK: - isAvailable エモート使用可否判定
 
-    @Test("userEmoteSets が空の場合（USERSTATE 未受信）は全エモートが使用可能")
+    @Test("userEmoteSets が nil の場合（USERSTATE 未受信）は全エモートが使用可能")
     @MainActor
-    func testIsAvailableWhenUserEmoteSetsEmpty() async {
-        // 前提: USERSTATE を受信していない状態（userEmoteSets 空）
+    func testIsAvailableWhenUserEmoteSetsNil() async {
+        // 前提: USERSTATE を受信していない状態（userEmoteSets が nil）
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
         await store.setGlobalEmotes([
             HelixEmote(id: "1", name: "LUL", format: ["static"], emoteType: "globals", emoteSetId: "0"),

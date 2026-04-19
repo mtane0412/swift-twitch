@@ -41,8 +41,9 @@ actor EmoteStore {
     /// ユーザーが使用可能なエモートセット ID の一覧
     ///
     /// USERSTATE の `emote-sets` タグから更新される。
-    /// 空の場合は USERSTATE 未受信状態（全エモートを使用可能として扱う）。
-    private var userEmoteSets: Set<String> = []
+    /// - `nil`: USERSTATE 未受信（全エモートを使用可能として扱う）
+    /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
+    private var userEmoteSets: Set<String>? = nil
 
     // MARK: - 初期化
 
@@ -200,8 +201,8 @@ actor EmoteStore {
     ///
     /// ViewModel が使用可否を判定するためのスナップショット取得に使用する。
     ///
-    /// - Returns: 使用可能なエモートセット ID の Set。空の場合は USERSTATE 未受信。
-    func userAvailableEmoteSets() -> Set<String> {
+    /// - Returns: 使用可能なエモートセット ID の Set。`nil` の場合は USERSTATE 未受信。
+    func userAvailableEmoteSets() -> Set<String>? {
         userEmoteSets
     }
 

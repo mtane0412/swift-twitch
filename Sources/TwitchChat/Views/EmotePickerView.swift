@@ -107,7 +107,7 @@ private struct EmoteCellView: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
-                    .offset(x: 2, y: 2)
+                    .padding(2)
             }
         }
         .help(isAvailable ? emoteName : "\(emoteName)（サブスクライブが必要です）")

@@ -177,6 +177,29 @@ struct EmoteDefinitionTests {
         #expect(response.data[0].emoteSetId == "301590448")
     }
 
+    @Test("emote_set_id が明示的に null の場合は emoteSetId が nil になる")
+    func testDecodeEmoteWithExplicitNullEmoteSetId() throws {
+        // 前提: emote_set_id が明示的に null のエモートレスポンス
+        let json = """
+        {
+          "data": [
+            {
+              "id": "425618",
+              "name": "LUL",
+              "format": ["static", "animated"],
+              "emote_type": "globals",
+              "emote_set_id": null
+            }
+          ]
+        }
+        """
+        let data = Data(json.utf8)
+        let response = try JSONDecoder().decode(HelixEmotesResponse.self, from: data)
+
+        #expect(response.data.count == 1)
+        #expect(response.data[0].emoteSetId == nil)
+    }
+
     @Test("emote_set_id が省略されている場合は emoteSetId が nil になる")
     func testDecodeEmoteWithMissingEmoteSetId() throws {
         // 前提: emote_set_id を含まないエモートのサンプルレスポンス
@@ -218,6 +241,7 @@ struct EmoteDefinitionTests {
         let data = Data(json.utf8)
         let response = try JSONDecoder().decode(HelixEmotesResponse.self, from: data)
 
+        #expect(response.data.count == 1)
         #expect(response.data[0].emoteSetId == "0")
     }
 

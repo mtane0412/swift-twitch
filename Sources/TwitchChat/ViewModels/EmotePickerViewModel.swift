@@ -38,8 +38,9 @@ final class EmotePickerViewModel {
     /// ユーザーが使用可能なエモートセット ID のスナップショット
     ///
     /// `loadEmotes()` 呼び出し時に EmoteStore からスナップショットを取得する。
-    /// 空の場合は USERSTATE 未受信（全エモートを使用可能として扱う）。
-    private var userEmoteSets: Set<String> = []
+    /// - `nil`: USERSTATE 未受信（全エモートを使用可能として扱う）
+    /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
+    private var userEmoteSets: Set<String>? = nil
 
     // MARK: - 初期化
 
@@ -66,16 +67,16 @@ final class EmotePickerViewModel {
 
     /// エモートがユーザーにとって使用可能かどうかを返す
     ///
-    /// - `userEmoteSets` が空（USERSTATE 未受信）の場合は全て true
+    /// - `userEmoteSets` が `nil`（USERSTATE 未受信）の場合は全て true
     /// - `emote.emoteSetId` が nil の場合は安全側に倒して true
     /// - それ以外は emoteSetId が userEmoteSets に含まれるか判定する
     ///
     /// - Parameter emote: 判定対象のエモート
     /// - Returns: 使用可能な場合は true
     func isAvailable(_ emote: HelixEmote) -> Bool {
-        guard !userEmoteSets.isEmpty else { return true }
+        guard let sets = userEmoteSets else { return true }
         guard let emoteSetId = emote.emoteSetId else { return true }
-        return userEmoteSets.contains(emoteSetId)
+        return sets.contains(emoteSetId)
     }
 
     // MARK: - プライベートメソッド
