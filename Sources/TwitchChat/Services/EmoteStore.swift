@@ -128,6 +128,8 @@ actor EmoteStore {
                 queryItems: [URLQueryItem(name: "broadcaster_id", value: broadcasterId)]
             )
             channelEmotes = response.data
+            // チャンネルエモートのロード完了をピッカーに通知する
+            notifyUserEmoteSetsUpdated()
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はスキップ
         } catch let error as URLError where error.code == .cancelled {
@@ -186,6 +188,8 @@ actor EmoteStore {
                 } while cursor != nil
                 self.userEmotes = accumulated
                 self.isUserEmotesLoaded = true
+                // ユーザーエモートのロード完了をピッカーに通知する
+                self.notifyUserEmoteSetsUpdated()
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン・スコープ未付与時はスキップ
             } catch let error as URLError where error.code == .cancelled {

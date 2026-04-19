@@ -337,12 +337,19 @@ final class ChatViewModel {
     ///
     /// PRIVMSG より先に届くため、接続直後のモデレーションコマンドが使えるようになる。
     /// room-id が既に設定済みの場合は上書きしない。
-    /// チャンネルバッジ・エモートのフェッチは appendMessage() で行う。
+    /// チャンネルエモートは ROOMSTATE 受信時にフェッチ開始し、ピッカーを開いたときに
+    /// 素早く表示できるようにする。バッジのフェッチは appendMessage() で行う。
     private func applyRoomState(roomId: String) {
         if currentRoomId == nil {
             currentRoomId = roomId
             // room-id 確定を ChannelManager に通知する（EventSub サブスクリプション登録に使用）
             onRoomIdConfirmed?(roomId)
+            // PRIVMSG より先に room-id が取得できるため、チャンネルエモートを早期フェッチする
+            // channelEmotesFetched フラグで重複フェッチを防止する（appendMessage() との排他制御）
+            if !channelEmotesFetched {
+                channelEmotesFetched = true
+                channelEmoteFetchTask = Task { await emoteStore.fetchChannelEmotes(broadcasterId: roomId) }
+            }
         }
     }
 
