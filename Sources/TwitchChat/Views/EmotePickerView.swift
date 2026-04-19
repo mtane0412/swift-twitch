@@ -59,6 +59,8 @@ struct EmotePickerView: View {
         }
         .frame(width: 320, height: 300)
         .task { await viewModel.loadEmotes() }
+        // ピッカー表示中に USERSTATE が届いた場合の使用可否リアルタイム更新
+        .task { await viewModel.observeUserEmoteSetsUpdates() }
     }
 }
 

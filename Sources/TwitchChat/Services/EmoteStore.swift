@@ -45,6 +45,13 @@ actor EmoteStore {
     /// - 空 `Set`: USERSTATE 受信済みだが使用可能セットが空
     private var userEmoteSets: Set<String>?
 
+    /// `userEmoteSets` 更新を待機している Continuation の一覧（ID → Continuation）
+    ///
+    /// `waitForNextUserEmoteSetsUpdate()` が呼ばれるたびに UUID キーで Continuation を登録し、
+    /// `updateUserEmoteSets` / `resetUserEmoteSets` が呼ばれたときに全件 resume する。
+    /// タスクキャンセル時は UUID で個別に resume して Continuation リークを防ぐ。
+    private var userEmoteSetsUpdateContinuations: [UUID: CheckedContinuation<Void, Never>] = [:]
+
     // MARK: - 初期化
 
     /// EmoteStore を初期化する
@@ -195,6 +202,16 @@ actor EmoteStore {
     /// - Parameter sets: USERSTATE の emote-sets タグから生成した Set<String>
     func updateUserEmoteSets(_ sets: Set<String>) {
         userEmoteSets = sets
+        notifyUserEmoteSetsUpdated()
+    }
+
+    /// ユーザーエモートセットをリセットする
+    ///
+    /// disconnect / ログアウト時に呼び出すことで、前回接続時のセット情報が
+    /// 次回接続に持ち越されないようにする。
+    func resetUserEmoteSets() {
+        userEmoteSets = nil
+        notifyUserEmoteSetsUpdated()
     }
 
     /// ユーザーが使用可能なエモートセット ID のスナップショットを返す
@@ -204,6 +221,38 @@ actor EmoteStore {
     /// - Returns: 使用可能なエモートセット ID の Set。`nil` の場合は USERSTATE 未受信。
     func userAvailableEmoteSets() -> Set<String>? {
         userEmoteSets
+    }
+
+    /// 次回の `userEmoteSets` 更新を待機する
+    ///
+    /// ピッカー表示中に USERSTATE が届いた場合に即座に追従するために使用する。
+    /// `updateUserEmoteSets` または `resetUserEmoteSets` が呼ばれたときに返る。
+    /// タスクキャンセル時は `withTaskCancellationHandler` が Continuation を resume して
+    /// リークを防ぐ。キャンセル時は resume するだけで CancellationError は投げない。
+    func waitForNextUserEmoteSetsUpdate() async {
+        guard !Task.isCancelled else { return }
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { cont in
+                userEmoteSetsUpdateContinuations[id] = cont
+            }
+        } onCancel: {
+            Task { await self.resumeContinuation(id: id) }
+        }
+        userEmoteSetsUpdateContinuations.removeValue(forKey: id)
+    }
+
+    /// 登録済みの全 Continuation を resume して更新を通知する
+    private func notifyUserEmoteSetsUpdated() {
+        let conts = userEmoteSetsUpdateContinuations
+        userEmoteSetsUpdateContinuations.removeAll()
+        conts.values.forEach { $0.resume() }
+    }
+
+    /// 指定 ID の Continuation を resume する（キャンセル時のリーク防止用）
+    private func resumeContinuation(id: UUID) {
+        guard let cont = userEmoteSetsUpdateContinuations.removeValue(forKey: id) else { return }
+        cont.resume()
     }
 
     /// チャンネルエモートのキャッシュをクリアする

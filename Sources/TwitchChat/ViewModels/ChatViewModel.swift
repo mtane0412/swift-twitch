@@ -281,6 +281,8 @@ final class ChatViewModel {
         // BadgeStore / EmoteStore 内部の unstructured task もキャンセルする（キャンセル伝播漏れの防止）
         await badgeStore.cancelGlobalFetch()
         await emoteStore.cancelGlobalFetch()
+        // disconnect 時にユーザーエモートセットをリセットし、前回接続の情報を持ち越さない
+        await emoteStore.resetUserEmoteSets()
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil

@@ -65,6 +65,19 @@ final class EmotePickerViewModel {
         applyFilter()
     }
 
+    /// ピッカー表示中に USERSTATE が届いた場合にエモートの使用可否をリアルタイムで更新する
+    ///
+    /// View の `.task` モディファイアから呼び出す。View が消えると `.task` が
+    /// このメソッドのタスクをキャンセルし、`waitForNextUserEmoteSetsUpdate` が
+    /// resume されてループを抜けるため、Continuation リークは発生しない。
+    func observeUserEmoteSetsUpdates() async {
+        while !Task.isCancelled {
+            await emoteStore.waitForNextUserEmoteSetsUpdate()
+            guard !Task.isCancelled else { break }
+            userEmoteSets = await emoteStore.userAvailableEmoteSets()
+        }
+    }
+
     /// エモートがユーザーにとって使用可能かどうかを返す
     ///
     /// - `userEmoteSets` が `nil`（USERSTATE 未受信）の場合は全て true
