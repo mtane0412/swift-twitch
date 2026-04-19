@@ -53,6 +53,15 @@ final class EmotePickerViewModel {
     /// このセットに含まれるエモートは USERSTATE の emoteSetId チェックによらず常に使用可能。
     private var userEmoteIds: Set<String> = []
 
+    /// 最後にセクションを構築したときのチャンネルエモート ID セット
+    ///
+    /// `observeUserEmoteSetsUpdates()` がエモートデータの変化を検知するために使用する。
+    /// USERSTATE のみの更新ではセクションを再構築しない最適化に使う。
+    private var lastBuiltChannelIds: Set<String> = []
+
+    /// 最後にセクションを構築したときのユーザーエモート ID セット
+    private var lastBuiltUserIds: Set<String> = []
+
     // MARK: - 初期化
 
     /// EmotePickerViewModel を初期化する
@@ -83,16 +92,35 @@ final class EmotePickerViewModel {
         await refreshSections()
     }
 
-    /// ピッカー表示中にエモートセットや USERSTATE が更新された場合にセクションをリアルタイムで再構築する
+    /// ピッカー表示中にエモートセット更新を監視し、変化に応じてセクションを更新する
     ///
-    /// View の `.task` モディファイアから呼び出す。View が消えると `.task` が
-    /// このメソッドのタスクをキャンセルし、`waitForNextUserEmoteSetsUpdate` が
-    /// resume されてループを抜けるため、Continuation リークは発生しない。
+    /// エモートデータ（チャンネル・ユーザーエモート）が変化した場合のみセクションを再構築する。
+    /// USERSTATE のみの更新（emote-sets 変化）はセクション再構築をスキップし、
+    /// 使用可否の再計算と再フィルタのみを行う。
+    /// これにより loadEmotes() との並行実行による表示名消失レースを防ぐ。
     func observeUserEmoteSetsUpdates() async {
         while !Task.isCancelled {
             await emoteStore.waitForNextUserEmoteSetsUpdate()
             guard !Task.isCancelled else { break }
-            await refreshSections()
+
+            userEmoteSets = await emoteStore.userAvailableEmoteSets()
+            userEmoteIds  = await emoteStore.userEmoteIdSet()
+
+            // エモートデータが変化した場合のみセクションを再構築する（USERSTATE のみの変化はスキップ）
+            let channel    = await emoteStore.channelEmotesSnapshot()
+            let user       = await emoteStore.userEmotesSnapshot()
+            let channelIds = Set(channel.map(\.id))
+            let userIds    = Set(user.map(\.id))
+
+            if channelIds != lastBuiltChannelIds || userIds != lastBuiltUserIds {
+                let global = await emoteStore.globalEmotesSnapshot()
+                await profileImageStore.fetchUsers(userIds: collectOwnerIds(channel: channel, user: user))
+                lastBuiltChannelIds = channelIds
+                lastBuiltUserIds    = userIds
+                allSections = buildSections(channel: channel, user: user, global: global)
+            }
+
+            applyFilter()
         }
     }
 
@@ -127,6 +155,8 @@ final class EmotePickerViewModel {
         userEmoteSets = await emoteStore.userAvailableEmoteSets()
         userEmoteIds  = await emoteStore.userEmoteIdSet()
         await profileImageStore.fetchUsers(userIds: collectOwnerIds(channel: channel, user: user))
+        lastBuiltChannelIds = Set(channel.map(\.id))
+        lastBuiltUserIds    = Set(user.map(\.id))
         allSections = buildSections(channel: channel, user: user, global: global)
         applyFilter()
     }

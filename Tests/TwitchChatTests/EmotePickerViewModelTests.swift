@@ -99,6 +99,105 @@ struct EmotePickerViewModelTests {
         #expect(subscribedSection?.title == "更新チャンネル")
     }
 
+    @Test("USERSTATE のみ更新されてもセクションは再構築されない（エモートデータが変わっていない場合）")
+    @MainActor
+    func testUserStateOnlyUpdateDoesNotRebuildSections() async throws {
+        // 前提: subscribedChannel セクションが 1 つある状態
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
+        let profileImageStore = ProfileImageStore(apiClient: MockProfileImageAPIClient())
+        let viewModel = EmotePickerViewModel(
+            emoteStore: store,
+            profileImageStore: profileImageStore,
+            currentBroadcasterId: nil
+        )
+        await store.setUserEmotes([
+            HelixEmote(id: "sub1", name: "Sub1", format: ["static"], emoteType: "subscriptions", emoteSetId: "111", ownerId: "11111")
+        ])
+        await viewModel.loadEmotes()
+        let initialSectionCount = viewModel.filteredSections.count
+
+        // observer 起動して待機状態にする
+        let observeTask = Task { await viewModel.observeUserEmoteSetsUpdates() }
+        for _ in 0..<5 { await Task.yield() }
+
+        // USERSTATE のみ更新（エモートデータは変えずに userEmoteSets を更新）
+        await store.updateUserEmoteSets(Set(["111"]))
+        try await Task.sleep(for: .milliseconds(50))
+        observeTask.cancel()
+
+        // 検証: セクション数に変化なし（再構築されていない）、可用性判定には反映されている
+        #expect(viewModel.filteredSections.count == initialSectionCount)
+    }
+
+    @Test("ユーザーエモートが増えた場合はセクションが再構築されて displayName が反映される")
+    @MainActor
+    func testUserEmoteIncreaseRebuildsSectionsWithDisplayName() async throws {
+        // 前提: 初回は空
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            HelixUserData(id: "22222", login: "new_ch", displayName: "新しいチャンネル", profileImageUrl: nil)
+        ])
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
+        let viewModel = EmotePickerViewModel(
+            emoteStore: store,
+            profileImageStore: profileImageStore,
+            currentBroadcasterId: nil
+        )
+        await viewModel.loadEmotes()
+        #expect(viewModel.filteredSections.isEmpty)
+
+        // observer 起動
+        let observeTask = Task { await viewModel.observeUserEmoteSetsUpdates() }
+        for _ in 0..<5 { await Task.yield() }
+
+        // ユーザーエモートを追加（count が増える）
+        await store.setUserEmotes([
+            HelixEmote(id: "new1", name: "New1", format: ["static"], emoteType: "subscriptions", emoteSetId: "222", ownerId: "22222")
+        ])
+        await store.notifyUserEmoteSetsUpdatedForTest()
+        try await Task.sleep(for: .milliseconds(100))
+        observeTask.cancel()
+
+        // 検証: セクションが追加され displayName が正しく設定されている
+        let section = viewModel.filteredSections.first { $0.kind == .subscribedChannel(ownerId: "22222") }
+        #expect(section?.title == "新しいチャンネル")
+    }
+
+    @Test("並行する古い refreshSections が新しい refreshSections の結果を上書きしない")
+    @MainActor
+    func testStaleRefreshDoesNotOverwriteNewerResult() async throws {
+        // 前提: 初回は空、その後エモートが追加される
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
+        let profileImageStore = ProfileImageStore(apiClient: MockProfileImageAPIClient())
+        let viewModel = EmotePickerViewModel(
+            emoteStore: store,
+            profileImageStore: profileImageStore,
+            currentBroadcasterId: nil
+        )
+
+        // observer タスクを先に起動して待機状態にする
+        let observeTask = Task { await viewModel.observeUserEmoteSetsUpdates() }
+        for _ in 0..<5 { await Task.yield() }
+
+        // ユーザーエモートを追加して通知（observer が新しいスナップショットで sections を構築）
+        await store.setUserEmotes([
+            HelixEmote(id: "race_emote", name: "raceEmote", format: ["static"], emoteType: "subscriptions", emoteSetId: "777", ownerId: "77777")
+        ])
+        await store.notifyUserEmoteSetsUpdatedForTest()
+
+        // loadEmotes も並行して呼ぶ（古いスナップショットで sections を上書きしようとする）
+        await viewModel.loadEmotes()
+
+        // 更新が落ち着くまで待つ
+        try await Task.sleep(for: .milliseconds(100))
+        observeTask.cancel()
+
+        // 検証: subscribedChannel セクションが消えていない（古いスナップショットで上書きされていない）
+        let hasSubscribedSection = viewModel.filteredSections.contains { $0.kind == .subscribedChannel(ownerId: "77777") }
+        #expect(hasSubscribedSection)
+    }
+
     @Test("グローバルエモートのみのとき global セクションだけが返る")
     @MainActor
     func testLoadEmotesGlobalOnly() async {
