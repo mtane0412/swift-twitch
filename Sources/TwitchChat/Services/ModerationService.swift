@@ -42,13 +42,25 @@ actor ModerationService: ModerationServiceProtocol {
 
     private let apiClient: any HelixAPIClientProtocol
 
+    /// ユーザー ID のインメモリキャッシュ（正規化済みログイン名 → ユーザーID + 取得日時）
+    private var userIdCache: [String: (userId: String, fetchedAt: Date)] = [:]
+
+    /// 現在日時を返すクロージャ（テスト時に差し替え可能）
+    private let currentDate: @Sendable () -> Date
+
+    /// キャッシュの有効期間（秒）。テストから参照できるよう internal アクセスにする
+    static let cacheTimeToLive: TimeInterval = 300
+
     // MARK: - 初期化
 
     /// ModerationService を初期化する
     ///
-    /// - Parameter apiClient: Helix API クライアント
-    init(apiClient: any HelixAPIClientProtocol) {
+    /// - Parameters:
+    ///   - apiClient: Helix API クライアント
+    ///   - currentDate: 現在日時を返すクロージャ（テスト時に時刻を注入するために使用）
+    init(apiClient: any HelixAPIClientProtocol, currentDate: @Sendable @escaping () -> Date = { Date() }) {
         self.apiClient = apiClient
+        self.currentDate = currentDate
     }
 
     // MARK: - ModerationServiceProtocol
@@ -113,6 +125,23 @@ actor ModerationService: ModerationServiceProtocol {
         let normalizedLogin = login
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+
+        let now = currentDate()
+
+        // 期限切れエントリを opportunistic pruning する（メモリ増大防止）
+        // filter による Dictionary 再生成を避け、removeValue でインプレース削除する
+        let keysToRemove = userIdCache.compactMap { key, value in
+            now.timeIntervalSince(value.fetchedAt) >= Self.cacheTimeToLive ? key : nil
+        }
+        for key in keysToRemove {
+            userIdCache.removeValue(forKey: key)
+        }
+
+        // TTL 内のキャッシュエントリがあれば API を呼ばずに返す
+        if let cached = userIdCache[normalizedLogin] {
+            return cached.userId
+        }
+
         let response: HelixUsersResponse = try await apiClient.get(
             url: Self.usersURL,
             queryItems: [URLQueryItem(name: "login", value: normalizedLogin)]
@@ -120,6 +149,9 @@ actor ModerationService: ModerationServiceProtocol {
         guard let user = response.data.first else {
             throw HelixAPIError.notFound
         }
+
+        // API 成功後のタイムスタンプを fetchedAt に使い、TTL の起点を正確にする
+        userIdCache[normalizedLogin] = (userId: user.id, fetchedAt: currentDate())
         return user.id
     }
 
