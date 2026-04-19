@@ -58,11 +58,11 @@ enum ChatCommandParser {
         switch commandName {
         case "emoteonly":   return .emoteOnly(enabled: true)
         case "emoteonlyoff": return .emoteOnly(enabled: false)
-        case "slow":        return parseOptionalIntCommand(args: args, commandName: commandName) { .slow(seconds: $0) }
+        case "slow":        return parseOptionalIntCommand(args: args, commandName: commandName, validRange: 3...120) { .slow(seconds: $0) }
         case "slowoff":     return .slowOff
         case "subscribers": return .subscribers(enabled: true)
         case "subscribersoff": return .subscribers(enabled: false)
-        case "followers":   return parseOptionalIntCommand(args: args, commandName: commandName) { .followers(duration: $0) }
+        case "followers":   return parseOptionalIntCommand(args: args, commandName: commandName, validRange: 0...129_600) { .followers(duration: $0) }
         case "followersoff": return .followersOff
         case "uniquechat":  return .uniqueChat(enabled: true)
         case "uniquechatoff": return .uniqueChat(enabled: false)
@@ -142,13 +142,18 @@ enum ChatCommandParser {
     private static func parseOptionalIntCommand(
         args: String,
         commandName: String,
+        validRange: ClosedRange<Int>? = nil,
         makeCommand: (Int?) -> ChatCommand
     ) -> ChatCommand {
         let trimmedArgs = args.trimmingCharacters(in: .whitespaces)
-        // 引数なしの場合はデフォルト値で有効化
+        // 引数なしの場合はデフォルト値で有効化（範囲チェック不要）
         if trimmedArgs.isEmpty { return makeCommand(nil) }
         // 先頭トークンを整数としてパース。非数値の場合は .unknown を返す
         guard let value = trimmedArgs.split(separator: " ").first.flatMap({ Int($0) }) else {
+            return .unknown(command: commandName, args: args)
+        }
+        // 範囲が指定されている場合、範囲外の値は .unknown を返す
+        if let validRange, !validRange.contains(value) {
             return .unknown(command: commandName, args: args)
         }
         return makeCommand(value)
