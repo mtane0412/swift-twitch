@@ -129,7 +129,13 @@ actor ModerationService: ModerationServiceProtocol {
         let now = currentDate()
 
         // 期限切れエントリを opportunistic pruning する（メモリ増大防止）
-        userIdCache = userIdCache.filter { now.timeIntervalSince($0.value.fetchedAt) < Self.cacheTimeToLive }
+        // filter による Dictionary 再生成を避け、removeValue でインプレース削除する
+        let keysToRemove = userIdCache.compactMap { key, value in
+            now.timeIntervalSince(value.fetchedAt) >= Self.cacheTimeToLive ? key : nil
+        }
+        for key in keysToRemove {
+            userIdCache.removeValue(forKey: key)
+        }
 
         // TTL 内のキャッシュエントリがあれば API を呼ばずに返す
         if let cached = userIdCache[normalizedLogin] {
@@ -144,8 +150,8 @@ actor ModerationService: ModerationServiceProtocol {
             throw HelixAPIError.notFound
         }
 
-        // 取得したユーザーIDをキャッシュに格納する
-        userIdCache[normalizedLogin] = (userId: user.id, fetchedAt: now)
+        // API 成功後のタイムスタンプを fetchedAt に使い、TTL の起点を正確にする
+        userIdCache[normalizedLogin] = (userId: user.id, fetchedAt: currentDate())
         return user.id
     }
 
