@@ -26,7 +26,7 @@ final class MentionCompletionViewModel {
     /// 選択中の候補インデックス
     private(set) var selectedIndex: Int = 0
 
-    /// テキスト内の @ から現在カーソルまでの NSRange（UTF-16 基準、置換に使用）
+    /// テキスト内の @ から現在カーソルまでの NSRange（Character 数基準、置換に使用）
     private(set) var mentionRange: NSRange?
 
     // MARK: - プライベートプロパティ
@@ -60,7 +60,7 @@ final class MentionCompletionViewModel {
             return
         }
 
-        mentionRange = NSRange(location: tokenInfo.atNSLocation, length: tokenInfo.tokenNSLength)
+        mentionRange = NSRange(location: tokenInfo.atCharLocation, length: tokenInfo.tokenCharLength)
 
         let newCandidates = mentionStore.candidates(matching: tokenInfo.query)
         candidates = newCandidates
@@ -125,7 +125,7 @@ final class MentionCompletionViewModel {
             return nil
         }
 
-        // 文字数ベースのインデックス（isWhitespace チェック用）
+        // Character 数インデックス（isWhitespace チェックおよび NSRange の location として使用）
         let atCharIndex = textUpToCursor.distance(from: textUpToCursor.startIndex, to: atRange.lowerBound)
 
         // @ の直前が空白または文頭であることを確認（メールアドレス等の誤検出防止）
@@ -144,18 +144,13 @@ final class MentionCompletionViewModel {
             return nil
         }
 
-        // UTF-16 オフセットを計算（NSRange / NSTextView との整合性のため）
-        let atNSLocation = textUpToCursor.utf16.distance(
-            from: textUpToCursor.utf16.startIndex,
-            to: atRange.lowerBound.samePosition(in: textUpToCursor.utf16)!
-        )
-        // "@" は BMP 文字で常に 1 UTF-16 code unit
-        let tokenNSLength = 1 + afterAt.utf16.count
+        // "@" は 1 Character、afterAt も Character 数で計算する（atCharIndex を再利用）
+        let tokenCharLength = 1 + afterAt.count
 
         return MentionTokenInfo(
-            atNSLocation: atNSLocation,
+            atCharLocation: atCharIndex,
             query: afterAt,
-            tokenNSLength: tokenNSLength
+            tokenCharLength: tokenCharLength
         )
     }
 }
@@ -164,10 +159,10 @@ final class MentionCompletionViewModel {
 
 /// メンショントークンの検出結果
 private struct MentionTokenInfo {
-    /// テキスト内の @ の UTF-16 オフセット（NSRange 用）
-    let atNSLocation: Int
+    /// テキスト内の @ の Character 数オフセット（nsViewRange 用）
+    let atCharLocation: Int
     /// @ 以降のクエリ文字列
     let query: String
-    /// トークン全体の UTF-16 長さ（@ + クエリ）
-    let tokenNSLength: Int
+    /// トークン全体の Character 数長さ（@ + クエリ）
+    let tokenCharLength: Int
 }

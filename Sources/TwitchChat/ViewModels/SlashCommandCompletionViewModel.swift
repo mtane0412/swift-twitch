@@ -27,7 +27,7 @@ final class SlashCommandCompletionViewModel {
     /// 選択中の候補インデックス
     private(set) var selectedIndex: Int = 0
 
-    /// テキスト内の / から現在クエリ末尾までの NSRange（UTF-16 基準、置換に使用）
+    /// テキスト内の / から現在クエリ末尾までの NSRange（Character 数基準、置換に使用）
     private(set) var commandRange: NSRange?
 
     // MARK: - パブリックメソッド
@@ -49,7 +49,7 @@ final class SlashCommandCompletionViewModel {
             return
         }
 
-        commandRange = NSRange(location: 0, length: tokenInfo.tokenNSLength)
+        commandRange = NSRange(location: 0, length: tokenInfo.tokenCharLength)
 
         let lowercasedQuery = tokenInfo.query.lowercased()
         let newCandidates = SlashCommandDefinition.allCommands.filter { command in
@@ -128,12 +128,12 @@ final class SlashCommandCompletionViewModel {
             return nil
         }
 
-        // "/" は BMP 文字で常に 1 UTF-16 code unit
-        let tokenNSLength = 1 + afterSlash.utf16.count
+        // "/" は 1 Character、afterSlash も Character 数で計算する
+        let tokenCharLength = 1 + afterSlash.count
 
         return SlashTokenInfo(
             query: afterSlash,
-            tokenNSLength: tokenNSLength
+            tokenCharLength: tokenCharLength
         )
     }
 }
@@ -144,6 +144,6 @@ final class SlashCommandCompletionViewModel {
 private struct SlashTokenInfo {
     /// / 以降のクエリ文字列（例: "ban", ""）
     let query: String
-    /// トークン全体の UTF-16 長さ（/ + クエリ）
-    let tokenNSLength: Int
+    /// トークン全体の Character 数長さ（/ + クエリ）
+    let tokenCharLength: Int
 }

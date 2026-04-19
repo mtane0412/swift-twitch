@@ -295,4 +295,22 @@ struct MentionCompletionViewModelTests {
         #expect(range?.length == 3)
         #expect(range?.location == 6)
     }
+
+    @Test("絵文字を含むテキストの後の @ の mentionRange は Character 数基準で正しい範囲を返す")
+    @MainActor
+    func testMentionRangeWithEmojiPrefix() {
+        let vm = MentionCompletionViewModel(mentionStore: makeStore())
+
+        // "🎮配信中 @ni" — "🎮" は UTF-16 で2 code unit だが Character では1文字
+        // "🎮配信中 " は 5 Character、UTF-16 では 6 code unit
+        let text = "🎮配信中 @ni"
+        vm.updateFromText(text, cursorPosition: text.count) // 8 Character
+
+        let range = vm.mentionRange
+        #expect(range != nil)
+        // "@ni" は 3 Character
+        #expect(range?.length == 3)
+        // "🎮配信中 " は 5 Character → location は 5（UTF-16 では 6 になるがそれは誤り）
+        #expect(range?.location == 5)
+    }
 }
