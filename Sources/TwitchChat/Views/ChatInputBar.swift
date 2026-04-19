@@ -339,9 +339,11 @@ struct ChatInputBar: View {
         guard let insertion = slashCommandCompletionVM.confirmSelection() else { return }
 
         // draft の / トークン部分を挿入文字列で置換する
+        // range は Character 数基準のため Swift String API で処理する（NSString は UTF-16 基準で不正）
         if let range {
-            let nsString = draft as NSString
-            draft = nsString.replacingCharacters(in: range, with: insertion)
+            let startIndex = draft.index(draft.startIndex, offsetBy: range.location)
+            let endIndex = draft.index(startIndex, offsetBy: range.length)
+            draft = draft.replacingCharacters(in: startIndex..<endIndex, with: insertion)
         } else {
             draft += insertion
         }
@@ -357,10 +359,11 @@ struct ChatInputBar: View {
         guard let insertion = mentionCompletionVM.confirmSelection() else { return }
 
         // draft の @ トークン部分を挿入文字列で置換する
-        // draft はプレーンテキストなので NSString で直接置換できる
+        // range は Character 数基準のため Swift String API で処理する（NSString は UTF-16 基準で不正）
         if let range {
-            let nsString = draft as NSString
-            draft = nsString.replacingCharacters(in: range, with: insertion)
+            let startIndex = draft.index(draft.startIndex, offsetBy: range.location)
+            let endIndex = draft.index(startIndex, offsetBy: range.length)
+            draft = draft.replacingCharacters(in: startIndex..<endIndex, with: insertion)
         } else {
             draft += insertion
         }
