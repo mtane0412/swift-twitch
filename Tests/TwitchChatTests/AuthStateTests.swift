@@ -35,7 +35,7 @@ struct AuthStateTests {
                 clientId: "testclientid",
                 login: "テスト配信者",
                 userId: "12345678",
-                scopes: ["chat:read", "chat:edit", "user:read:follows"],
+                scopes: ["chat:read", "chat:edit", "user:read:follows", "user:read:chat"],
                 expiresIn: 10000
             )
         )
@@ -233,13 +233,13 @@ struct AuthStateTests {
         let store = makeTestKeychainStore()
         try await store.save(key: "access_token", value: "テスト用トークン")
 
-        // 前提: chat:read と chat:edit を含む validateResponse を返すモック
+        // 前提: 必須スコープ（chat:edit・user:read:chat）を含む validateResponse を返すモック
         let mockClient = MockTwitchAuthClient(
             validateResponse: TwitchValidateResponse(
                 clientId: "testclientid",
                 login: "配信者ユーザー",
                 userId: "99999",
-                scopes: ["chat:read", "chat:edit"],
+                scopes: ["chat:read", "chat:edit", "user:read:chat"],
                 expiresIn: 14400
             )
         )
