@@ -65,6 +65,21 @@ actor PersistenceActor {
         try upsertBadges(badges, scope: scope)
     }
 
+    /// 指定スコープのバッジをタイムスタンプ付きで取得する
+    ///
+    /// `updatedAt` の最大値を `fetchedAt` として返す。未保存の場合は `fetchedAt` が nil。
+    func loadBadgesWithTimestamp(scope: BadgeScope) -> (snapshots: [BadgeVersionSnapshot], fetchedAt: Date?) {
+        let scopeRaw = badgeScopeRaw(scope)
+        let descriptor = FetchDescriptor<PersistedBadgeVersion>(
+            predicate: #Predicate { $0.scope == scopeRaw }
+        )
+        let rows = (try? modelContext.fetch(descriptor)) ?? []
+        guard !rows.isEmpty else { return (snapshots: [], fetchedAt: nil) }
+        let snapshots = rows.map { $0.toDomain() }
+        let fetchedAt = rows.map(\.updatedAt).max()
+        return (snapshots: snapshots, fetchedAt: fetchedAt)
+    }
+
     // MARK: - プロフィール
 
     /// 指定ユーザーIDのプロフィールを一括取得する

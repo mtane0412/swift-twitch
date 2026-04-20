@@ -20,7 +20,8 @@ actor InMemoryPersistenceService: PersistenceService {
     private var userEmotes: [String: [HelixEmote]] = [:]
     private var globalEmotes: [HelixEmote] = []
     private var channelEmotes: [String: [HelixEmote]] = [:]
-    private var badges: [BadgeScope: [BadgeVersionSnapshot]] = [:]
+    /// バッジデータとその保存時刻を保持する（TTL 判定に使用）
+    private var badges: [BadgeScope: (snapshots: [BadgeVersionSnapshot], savedAt: Date)] = [:]
     private var userProfiles: [String: UserProfileSnapshot] = [:]
     /// roomId をキーにメッセージを格納。roomId が nil のメッセージは `noRoomKey` に格納する
     private var messages: [String: [ChatMessage]] = [:]
@@ -55,11 +56,16 @@ actor InMemoryPersistenceService: PersistenceService {
     }
 
     func loadBadges(scope: BadgeScope) async -> [BadgeVersionSnapshot] {
-        badges[scope] ?? []
+        badges[scope]?.snapshots ?? []
     }
 
     func saveBadges(_ badgeList: [BadgeVersionSnapshot], scope: BadgeScope) async throws {
-        badges[scope] = badgeList
+        badges[scope] = (snapshots: badgeList, savedAt: Date())
+    }
+
+    func loadBadgesWithTimestamp(scope: BadgeScope) async -> (snapshots: [BadgeVersionSnapshot], fetchedAt: Date?) {
+        guard let entry = badges[scope] else { return (snapshots: [], fetchedAt: nil) }
+        return (snapshots: entry.snapshots, fetchedAt: entry.savedAt)
     }
 
     func loadUserProfiles(userIds: [String]) async -> [UserProfileSnapshot] {
@@ -122,4 +128,11 @@ actor InMemoryPersistenceService: PersistenceService {
         userEmotes.removeValue(forKey: userId)
         userProfiles.removeValue(forKey: userId)
     }
+
+#if DEBUG
+    /// テスト用: バッジを任意の保存日時で登録する（TTL 検証用）
+    func saveBadgesWithDate(_ badgeList: [BadgeVersionSnapshot], scope: BadgeScope, savedAt: Date) async {
+        badges[scope] = (snapshots: badgeList, savedAt: savedAt)
+    }
+#endif
 }

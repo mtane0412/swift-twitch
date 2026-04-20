@@ -50,6 +50,12 @@ protocol PersistenceService: Sendable {
     /// - Throws: ディスクまたはデータベース書き込みに失敗した場合
     func saveBadges(_ badges: [BadgeVersionSnapshot], scope: BadgeScope) async throws
 
+    /// 指定スコープのバッジ一覧をタイムスタンプ付きでロードする
+    ///
+    /// TTL 判定（24h stale-while-revalidate）に使用する。
+    /// 該当スコープのバッジが未保存の場合は `fetchedAt` に nil を返す。
+    func loadBadgesWithTimestamp(scope: BadgeScope) async -> (snapshots: [BadgeVersionSnapshot], fetchedAt: Date?)
+
     /// 指定ユーザーID 一覧のプロフィールをロードする
     ///
     /// 取得できたプロフィールのみを返す。指定した ID が存在しない場合はその要素を省略する。

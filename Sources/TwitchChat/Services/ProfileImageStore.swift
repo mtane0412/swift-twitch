@@ -129,7 +129,18 @@ final class ProfileImageStore {
         // 未取得かつフェッチ中でないユーザーのみ対象にする
         // fetchedUserIds でフェッチ済み（URL が nil のユーザーを含む）を除外し、
         // @MainActor の await サスペンション中に別タスクが同じ ID を重複リクエストする問題を防ぐ
-        let newUserIds = userIds.filter { !fetchedUserIds.contains($0) && !inFlightUserIds.contains($0) }
+        var newUserIds = userIds.filter { !fetchedUserIds.contains($0) && !inFlightUserIds.contains($0) }
+
+        // 永続化キャッシュから先読みして API 呼び出しを最小化する
+        if !newUserIds.isEmpty, let persistence = persistenceService {
+            let cached = await persistence.loadUserProfiles(userIds: newUserIds)
+            for snapshot in cached {
+                applyCachedSnapshot(snapshot)
+            }
+            // キャッシュで解決済みの ID は API から取得しない
+            let cachedIds = Set(cached.map(\.userId))
+            newUserIds = newUserIds.filter { !cachedIds.contains($0) }
+        }
 
         if !newUserIds.isEmpty {
             // フェッチ中フラグを設定し、完了後に必ず解除する
@@ -197,6 +208,37 @@ final class ProfileImageStore {
         await fetchAndStore(queryItems: queryItems, fallbackIds: logins, mode: .login)
     }
 
+    /// API 取得結果を永続化サービスに非同期保存する（fire-and-forget）
+    private func persistUserProfilesAsync(from users: [HelixUserData]) {
+        guard let persistence = persistenceService, !users.isEmpty else { return }
+        let snapshots = users.map { userData in
+            UserProfileSnapshot(
+                userId: userData.id,
+                login: userData.login.lowercased(),
+                displayName: userData.displayName,
+                profileImageUrl: userData.profileImageUrl?.absoluteString
+            )
+        }
+        Task { [persistence] in
+            try? await persistence.saveUserProfiles(snapshots)
+        }
+    }
+
+    /// 永続化スナップショットをインメモリキャッシュに適用する
+    ///
+    /// fetchUsers の先読みで使用する。`fetchedUserIds` にも登録することで
+    /// 同一ユーザーへの重複 API 呼び出しを防ぐ。
+    private func applyCachedSnapshot(_ snapshot: UserProfileSnapshot) {
+        fetchedUserIds.insert(snapshot.userId)
+        fetchedLogins.insert(snapshot.login)
+        loginToUserId[snapshot.login] = snapshot.userId
+        userLogins[snapshot.userId] = snapshot.login
+        displayNames[snapshot.userId] = snapshot.displayName
+        if let urlString = snapshot.profileImageUrl, let url = URL(string: urlString) {
+            profileImageUrls[snapshot.userId] = url
+        }
+    }
+
     /// Helix API を呼び出してレスポンスをキャッシュに保存する共通処理
     ///
     /// - Parameters:
@@ -239,6 +281,7 @@ final class ProfileImageStore {
                 let returnedLogins = Set(response.data.map { $0.login.lowercased() })
                 fetchedLogins.formUnion(Set(fallbackIds).subtracting(returnedLogins))
             }
+            persistUserProfilesAsync(from: response.data)
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             #if DEBUG
             logger.debug("プロフィール画像取得スキップ: 未認証 queryItems=\(queryItems)")

@@ -2,6 +2,7 @@
 // アプリケーションのエントリポイント
 // SwiftUI の App プロトコルに準拠し、メインウィンドウを定義する
 
+import os.log
 import SwiftUI
 
 /// Twitch IRC チャットビューアーのアプリ定義
@@ -69,7 +70,14 @@ struct TwitchChatApp: App {
                 ProgressView("起動中...")
                     .onAppear {
                         let helixClient = HelixAPIClient(tokenProvider: authState)
-                        let persistenceContainer = PersistenceContainer.makeInMemory()
+                        let persistenceContainer: PersistenceContainer
+                        do {
+                            persistenceContainer = try PersistenceContainer.makeOnDisk()
+                        } catch {
+                            Logger(subsystem: "dev.mtane.TwitchChat", category: "Persistence")
+                                .error("makeOnDisk 失敗、InMemory にフォールバック: \(error.localizedDescription)")
+                            persistenceContainer = .makeInMemory()
+                        }
                         channelManager = ChannelManager(
                             authState: authState,
                             persistenceService: persistenceContainer.service

@@ -25,6 +25,11 @@ actor BadgeStore {
     /// Helix チャンネルバッジエンドポイント
     private static let helixChannelBadgesURL = URL(string: "https://api.twitch.tv/helix/chat/badges")!
 
+    // MARK: - 定数
+
+    /// グローバルバッジの TTL（24 時間）
+    private static let badgeTTL: TimeInterval = 86400
+
     // MARK: - 状態
 
     /// グローバルバッジのURLマッピング
@@ -42,16 +47,39 @@ actor BadgeStore {
     /// Helix API クライアント
     private let apiClient: any HelixAPIClientProtocol
 
+    /// 永続化サービス（seed / write-back に使用）
+    private let persistenceService: (any PersistenceService)?
+
     // MARK: - 初期化
 
     /// BadgeStore を初期化する
     ///
-    /// - Parameter apiClient: Helix API クライアント（テスト時はモックを注入）
-    init(apiClient: any HelixAPIClientProtocol) {
+    /// - Parameters:
+    ///   - apiClient: Helix API クライアント（テスト時はモックを注入）
+    ///   - persistenceService: 永続化サービス（nil の場合は永続化なし）
+    init(apiClient: any HelixAPIClientProtocol, persistenceService: (any PersistenceService)? = nil) {
         self.apiClient = apiClient
+        self.persistenceService = persistenceService
     }
 
     // MARK: - 公開メソッド
+
+    /// 永続化済みグローバルバッジを読み込んでキャッシュを事前充填する
+    ///
+    /// チャンネル接続時に呼び出す。TTL（24h）以内のデータなら `isGlobalLoaded = true`
+    /// にして後続の `fetchGlobalBadges()` による API 呼び出しを抑止する（stale-while-revalidate）。
+    /// TTL 超過時は古いデータでキャッシュを充填した上で `isGlobalLoaded = false` のままにし、
+    /// 後続の `fetchGlobalBadges()` で再フェッチさせる。
+    func seedFromPersistence() async {
+        guard let persistence = persistenceService else { return }
+        let result = await persistence.loadBadgesWithTimestamp(scope: .global)
+        guard !result.snapshots.isEmpty else { return }
+        globalBadges = Self.buildMapping(from: result.snapshots)
+        if let fetchedAt = result.fetchedAt,
+           Date().timeIntervalSince(fetchedAt) < Self.badgeTTL {
+            isGlobalLoaded = true
+        }
+    }
 
     /// グローバルバッジ定義をフェッチする
     ///
@@ -73,6 +101,13 @@ actor BadgeStore {
                 )
                 self.globalBadges = Self.buildMapping(from: response.data)
                 self.isGlobalLoaded = true
+                // write-back: 永続化サービスが存在すればバッジを非同期保存する
+                if let persistence = self.persistenceService {
+                    let snapshots = response.data.map { Self.badgeVersionSnapshot(from: $0) }.flatMap { $0 }
+                    Task { [persistence] in
+                        try? await persistence.saveBadges(snapshots, scope: .global)
+                    }
+                }
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
             } catch let error as URLError where error.code == .cancelled {
@@ -105,6 +140,13 @@ actor BadgeStore {
                 queryItems: [URLQueryItem(name: "broadcaster_id", value: channelId)]
             )
             channelBadges = Self.buildMapping(from: response.data)
+            // write-back: 永続化サービスが存在すればチャンネルスコープで非同期保存する
+            if let persistence = persistenceService {
+                let snapshots = response.data.map { Self.badgeVersionSnapshot(from: $0) }.flatMap { $0 }
+                Task { [persistence] in
+                    try? await persistence.saveBadges(snapshots, scope: .channel(broadcasterId: channelId))
+                }
+            }
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はスキップ
         } catch HelixAPIError.unauthorized {
@@ -178,5 +220,34 @@ actor BadgeStore {
             mapping[set.setId] = versions
         }
         return mapping
+    }
+
+    /// BadgeVersionSnapshot の配列から URLマッピングを構築する
+    ///
+    /// 永続化キャッシュから復元する際に使用する。2x URL を採用する。
+    ///
+    /// - Parameter snapshots: 永続化済みバッジスナップショットの配列
+    /// - Returns: [バッジ名: [バージョン: URLString]] のマッピング
+    static func buildMapping(from snapshots: [BadgeVersionSnapshot]) -> BadgeURLMapping {
+        var mapping: BadgeURLMapping = [:]
+        for snapshot in snapshots {
+            mapping[snapshot.setId, default: [:]][snapshot.version] = snapshot.imageUrl2x
+        }
+        return mapping
+    }
+
+    /// HelixBadgeSet を BadgeVersionSnapshot の配列に変換する（write-back 用）
+    private static func badgeVersionSnapshot(from badgeSet: HelixBadgeSet) -> [BadgeVersionSnapshot] {
+        badgeSet.versions.map { version in
+            BadgeVersionSnapshot(
+                setId: badgeSet.setId,
+                version: version.id,
+                imageUrl1x: version.imageUrl1x,
+                imageUrl2x: version.imageUrl2x,
+                imageUrl4x: version.imageUrl4x,
+                title: version.title,
+                description: version.description
+            )
+        }
     }
 }

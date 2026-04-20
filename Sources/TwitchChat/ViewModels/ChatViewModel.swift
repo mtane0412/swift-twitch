@@ -158,16 +158,18 @@ final class ChatViewModel {
     ///   - authState: 認証状態（ログイン済みなら認証接続に使用）
     ///   - apiClient: Helix API クライアント（テスト時はモックを注入）
     ///   - moderationService: モデレーションサービス（テスト時はモックを注入）
+    ///   - persistenceService: 永続化サービス（nil の場合は永続化なし）
     init(
         ircClient: any TwitchIRCClientProtocol = TwitchIRCClient(),
         authState: AuthState = AuthState(),
         apiClient: (any HelixAPIClientProtocol)? = nil,
-        moderationService: (any ModerationServiceProtocol)? = nil
+        moderationService: (any ModerationServiceProtocol)? = nil,
+        persistenceService: (any PersistenceService)? = nil
     ) {
         self.ircClient = ircClient
         self.authState = authState
         let helixClient = apiClient ?? HelixAPIClient(tokenProvider: authState)
-        self.badgeStore = BadgeStore(apiClient: helixClient)
+        self.badgeStore = BadgeStore(apiClient: helixClient, persistenceService: persistenceService)
         self.emoteStore = EmoteStore(apiClient: helixClient)
         self.moderationService = moderationService ?? ModerationService(apiClient: helixClient)
     }
@@ -192,7 +194,11 @@ final class ChatViewModel {
         await emoteStore.resetChannelEmotes()
 
         // グローバルバッジ・エモート定義を並行フェッチ（切断時にキャンセルできるよう保持）
-        globalBadgeFetchTask = Task { await badgeStore.fetchGlobalBadges() }
+        // seedFromPersistence でキャッシュを先読みしてから fetchGlobalBadges を実行する（stale-while-revalidate）
+        globalBadgeFetchTask = Task {
+            await badgeStore.seedFromPersistence()
+            await badgeStore.fetchGlobalBadges()
+        }
         globalEmoteFetchTask = Task { await emoteStore.fetchGlobalEmotes() }
 
         // ユーザーエモートを並行フェッチ（user:read:emotes スコープがある場合のみ）

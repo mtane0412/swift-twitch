@@ -156,7 +156,12 @@ final class ChannelManager {
 
         // 新規接続
         let ircClient = makeIRCClient()
-        let viewModel = ChatViewModel(ircClient: ircClient, authState: authState, apiClient: apiClient)
+        let viewModel = ChatViewModel(
+            ircClient: ircClient,
+            authState: authState,
+            apiClient: apiClient,
+            persistenceService: persistenceService
+        )
 
         // プリロード済みユーザーエモートをシードして初回ピッカー表示を高速化する
         // connect() より前にシードすることで、USERSTATE 到着前からエモートが利用可能になる
