@@ -1,14 +1,15 @@
 // EmotePickerView.swift
 // エモートピッカービュー
-// グリッド表示と検索フィルタでエモートを選択し、入力フォームに挿入できるビュー
+// グリッド表示・チャンネルごとのセクション・検索フィルタでエモートを選択し入力フォームに挿入できるビュー
 
 import AppKit
 import SwiftUI
 
 /// エモートピッカービュー
 ///
+/// - セクション表示: チャンネルごとにエモートをグループ化し、ヘッダーにアイコン＋名前を表示する
 /// - グリッド表示: `LazyVGrid` でエモートサムネイルを並べる
-/// - 検索フィルタ: テキストフィールドで名前を絞り込む（大文字小文字非区別）
+/// - 検索フィルタ: テキストフィールドで名前を絞り込む（大文字小文字非区別・全セクション横断）
 /// - エモートを選択すると `onSelect` コールバックでエモート名を呼び出し元に通知する
 struct EmotePickerView: View {
 
@@ -16,9 +17,22 @@ struct EmotePickerView: View {
 
     @State private var viewModel: EmotePickerViewModel
 
-    init(emoteStore: EmoteStore, onSelect: @escaping (String) -> Void) {
+    /// プロフィール画像・表示名ストア（セクションヘッダーのアイコン表示に使用）
+    var profileImageStore: ProfileImageStore
+
+    init(
+        emoteStore: EmoteStore,
+        profileImageStore: ProfileImageStore,
+        currentBroadcasterId: String?,
+        onSelect: @escaping (String) -> Void
+    ) {
         self.onSelect = onSelect
-        self._viewModel = State(initialValue: EmotePickerViewModel(emoteStore: emoteStore))
+        self.profileImageStore = profileImageStore
+        self._viewModel = State(initialValue: EmotePickerViewModel(
+            emoteStore: emoteStore,
+            profileImageStore: profileImageStore,
+            currentBroadcasterId: currentBroadcasterId
+        ))
     }
 
     var body: some View {
@@ -30,8 +44,8 @@ struct EmotePickerView: View {
 
             Divider()
 
-            // エモートグリッド
-            if viewModel.filteredEmotes.isEmpty {
+            // エモートグリッド（セクション分け）
+            if viewModel.filteredSections.isEmpty {
                 Spacer()
                 Text("エモートが見つかりません")
                     .font(.caption)
@@ -39,28 +53,80 @@ struct EmotePickerView: View {
                 Spacer()
             } else {
                 ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 4) {
-                        ForEach(viewModel.filteredEmotes) { emote in
-                            let available = viewModel.isAvailable(emote)
-                            Button {
-                                onSelect(emote.name)
-                            } label: {
-                                EmoteCellView(emoteId: emote.id, emoteName: emote.name, isAvailable: available)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 4, pinnedViews: [.sectionHeaders]) {
+                        ForEach(viewModel.filteredSections) { section in
+                            Section {
+                                ForEach(section.emotes) { emote in
+                                    let available = viewModel.isAvailable(emote)
+                                    Button {
+                                        onSelect(emote.name)
+                                    } label: {
+                                        EmoteCellView(emoteId: emote.id, emoteName: emote.name, isAvailable: available)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(!available)
+                                    .accessibilityLabel(Text(emote.name))
+                                    .accessibilityValue(available ? "" : "使用不可")
+                                }
+                            } header: {
+                                EmoteSectionHeader(section: section, profileImageStore: profileImageStore)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!available)
-                            .accessibilityLabel(Text(emote.name))
-                            .accessibilityValue(available ? "" : "使用不可")
                         }
                     }
-                    .padding(8)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
                 }
             }
         }
-        .frame(width: 320, height: 300)
+        .frame(width: 320, height: 380)
         .task { await viewModel.loadEmotes() }
         // ピッカー表示中に USERSTATE が届いた場合の使用可否リアルタイム更新
         .task { await viewModel.observeUserEmoteSetsUpdates() }
+    }
+}
+
+/// エモートセクションヘッダービュー
+///
+/// チャンネルアイコン（ProfileImageStore から取得）とセクション名を横並びに表示する。
+/// グローバル・HYPE・その他セクションはアイコンなし。
+private struct EmoteSectionHeader: View {
+
+    let section: EmotePickerSection
+    let profileImageStore: ProfileImageStore
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // チャンネルアイコン（currentChannel / subscribedChannel のみ表示）
+            if let userId = section.iconUserId,
+               let iconUrl = profileImageStore.profileImageUrl(for: userId) {
+                AsyncImage(url: iconUrl) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.clear
+                }
+                .frame(width: 14, height: 14)
+                .clipShape(Circle())
+            }
+
+            // displayName → login → section.title の順でヘッダーテキストを決定する（@Observable で自動更新）
+            Text(section.iconUserId.flatMap { profileImageStore.displayName(for: $0) ?? profileImageStore.login(for: $0) } ?? section.title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(.windowBackgroundColor))
+        // ヘッダー表示時にも displayName を確実に取得する（タイミング次第でキャッシュ未到達の場合に対応）
+        .task(id: section.iconUserId) {
+            if let userId = section.iconUserId {
+                await profileImageStore.fetchUsers(userIds: [userId])
+            }
+        }
     }
 }
 

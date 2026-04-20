@@ -666,4 +666,70 @@ struct EmoteStoreTests {
         // 検証: リセット後はスナップショットが空
         #expect(snapshot.isEmpty)
     }
+
+    // MARK: - channelEmotesSnapshot
+
+    @Test("channelEmotesSnapshot は設定済みチャンネルエモートを返す")
+    func testChannelEmotesSnapshotReturnsCurrentEmotes() async {
+        // 前提: チャンネルエモートを直接設定済み
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setChannelEmotes([.チャンネルエモートHype])
+
+        let snapshot = await store.channelEmotesSnapshot()
+
+        // 検証: 設定したチャンネルエモートが全件返る
+        #expect(snapshot.count == 1)
+        #expect(snapshot.first?.id == HelixEmote.チャンネルエモートHype.id)
+    }
+
+    @Test("channelEmotesSnapshot はチャンネルエモートが未設定の場合に空配列を返す")
+    func testChannelEmotesSnapshotEmpty() async {
+        // 前提: チャンネルエモートが設定されていない
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+
+        let snapshot = await store.channelEmotesSnapshot()
+
+        // 検証: チャンネルエモート未設定のため空配列
+        #expect(snapshot.isEmpty)
+    }
+
+    @Test("channelEmotesSnapshot は resetChannelEmotes 後に空配列を返す")
+    func testChannelEmotesSnapshotAfterReset() async {
+        // 前提: チャンネルエモートを設定してからリセット
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setChannelEmotes([.チャンネルエモートHype])
+        await store.resetChannelEmotes()
+
+        let snapshot = await store.channelEmotesSnapshot()
+
+        // 検証: リセット後はスナップショットが空
+        #expect(snapshot.isEmpty)
+    }
+
+    // MARK: - globalEmotesSnapshot
+
+    @Test("globalEmotesSnapshot は設定済みグローバルエモートを返す")
+    func testGlobalEmotesSnapshotReturnsCurrentEmotes() async {
+        // 前提: グローバルエモートを直接設定済み
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setGlobalEmotes([.グローバルエモートLUL, .グローバルエモートPogChamp])
+
+        let snapshot = await store.globalEmotesSnapshot()
+
+        // 検証: 設定したグローバルエモートが全件返る
+        #expect(snapshot.count == 2)
+        #expect(snapshot.contains(where: { $0.id == HelixEmote.グローバルエモートLUL.id }))
+        #expect(snapshot.contains(where: { $0.id == HelixEmote.グローバルエモートPogChamp.id }))
+    }
+
+    @Test("globalEmotesSnapshot はグローバルエモートが未設定の場合に空配列を返す")
+    func testGlobalEmotesSnapshotEmpty() async {
+        // 前提: グローバルエモートが設定されていない
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+
+        let snapshot = await store.globalEmotesSnapshot()
+
+        // 検証: グローバルエモート未設定のため空配列
+        #expect(snapshot.isEmpty)
+    }
 }

@@ -430,6 +430,57 @@ struct ChannelManagerTests {
         #expect(userEmoteIdSet.isEmpty)
     }
 
+    @Test("preloadEmoteOwnerDisplayNames でプリロード済みエモートの ownerId の表示名が ProfileImageStore にキャッシュされる")
+    func testPreloadEmoteOwnerDisplayNamesFetchesDisplayNames() async {
+        // 前提: ownerId "99999" を持つユーザーエモートがプリロードストアに設定済み
+        let preloadStore = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await preloadStore.setUserEmotes([
+            HelixEmote(
+                id: "emote_sub_99999", name: "サブチャンネルエモート", format: ["static"],
+                emoteType: "subscriptions", emoteSetId: "set_99999", ownerId: "99999"
+            )
+        ])
+        let manager = ChannelManager(
+            authState: AuthState(),
+            makeIRCClient: { MockTwitchIRCClient() },
+            preloadEmoteStore: preloadStore
+        )
+        // モック API が ownerId "99999" に対して "サブチャンネル配信者" を返す
+        let mockClient = MockProfileImageAPIClient()
+        await mockClient.setUsers([
+            HelixUserData(id: "99999", login: "sub_channel", displayName: "サブチャンネル配信者", profileImageUrl: nil)
+        ])
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
+
+        // 操作: ownerId の表示名をプリロードする
+        await manager.preloadEmoteOwnerDisplayNames(using: profileImageStore)
+
+        // 検証: ProfileImageStore に ownerId の displayName がキャッシュされている
+        #expect(profileImageStore.displayName(for: "99999") == "サブチャンネル配信者")
+    }
+
+    @Test("ownerId が nil またはゼロのエモートのみの場合 preloadEmoteOwnerDisplayNames は API を呼ばない")
+    func testPreloadEmoteOwnerDisplayNamesSkipsNilAndZeroOwnerIds() async {
+        // 前提: ownerId が nil / "0" のエモートのみ
+        let preloadStore = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await preloadStore.setUserEmotes([
+            HelixEmote(id: "global1", name: "GlobalEmote", format: ["static"], emoteType: "globals", ownerId: nil),
+            HelixEmote(id: "global2", name: "TurboEmote", format: ["static"], emoteType: "turbo", ownerId: "0")
+        ])
+        let manager = ChannelManager(
+            authState: AuthState(),
+            makeIRCClient: { MockTwitchIRCClient() },
+            preloadEmoteStore: preloadStore
+        )
+        let mockClient = MockProfileImageAPIClient()
+        let profileImageStore = ProfileImageStore(apiClient: mockClient)
+
+        await manager.preloadEmoteOwnerDisplayNames(using: profileImageStore)
+
+        // 検証: API が呼ばれていないこと（callCount == 0）
+        #expect(await mockClient.callCount == 0)
+    }
+
     @Test("roomId 確定時に ChatViewModel の onRoomIdConfirmed コールバックがセットされている")
     func testRoomIdConfirmedCallbackIsConfigured() async throws {
         // 前提: MockTwitchIRCClient と MockTwitchEventSubClient を使う

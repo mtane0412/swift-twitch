@@ -113,6 +113,21 @@ final class ChannelManager {
         await preloadEmoteStore.fetchUserEmotes(userId: userId)
     }
 
+    /// プリロード済みユーザーエモートの ownerId に対応する表示名を ProfileImageStore に事前キャッシュする
+    ///
+    /// `preloadUserEmotes()` 完了後に呼ぶことで、エモートピッカーを開いた時点で
+    /// チャンネル表示名がキャッシュ済みになり、数字IDが表示されるのを防ぐ。
+    /// ownerId が nil または "0" のエモートはスキップする。
+    func preloadEmoteOwnerDisplayNames(using profileImageStore: ProfileImageStore) async {
+        let userEmotes = await preloadEmoteStore.userEmotesSnapshot()
+        var ids = Set<String>()
+        for emote in userEmotes {
+            if let ownerId = emote.ownerId, ownerId != "0", !ownerId.isEmpty { ids.insert(ownerId) }
+        }
+        guard !ids.isEmpty else { return }
+        await profileImageStore.fetchUsers(userIds: Array(ids))
+    }
+
     /// 指定チャンネルに参加する
     ///
     /// - 未接続の場合: 新しい `ChatViewModel` を作成して接続開始し、選択状態にする

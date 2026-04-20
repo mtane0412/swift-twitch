@@ -336,6 +336,24 @@ actor EmoteStore {
         userEmotes
     }
 
+    /// 現在のチャンネルエモート一覧のスナップショットを返す
+    ///
+    /// `EmotePickerViewModel` がセクション分けされたエモート一覧を構築する際に使用する。
+    ///
+    /// - Returns: 現在のチャンネルエモート一覧（未ロードの場合は空配列）
+    func channelEmotesSnapshot() -> [HelixEmote] {
+        channelEmotes
+    }
+
+    /// 現在のグローバルエモート一覧のスナップショットを返す
+    ///
+    /// `EmotePickerViewModel` がセクション分けされたエモート一覧を構築する際に使用する。
+    ///
+    /// - Returns: 現在のグローバルエモート一覧（未ロードの場合は空配列）
+    func globalEmotesSnapshot() -> [HelixEmote] {
+        globalEmotes
+    }
+
     /// ユーザーが使用可能なエモートセット ID を更新する
     ///
     /// USERSTATE の `emote-sets` タグを受信するたびに呼び出す。
@@ -461,6 +479,11 @@ actor EmoteStore {
     /// ユーザーエモートセットを直接設定する（テスト用）
     func setUserEmoteSets(_ sets: Set<String>) {
         userEmoteSets = sets
+    }
+
+    /// エモートセット更新通知をテストから手動発火する（テスト用）
+    func notifyUserEmoteSetsUpdatedForTest() {
+        notifyUserEmoteSetsUpdated()
     }
 #endif
 }

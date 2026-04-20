@@ -33,6 +33,12 @@ final class ProfileImageStore {
     /// userId → profileImageUrl のキャッシュ
     private var profileImageUrls: [String: URL] = [:]
 
+    /// userId → displayName のキャッシュ（エモートピッカーのセクションヘッダーに使用）
+    private var displayNames: [String: String] = [:]
+
+    /// userId → login のキャッシュ（displayName のフォールバック表示に使用）
+    private var userLogins: [String: String] = [:]
+
     /// login → userId のマッピング（userId フェッチ時にもログイン名から参照できるよう記録する）
     private var loginToUserId: [String: String] = [:]
 
@@ -92,6 +98,22 @@ final class ProfileImageStore {
         loginToUserId[login.lowercased()]
     }
 
+    /// 指定ユーザーIDの表示名（display_name）を取得する
+    ///
+    /// - Parameter userId: Twitch ユーザーID
+    /// - Returns: 表示名（未取得またはユーザーが存在しない場合は `nil`）
+    func displayName(for userId: String) -> String? {
+        displayNames[userId]
+    }
+
+    /// 指定ユーザーIDのログイン名（login）を取得する
+    ///
+    /// - Parameter userId: Twitch ユーザーID
+    /// - Returns: ログイン名（未取得またはユーザーが存在しない場合は `nil`）
+    func login(for userId: String) -> String? {
+        userLogins[userId]
+    }
+
     /// 複数ユーザーのプロフィール画像URLを一括取得する
     ///
     /// - Parameter userIds: 取得対象の Twitch ユーザーID 一覧
@@ -102,16 +124,23 @@ final class ProfileImageStore {
         // fetchedUserIds でフェッチ済み（URL が nil のユーザーを含む）を除外し、
         // @MainActor の await サスペンション中に別タスクが同じ ID を重複リクエストする問題を防ぐ
         let newUserIds = userIds.filter { !fetchedUserIds.contains($0) && !inFlightUserIds.contains($0) }
-        guard !newUserIds.isEmpty else { return }
 
-        // フェッチ中フラグを設定し、完了後に必ず解除する
-        inFlightUserIds.formUnion(newUserIds)
-        defer { inFlightUserIds.subtract(newUserIds) }
+        if !newUserIds.isEmpty {
+            // フェッチ中フラグを設定し、完了後に必ず解除する
+            inFlightUserIds.formUnion(newUserIds)
+            defer { inFlightUserIds.subtract(newUserIds) }
 
-        // Helix API の100件制限に合わせてチャンク分割してリクエスト
-        let chunks = newUserIds.chunked(into: Self.maxIdsPerRequest)
-        for chunk in chunks {
-            await fetchChunk(userIds: chunk)
+            // Helix API の100件制限に合わせてチャンク分割してリクエスト
+            let chunks = newUserIds.chunked(into: Self.maxIdsPerRequest)
+            for chunk in chunks {
+                await fetchChunk(userIds: chunk)
+            }
+        }
+
+        // 並行タスクがフェッチ中の ID がある場合はそれらの完了を待つ
+        // これにより呼び出し元は fetchUsers 返却後に確実に displayName を参照できる
+        while userIds.contains(where: { inFlightUserIds.contains($0) }) {
+            await Task.yield()
         }
     }
 
@@ -139,6 +168,8 @@ final class ProfileImageStore {
     /// ログアウト時など、データを消去したい場合に使用する
     func clear() {
         profileImageUrls = [:]
+        displayNames = [:]
+        userLogins = [:]
         loginToUserId = [:]
         fetchedUserIds = []
         fetchedLogins = []
@@ -176,6 +207,8 @@ final class ProfileImageStore {
             // キャッシュ上限超過時は全消去してメモリ増大を防ぐ
             if profileImageUrls.count + response.data.count > Self.maxCacheEntries {
                 profileImageUrls.removeAll()
+                displayNames.removeAll()
+                userLogins.removeAll()
                 fetchedUserIds.removeAll()
                 fetchedLogins.removeAll()
                 loginToUserId.removeAll()
@@ -185,6 +218,8 @@ final class ProfileImageStore {
                 fetchedLogins.insert(userData.login.lowercased())
                 // login → userId の対応を記録してログイン名から参照できるようにする
                 loginToUserId[userData.login.lowercased()] = userData.id
+                userLogins[userData.id] = userData.login
+                displayNames[userData.id] = userData.displayName
                 if let url = userData.profileImageUrl {
                     profileImageUrls[userData.id] = url
                 }

@@ -75,6 +75,9 @@ actor BadgeStore {
                 self.isGlobalLoaded = true
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
+            } catch let error as URLError where error.code == .cancelled {
+                // タスクキャンセル（アプリ終了・再接続時）は正常系なのでスキップ
+                _ = error
             } catch HelixAPIError.unauthorized {
                 // Helix API が 401 を返した場合（トークン失効等）は次回接続時に再取得する
             } catch is AuthConfigError {

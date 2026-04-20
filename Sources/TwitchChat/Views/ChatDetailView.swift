@@ -13,6 +13,8 @@ import SwiftUI
 struct ChatDetailView: View {
     var viewModel: ChatViewModel
     var authState: AuthState
+    /// プロフィール画像・表示名ストア（エモートピッカーのセクションヘッダー用）
+    var profileImageStore: ProfileImageStore
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,7 +32,7 @@ struct ChatDetailView: View {
 
             // コメント投稿用入力バー
             Divider()
-            ChatInputBar(viewModel: viewModel, authState: authState)
+            ChatInputBar(viewModel: viewModel, authState: authState, profileImageStore: profileImageStore)
         }
         // タブバーのアクティブタブ色（controlBackgroundColor）と一致させる
         .background(Color(.controlBackgroundColor))
