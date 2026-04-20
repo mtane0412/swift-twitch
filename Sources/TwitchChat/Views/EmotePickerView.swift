@@ -121,6 +121,12 @@ private struct EmoteSectionHeader: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(Color(.windowBackgroundColor))
+        // ヘッダー表示時にも displayName を確実に取得する（タイミング次第でキャッシュ未到達の場合に対応）
+        .task(id: section.iconUserId) {
+            if let userId = section.iconUserId {
+                await profileImageStore.fetchUsers(userIds: [userId])
+            }
+        }
     }
 }
 
