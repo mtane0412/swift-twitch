@@ -5,39 +5,35 @@ import Foundation
 import Testing
 @testable import TwitchChat
 
-@Suite("EmotePickerViewModelTests")
-struct EmotePickerViewModelTests {
+/// テスト用エモートストアと ProfileImageStore を含む環境を生成する
+@MainActor
+private func makeEnvironment(
+    channelEmotes: [HelixEmote] = [],
+    userEmotes: [HelixEmote] = [],
+    globalEmotes: [HelixEmote] = [],
+    currentBroadcasterId: String? = nil,
+    profileImageUsers: [HelixUserData] = []
+) async -> (store: EmoteStore, profileImageStore: ProfileImageStore, viewModel: EmotePickerViewModel) {
+    let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
+    await store.setChannelEmotes(channelEmotes)
+    await store.setUserEmotes(userEmotes)
+    await store.setGlobalEmotes(globalEmotes)
 
-    // MARK: - テストヘルパー
+    let mockClient = MockProfileImageAPIClient()
+    await mockClient.setUsers(profileImageUsers)
+    let profileImageStore = ProfileImageStore(apiClient: mockClient)
+    let viewModel = EmotePickerViewModel(
+        emoteStore: store,
+        profileImageStore: profileImageStore,
+        currentBroadcasterId: currentBroadcasterId
+    )
+    return (store, profileImageStore, viewModel)
+}
 
-    /// テスト用エモートストアと ProfileImageStore を含む環境を生成する
-    ///
-    /// - Parameter profileImageUsers: ProfileImageStore モックが返すユーザーデータ（subscribedChannel セクションに displayName が必要な場合に指定）
-    @MainActor
-    private func makeEnvironment(
-        channelEmotes: [HelixEmote] = [],
-        userEmotes: [HelixEmote] = [],
-        globalEmotes: [HelixEmote] = [],
-        currentBroadcasterId: String? = nil,
-        profileImageUsers: [HelixUserData] = []
-    ) async -> (store: EmoteStore, profileImageStore: ProfileImageStore, viewModel: EmotePickerViewModel) {
-        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote(stubbedEmotes: []))
-        await store.setChannelEmotes(channelEmotes)
-        await store.setUserEmotes(userEmotes)
-        await store.setGlobalEmotes(globalEmotes)
+// MARK: - セクション構築テスト
 
-        let mockClient = MockProfileImageAPIClient()
-        await mockClient.setUsers(profileImageUsers)
-        let profileImageStore = ProfileImageStore(apiClient: mockClient)
-        let viewModel = EmotePickerViewModel(
-            emoteStore: store,
-            profileImageStore: profileImageStore,
-            currentBroadcasterId: currentBroadcasterId
-        )
-        return (store, profileImageStore, viewModel)
-    }
-
-    // MARK: - loadEmotes / セクション構築
+@Suite("EmotePickerViewModel - セクション構築")
+struct EmotePickerViewModelSectionTests {
 
     @Test("loadEmotes はセクション構築前にオーナーIDの表示名をフェッチしてセクションタイトルに反映する")
     @MainActor
@@ -447,8 +443,12 @@ struct EmotePickerViewModelTests {
         let uniqueIds = Set(allEmoteIds)
         #expect(allEmoteIds.count == uniqueIds.count)
     }
+}
 
-    // MARK: - searchQuery フィルタリング
+// MARK: - 検索フィルタリングテスト
+
+@Suite("EmotePickerViewModel - 検索フィルタリング")
+struct EmotePickerViewModelFilterTests {
 
     @Test("searchQuery を設定するとすべてのセクションを横断的に絞り込める")
     @MainActor
@@ -547,8 +547,12 @@ struct EmotePickerViewModelTests {
         #expect(viewModel.filteredSections.count == 1)
         #expect(viewModel.filteredSections.first?.emotes.first?.name == HelixEmote.チャンネルエモートHype.name)
     }
+}
 
-    // MARK: - isAvailable エモート使用可否判定
+// MARK: - エモート使用可否判定・異常値ハンドリングテスト
+
+@Suite("EmotePickerViewModel - エモート使用可否判定")
+struct EmotePickerViewModelAvailabilityTests {
 
     @Test("userEmoteSets が nil の場合（USERSTATE 未受信）は全エモートが使用可能")
     @MainActor
@@ -563,7 +567,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
-            currentBroadcasterId: nil,
+            currentBroadcasterId: nil
         )
 
         await viewModel.loadEmotes()
@@ -586,7 +590,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
-            currentBroadcasterId: nil,
+            currentBroadcasterId: nil
         )
 
         await viewModel.loadEmotes()
@@ -610,7 +614,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
-            currentBroadcasterId: nil,
+            currentBroadcasterId: nil
         )
 
         await viewModel.loadEmotes()
@@ -634,7 +638,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
-            currentBroadcasterId: nil,
+            currentBroadcasterId: nil
         )
 
         await viewModel.loadEmotes()
@@ -656,7 +660,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
-            currentBroadcasterId: nil,
+            currentBroadcasterId: nil
         )
 
         await viewModel.loadEmotes()
@@ -680,7 +684,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
-            currentBroadcasterId: nil,
+            currentBroadcasterId: nil
         )
 
         await viewModel.loadEmotes()
@@ -708,7 +712,7 @@ struct EmotePickerViewModelTests {
         let viewModel = EmotePickerViewModel(
             emoteStore: store,
             profileImageStore: profileImageStore,
-            currentBroadcasterId: nil,
+            currentBroadcasterId: nil
         )
 
         await viewModel.loadEmotes()
@@ -721,8 +725,6 @@ struct EmotePickerViewModelTests {
         // 検証: ユーザーエモートでないためemoteSetId チェックが適用される
         #expect(viewModel.isAvailable(targetEmote) == false)
     }
-
-    // MARK: - ownerId の異常値ハンドリング
 
     @Test("ownerId が空文字のユーザーエモートは global セクションに分類され subscribedChannel セクションは作成されない")
     @MainActor

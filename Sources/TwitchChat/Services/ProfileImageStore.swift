@@ -207,6 +207,8 @@ final class ProfileImageStore {
             // キャッシュ上限超過時は全消去してメモリ増大を防ぐ
             if profileImageUrls.count + response.data.count > Self.maxCacheEntries {
                 profileImageUrls.removeAll()
+                displayNames.removeAll()
+                userLogins.removeAll()
                 fetchedUserIds.removeAll()
                 fetchedLogins.removeAll()
                 loginToUserId.removeAll()
