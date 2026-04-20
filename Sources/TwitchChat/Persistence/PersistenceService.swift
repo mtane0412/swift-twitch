@@ -71,7 +71,9 @@ protocol PersistenceService: Sendable {
     func loadRecentMessages(roomId: String, limit: Int, before: Date?) async -> [ChatMessage]
 
     /// メッセージを追加保存する
-    func appendMessages(_ messages: [ChatMessage]) async
+    ///
+    /// - Throws: ディスクまたはデータベース書き込みに失敗した場合
+    func appendMessages(_ messages: [ChatMessage]) async throws
 
     /// メッセージを全文検索する
     ///
@@ -93,7 +95,8 @@ protocol PersistenceService: Sendable {
     ///   - key: キャッシュキー
     ///   - mime: MIME タイプ文字列（例: "image/png", "image/gif"）。メタデータとして保存し、
     ///     将来の HTTP レスポンスや Content-Type ヘッダー再現に使用する。
-    func saveImageData(_ data: Data, key: ImageCacheKey, mime: String) async
+    /// - Throws: ディスクまたはデータベース書き込みに失敗した場合
+    func saveImageData(_ data: Data, key: ImageCacheKey, mime: String) async throws
 
     // MARK: - ライフサイクル
 

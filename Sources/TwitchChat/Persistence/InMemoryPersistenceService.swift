@@ -73,6 +73,7 @@ actor InMemoryPersistenceService: PersistenceService {
     }
 
     func loadRecentMessages(roomId: String, limit: Int, before: Date?) async -> [ChatMessage] {
+        let safeLimit = max(0, limit)
         let stored = messages[roomId] ?? []
         let filtered: [ChatMessage]
         if let before {
@@ -81,10 +82,10 @@ actor InMemoryPersistenceService: PersistenceService {
             filtered = stored
         }
         // 新しい順に並べて上限件数を返す
-        return Array(filtered.sorted { $0.receivedAt > $1.receivedAt }.prefix(limit))
+        return Array(filtered.sorted { $0.receivedAt > $1.receivedAt }.prefix(safeLimit))
     }
 
-    func appendMessages(_ newMessages: [ChatMessage]) async {
+    func appendMessages(_ newMessages: [ChatMessage]) async throws {
         for message in newMessages {
             let key = message.roomId ?? Self.noRoomKey
             messages[key, default: []].append(message)
@@ -92,6 +93,7 @@ actor InMemoryPersistenceService: PersistenceService {
     }
 
     func searchMessages(query: String, roomId: String?, limit: Int) async -> [ChatMessage] {
+        let safeLimit = max(0, limit)
         let source: [ChatMessage]
         if let roomId {
             source = messages[roomId] ?? []
@@ -103,7 +105,7 @@ actor InMemoryPersistenceService: PersistenceService {
             source
                 .filter { $0.text.localizedCaseInsensitiveContains(query) }
                 .sorted { $0.receivedAt > $1.receivedAt }
-                .prefix(limit)
+                .prefix(safeLimit)
         )
     }
 
@@ -111,7 +113,7 @@ actor InMemoryPersistenceService: PersistenceService {
         imageData[key]
     }
 
-    func saveImageData(_ data: Data, key: ImageCacheKey, mime: String) async {
+    func saveImageData(_ data: Data, key: ImageCacheKey, mime: String) async throws {
         imageData[key] = data
         imageMime[key] = mime
     }
