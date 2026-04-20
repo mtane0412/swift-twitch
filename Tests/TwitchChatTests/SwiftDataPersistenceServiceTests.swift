@@ -564,7 +564,7 @@ struct SwiftDataPersistenceServiceTests {
 // MARK: - テスト用 ChatMessage イニシャライザ
 
 private extension ChatMessage {
-    /// テスト専用: roomId と receivedAt を指定してチャットメッセージを生成する
+    /// テスト専用: id と receivedAt を指定してチャットメッセージを生成する（roomId は固定値）
     init(id: String, text: String, receivedAt: Date) {
         self.init(
             id: id,

@@ -164,7 +164,7 @@ actor PersistenceActor {
         let descriptor = FetchDescriptor<PersistedImageAsset>(
             predicate: #Predicate { $0.cacheKey == cacheKeyStr }
         )
-        guard let asset = try? modelContext.fetch(descriptor).first else { return nil }
+        guard let asset = (try? modelContext.fetch(descriptor))?.first else { return nil }
         // LRU 更新（失敗しても無視）
         asset.lastAccessedAt = Date()
         try? modelContext.save()
@@ -178,7 +178,7 @@ actor PersistenceActor {
             predicate: #Predicate { $0.cacheKey == cacheKeyStr }
         )
         let now = Date()
-        if let existing = try? modelContext.fetch(descriptor).first {
+        if let existing = (try? modelContext.fetch(descriptor))?.first {
             existing.data = data
             existing.mime = mime
             existing.lastAccessedAt = now
@@ -208,7 +208,7 @@ actor PersistenceActor {
             let rows = try modelContext.fetch(emoteDescriptor)
             for row in rows { modelContext.delete(row) }
         } catch {
-            print("[PersistenceActor] clearUserScoped: ユーザーエモート fetch 失敗 userId=\(userId) error=\(error)")
+            print("[PersistenceActor] clearUserScoped: ユーザーエモート fetch 失敗 error=\(error)")
         }
         let userDescriptor = FetchDescriptor<PersistedUser>(
             predicate: #Predicate { $0.userId == userId }
@@ -217,12 +217,12 @@ actor PersistenceActor {
             let rows = try modelContext.fetch(userDescriptor)
             for row in rows { modelContext.delete(row) }
         } catch {
-            print("[PersistenceActor] clearUserScoped: ユーザープロフィール fetch 失敗 userId=\(userId) error=\(error)")
+            print("[PersistenceActor] clearUserScoped: ユーザープロフィール fetch 失敗 error=\(error)")
         }
         do {
             try modelContext.save()
         } catch {
-            print("[PersistenceActor] clearUserScoped: save 失敗 userId=\(userId) error=\(error)")
+            print("[PersistenceActor] clearUserScoped: save 失敗 error=\(error)")
         }
     }
 }
@@ -470,13 +470,13 @@ extension PersistedUser {
 // Badge と EmotePosition への Codable 適合（永続化層限定）
 // ドメイン層には漏らさない
 extension Badge: Codable {
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)
         version = try container.decode(String.self, forKey: .version)
     }
 
-    public func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(name, forKey: .name)
         try container.encode(version, forKey: .version)
@@ -489,14 +489,14 @@ extension Badge: Codable {
 }
 
 extension EmotePosition: Codable {
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         emoteId = try container.decode(String.self, forKey: .emoteId)
         startIndex = try container.decode(Int.self, forKey: .startIndex)
         endIndex = try container.decode(Int.self, forKey: .endIndex)
     }
 
-    public func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(emoteId, forKey: .emoteId)
         try container.encode(startIndex, forKey: .startIndex)
@@ -510,22 +510,20 @@ extension EmotePosition: Codable {
     }
 }
 
-private let jsonEncoder = JSONEncoder()
-private let jsonDecoder = JSONDecoder()
-
 extension PersistedChatMessage {
     /// ChatMessage から PersistedChatMessage を生成する
     convenience init(from message: ChatMessage) {
+        let encoder = JSONEncoder()
         let badgesRaw: String
         do {
-            badgesRaw = String(data: try jsonEncoder.encode(message.badges), encoding: .utf8) ?? "[]"
+            badgesRaw = String(data: try encoder.encode(message.badges), encoding: .utf8) ?? "[]"
         } catch {
             print("[PersistenceActor] badges JSON エンコード失敗 id=\(message.id) error=\(error)")
             badgesRaw = "[]"
         }
         let emotesRaw: String
         do {
-            emotesRaw = String(data: try jsonEncoder.encode(message.emotes), encoding: .utf8) ?? "[]"
+            emotesRaw = String(data: try encoder.encode(message.emotes), encoding: .utf8) ?? "[]"
         } catch {
             print("[PersistenceActor] emotes JSON エンコード失敗 id=\(message.id) error=\(error)")
             emotesRaw = "[]"
@@ -554,8 +552,9 @@ extension PersistedChatMessage {
 
     /// ChatMessage に変換する（segments は text と emotes から再生成する）
     func toDomain() -> ChatMessage? {
-        let badges = (try? jsonDecoder.decode([Badge].self, from: Data(badgesRaw.utf8))) ?? []
-        let emotes = (try? jsonDecoder.decode([EmotePosition].self, from: Data(emotesRaw.utf8))) ?? []
+        let decoder = JSONDecoder()
+        let badges = (try? decoder.decode([Badge].self, from: Data(badgesRaw.utf8))) ?? []
+        let emotes = (try? decoder.decode([EmotePosition].self, from: Data(emotesRaw.utf8))) ?? []
         return ChatMessage(
             id: id,
             username: username,
