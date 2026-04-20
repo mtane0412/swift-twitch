@@ -25,8 +25,6 @@ actor BadgeStore {
     /// Helix チャンネルバッジエンドポイント
     private static let helixChannelBadgesURL = URL(string: "https://api.twitch.tv/helix/chat/badges")!
 
-    // MARK: - 定数
-
     /// グローバルバッジの TTL（24 時間）
     private static let badgeTTL: TimeInterval = 86400
 
@@ -71,6 +69,8 @@ actor BadgeStore {
     /// TTL 超過時は古いデータでキャッシュを充填した上で `isGlobalLoaded = false` のままにし、
     /// 後続の `fetchGlobalBadges()` で再フェッチさせる。
     func seedFromPersistence() async {
+        // 既に API フェッチ済みならインメモリデータを上書きしない
+        guard !isGlobalLoaded else { return }
         guard let persistence = persistenceService else { return }
         let result = await persistence.loadBadgesWithTimestamp(scope: .global)
         guard !result.snapshots.isEmpty else { return }
@@ -102,12 +102,7 @@ actor BadgeStore {
                 self.globalBadges = Self.buildMapping(from: response.data)
                 self.isGlobalLoaded = true
                 // write-back: 永続化サービスが存在すればバッジを非同期保存する
-                if let persistence = self.persistenceService {
-                    let snapshots = response.data.map { Self.badgeVersionSnapshot(from: $0) }.flatMap { $0 }
-                    Task { [persistence] in
-                        try? await persistence.saveBadges(snapshots, scope: .global)
-                    }
-                }
+                self.writeBackBadges(response.data, scope: .global)
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
             } catch let error as URLError where error.code == .cancelled {
@@ -141,12 +136,7 @@ actor BadgeStore {
             )
             channelBadges = Self.buildMapping(from: response.data)
             // write-back: 永続化サービスが存在すればチャンネルスコープで非同期保存する
-            if let persistence = persistenceService {
-                let snapshots = response.data.map { Self.badgeVersionSnapshot(from: $0) }.flatMap { $0 }
-                Task { [persistence] in
-                    try? await persistence.saveBadges(snapshots, scope: .channel(broadcasterId: channelId))
-                }
-            }
+            writeBackBadges(response.data, scope: .channel(broadcasterId: channelId))
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はスキップ
         } catch HelixAPIError.unauthorized {
@@ -200,6 +190,23 @@ actor BadgeStore {
         channelBadges = mapping
     }
 #endif
+
+    // MARK: - プライベートメソッド
+
+    /// バッジを永続化サービスに非同期保存する（fire-and-forget）
+    private func writeBackBadges(_ badgeSets: [HelixBadgeSet], scope: BadgeScope) {
+        guard let persistence = persistenceService else { return }
+        let snapshots = badgeSets.flatMap { Self.badgeVersionSnapshot(from: $0) }
+        Task { [persistence] in
+            do {
+                try await persistence.saveBadges(snapshots, scope: scope)
+            } catch {
+                #if DEBUG
+                print("[BadgeStore] write-back 失敗 scope=\(scope) error=\(error)")
+                #endif
+            }
+        }
+    }
 
     // MARK: - 静的ユーティリティ
 

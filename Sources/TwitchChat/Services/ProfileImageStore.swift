@@ -220,7 +220,11 @@ final class ProfileImageStore {
             )
         }
         Task { [persistence] in
-            try? await persistence.saveUserProfiles(snapshots)
+            do {
+                try await persistence.saveUserProfiles(snapshots)
+            } catch {
+                logger.debug("プロフィール永続化失敗: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -229,6 +233,15 @@ final class ProfileImageStore {
     /// fetchUsers の先読みで使用する。`fetchedUserIds` にも登録することで
     /// 同一ユーザーへの重複 API 呼び出しを防ぐ。
     private func applyCachedSnapshot(_ snapshot: UserProfileSnapshot) {
+        // キャッシュ上限超過時は全消去してメモリ増大を防ぐ（fetchAndStore と同じ方針）
+        if profileImageUrls.count >= Self.maxCacheEntries {
+            profileImageUrls.removeAll()
+            displayNames.removeAll()
+            userLogins.removeAll()
+            fetchedUserIds.removeAll()
+            fetchedLogins.removeAll()
+            loginToUserId.removeAll()
+        }
         fetchedUserIds.insert(snapshot.userId)
         fetchedLogins.insert(snapshot.login)
         loginToUserId[snapshot.login] = snapshot.userId

@@ -22,15 +22,6 @@ struct ProfileImageStorePersistenceTests {
         )
     }
 
-    private func makeSatoProfile() -> UserProfileSnapshot {
-        UserProfileSnapshot(
-            userId: "ユーザーID002",
-            login: "sato_hanako",
-            displayName: "佐藤花子",
-            profileImageUrl: nil
-        )
-    }
-
     // MARK: - キャッシュ先読み（API 呼び出し抑制）
 
     @Test("永続化済みプロフィールはfetchUsers呼び出し時にAPIを呼ばずに解決される")
@@ -38,7 +29,7 @@ struct ProfileImageStorePersistenceTests {
         // 前提: 山田太郎のプロフィールを InMemoryPersistenceService に事前保存する
         let persistence = InMemoryPersistenceService()
         let yamada = makeYamadaProfile()
-        try? await persistence.saveUserProfiles([yamada])
+        try await persistence.saveUserProfiles([yamada])
 
         // 前提: API クライアントは呼ばれてはならない（永続化から解決できるため）
         let apiClient = MockProfileImageAPIClient()
@@ -128,7 +119,7 @@ struct ProfileImageStorePersistenceTests {
         // 前提: 永続化に山田太郎を保存済み
         let persistence = InMemoryPersistenceService()
         let yamada = makeYamadaProfile()
-        try? await persistence.saveUserProfiles([yamada])
+        try await persistence.saveUserProfiles([yamada])
 
         let apiClient = MockProfileImageAPIClient()
         let store = ProfileImageStore(apiClient: apiClient, persistenceService: persistence)

@@ -52,12 +52,7 @@ actor PersistenceActor {
 
     /// 指定スコープのバッジを取得する
     func loadBadges(scope: BadgeScope) -> [BadgeVersionSnapshot] {
-        let scopeRaw = badgeScopeRaw(scope)
-        let descriptor = FetchDescriptor<PersistedBadgeVersion>(
-            predicate: #Predicate { $0.scope == scopeRaw }
-        )
-        let rows = (try? modelContext.fetch(descriptor)) ?? []
-        return rows.map { $0.toDomain() }
+        fetchBadgeRows(scope: scope).map { $0.toDomain() }
     }
 
     /// 指定スコープのバッジを保存する（全件 upsert）
@@ -69,11 +64,7 @@ actor PersistenceActor {
     ///
     /// `updatedAt` の最大値を `fetchedAt` として返す。未保存の場合は `fetchedAt` が nil。
     func loadBadgesWithTimestamp(scope: BadgeScope) -> (snapshots: [BadgeVersionSnapshot], fetchedAt: Date?) {
-        let scopeRaw = badgeScopeRaw(scope)
-        let descriptor = FetchDescriptor<PersistedBadgeVersion>(
-            predicate: #Predicate { $0.scope == scopeRaw }
-        )
-        let rows = (try? modelContext.fetch(descriptor)) ?? []
+        let rows = fetchBadgeRows(scope: scope)
         guard !rows.isEmpty else { return (snapshots: [], fetchedAt: nil) }
         let snapshots = rows.map { $0.toDomain() }
         let fetchedAt = rows.map(\.updatedAt).max()
@@ -293,6 +284,15 @@ private extension PersistenceActor {
             }
         }
         try modelContext.save()
+    }
+
+    /// 指定スコープの PersistedBadgeVersion 行を取得する共通ヘルパー
+    func fetchBadgeRows(scope: BadgeScope) -> [PersistedBadgeVersion] {
+        let scopeRaw = badgeScopeRaw(scope)
+        let descriptor = FetchDescriptor<PersistedBadgeVersion>(
+            predicate: #Predicate { $0.scope == scopeRaw }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
     }
 
     /// バッジをスコープ単位で upsert する（既存を全件差し替え）
