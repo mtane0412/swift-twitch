@@ -220,6 +220,48 @@ struct ChatMessage: Sendable, Identifiable {
         self.isSystemNotice = original.isSystemNotice
     }
 
+    /// 永続化層からの復元用イニシャライザ（PersistedChatMessage.toDomain() から呼ぶ）
+    ///
+    /// segments は text と emotePositions から再生成する。
+    ///
+    /// - Note: このイニシャライザは Persistence 層の DTO 変換にのみ使用する
+    init(
+        id: String,
+        username: String,
+        displayName: String,
+        text: String,
+        colorHex: String?,
+        badges: [Badge],
+        emotes: [EmotePosition],
+        roomId: String?,
+        isAction: Bool,
+        receivedAt: Date,
+        replyParentMsgId: String?,
+        isOptimistic: Bool,
+        replyParentUserLogin: String?,
+        replyParentDisplayName: String?,
+        replyParentMsgBody: String?,
+        isSystemNotice: Bool
+    ) {
+        self.id = id
+        self.username = username
+        self.displayName = displayName
+        self.text = text
+        self.colorHex = colorHex
+        self.badges = badges
+        self.emotes = emotes
+        self.segments = MessageSegment.segments(from: text, emotePositions: emotes)
+        self.roomId = roomId
+        self.isAction = isAction
+        self.receivedAt = receivedAt
+        self.replyParentMsgId = replyParentMsgId
+        self.isOptimistic = isOptimistic
+        self.replyParentUserLogin = replyParentUserLogin
+        self.replyParentDisplayName = replyParentDisplayName
+        self.replyParentMsgBody = replyParentMsgBody
+        self.isSystemNotice = isSystemNotice
+    }
+
     /// システム通知メッセージを生成する
     ///
     /// モデレーションコマンドの成功・失敗等、アプリが生成する情報メッセージに使用する。
