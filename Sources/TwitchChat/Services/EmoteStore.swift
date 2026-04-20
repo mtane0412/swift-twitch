@@ -52,6 +52,9 @@ actor EmoteStore {
     /// Helix API クライアント
     private let apiClient: any HelixAPIClientProtocol
 
+    /// 永続化サービス（PR-3 以降で seed/write-back に使用）
+    private let persistenceService: (any PersistenceService)?
+
     /// ユーザーが使用可能なエモートセット ID の一覧
     ///
     /// USERSTATE の `emote-sets` タグから更新される。
@@ -70,9 +73,12 @@ actor EmoteStore {
 
     /// EmoteStore を初期化する
     ///
-    /// - Parameter apiClient: Helix API クライアント（テスト時はモックを注入）
-    init(apiClient: any HelixAPIClientProtocol) {
+    /// - Parameters:
+    ///   - apiClient: Helix API クライアント（テスト時はモックを注入）
+    ///   - persistenceService: 永続化サービス（nil の場合は永続化なし）
+    init(apiClient: any HelixAPIClientProtocol, persistenceService: (any PersistenceService)? = nil) {
         self.apiClient = apiClient
+        self.persistenceService = persistenceService
     }
 
     // MARK: - 公開メソッド

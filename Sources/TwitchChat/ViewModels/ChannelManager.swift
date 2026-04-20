@@ -36,6 +36,9 @@ final class ChannelManager {
     private let authState: AuthState
     private let apiClient: any HelixAPIClientProtocol
 
+    /// 永続化サービス（PR-3 以降で seedBadges/seedUserProfiles を呼ぶ）
+    private let persistenceService: (any PersistenceService)?
+
     /// ログイン時にユーザーエモートを事前取得するストア
     ///
     /// 各チャンネルの `ChatViewModel` が持つ個別のエモートストアとは別に、
@@ -66,12 +69,15 @@ final class ChannelManager {
 
     /// ChannelManager を初期化する（本番用）
     ///
-    /// - Parameter authState: 認証状態（IRC 接続と Helix API 呼び出しに使用）
-    init(authState: AuthState) {
+    /// - Parameters:
+    ///   - authState: 認証状態（IRC 接続と Helix API 呼び出しに使用）
+    ///   - persistenceService: 永続化サービス（nil の場合は永続化なし）
+    init(authState: AuthState, persistenceService: (any PersistenceService)? = nil) {
         self.authState = authState
+        self.persistenceService = persistenceService
         let helixClient = HelixAPIClient(tokenProvider: authState)
         self.apiClient = helixClient
-        self.preloadEmoteStore = EmoteStore(apiClient: helixClient)
+        self.preloadEmoteStore = EmoteStore(apiClient: helixClient, persistenceService: persistenceService)
         self.makeIRCClient = { TwitchIRCClient() }
         self.makeEventSubClient = { [authState] in
             TwitchEventSubClient(apiClient: HelixAPIClient(tokenProvider: authState))
@@ -85,16 +91,21 @@ final class ChannelManager {
     ///   - makeIRCClient: IRC クライアントを生成するファクトリクロージャ
     ///   - makeEventSubClient: EventSub クライアントを生成するファクトリクロージャ（nil で EventSub 無効化）
     ///   - preloadEmoteStore: ユーザーエモートプリロード用ストア（nil の場合はデフォルトを生成）
+    ///     preloadEmoteStore を外部から注入する場合、persistenceService と同一インスタンスを
+    ///     保持する EmoteStore を渡すこと。不整合があると将来の seed/write-back で不一致が生じる。
+    ///   - persistenceService: 永続化サービス（nil の場合は永続化なし）
     init(
         authState: AuthState,
         makeIRCClient: @escaping @MainActor () -> any TwitchIRCClientProtocol,
         makeEventSubClient: (@MainActor () -> any TwitchEventSubClientProtocol)? = nil,
-        preloadEmoteStore: EmoteStore? = nil
+        preloadEmoteStore: EmoteStore? = nil,
+        persistenceService: (any PersistenceService)? = nil
     ) {
         self.authState = authState
+        self.persistenceService = persistenceService
         let helixClient = HelixAPIClient(tokenProvider: authState)
         self.apiClient = helixClient
-        self.preloadEmoteStore = preloadEmoteStore ?? EmoteStore(apiClient: helixClient)
+        self.preloadEmoteStore = preloadEmoteStore ?? EmoteStore(apiClient: helixClient, persistenceService: persistenceService)
         self.makeIRCClient = makeIRCClient
         self.makeEventSubClient = makeEventSubClient
     }
