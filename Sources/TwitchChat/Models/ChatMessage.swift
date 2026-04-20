@@ -232,7 +232,7 @@ struct ChatMessage: Sendable, Identifiable {
         text: String,
         colorHex: String?,
         badges: [Badge],
-        emotes: [EmotePosition],
+        emotePositions: [EmotePosition],
         roomId: String?,
         isAction: Bool,
         receivedAt: Date,
@@ -249,8 +249,8 @@ struct ChatMessage: Sendable, Identifiable {
         self.text = text
         self.colorHex = colorHex
         self.badges = badges
-        self.emotes = emotes
-        self.segments = MessageSegment.segments(from: text, emotePositions: emotes)
+        self.emotes = emotePositions
+        self.segments = MessageSegment.segments(from: text, emotePositions: emotePositions)
         self.roomId = roomId
         self.isAction = isAction
         self.receivedAt = receivedAt

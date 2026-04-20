@@ -85,7 +85,7 @@ final class PersistedChatMessage {
     @Attribute(.unique) var id: String
     var username: String
     var displayName: String
-    /// メッセージ本文（全文検索インデックス対象）
+    /// メッセージ本文（B-tree インデックス対象、全文検索ではない）
     var text: String
     var colorHex: String?
     /// [Badge] を JSONEncoder でエンコードした文字列
@@ -108,7 +108,7 @@ final class PersistedChatMessage {
     /// V1 枠確保（user-id タグのパース後に充填予定）
     var senderUserId: String?
 
-    #Index<PersistedChatMessage>([\.roomId], [\.receivedAt], [\.text])
+    #Index<PersistedChatMessage>([\.roomId, \.receivedAt], [\.text])
 
     init(
         id: String,

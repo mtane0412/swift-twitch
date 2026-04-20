@@ -326,7 +326,7 @@ struct SwiftDataPersistenceServiceTests {
             text: "LUL こんにちは",
             colorHex: "#FF4500",
             badges: badges,
-            emotes: emotes,
+            emotePositions: emotes,
             roomId: "チャンネルA配信者ID",
             isAction: false,
             receivedAt: Date(),
@@ -367,7 +367,7 @@ struct SwiftDataPersistenceServiceTests {
             text: "返信テスト",
             colorHex: nil,
             badges: [],
-            emotes: [],
+            emotePositions: [],
             roomId: "チャンネルA配信者ID",
             isAction: false,
             receivedAt: Date(),
@@ -402,7 +402,7 @@ struct SwiftDataPersistenceServiceTests {
             text: "踊っています",
             colorHex: nil,
             badges: [],
-            emotes: [],
+            emotePositions: [],
             roomId: "チャンネルA配信者ID",
             isAction: true,
             receivedAt: Date().addingTimeInterval(-1),
@@ -420,7 +420,7 @@ struct SwiftDataPersistenceServiceTests {
             text: "モデレーションコマンド成功",
             colorHex: nil,
             badges: [],
-            emotes: [],
+            emotePositions: [],
             roomId: "チャンネルA配信者ID",
             isAction: false,
             receivedAt: Date(),
@@ -502,38 +502,54 @@ struct SwiftDataPersistenceServiceTests {
 
     @Test("clearUserScopedでユーザー固有データのみ削除されグローバル_チャンネル_履歴は保持される")
     func clearUserScopedでユーザー固有データのみ削除されグローバル_チャンネル_履歴は保持される() async throws {
-        // 前提: 5種類のデータを保存
+        // 前提: 削除対象ユーザーと別ユーザーのデータを保存
         let service = try makeService()
         let userId = "削除対象ユーザー001"
-        // ユーザーエモート（削除対象）
+        let otherUserId = "別ユーザー002"
+        // 削除対象: ユーザーエモート
         try await service.saveUserEmotes([
             HelixEmote(id: "user1", name: "ユーザー固有エモート", format: ["static"], emoteType: nil)
         ], userId: userId)
-        // ユーザープロフィール（削除対象）
+        // 削除対象: ユーザープロフィール
         try await service.saveUserProfiles([
             UserProfileSnapshot(userId: userId, login: "target_user", displayName: "削除対象ユーザー", profileImageUrl: nil)
         ])
-        // グローバルエモート（保持対象）
+        // 保持対象: 別ユーザーのエモートとプロフィール
+        try await service.saveUserEmotes([
+            HelixEmote(id: "other1", name: "別ユーザーエモート", format: ["static"], emoteType: nil)
+        ], userId: otherUserId)
+        try await service.saveUserProfiles([
+            UserProfileSnapshot(userId: otherUserId, login: "other_user", displayName: "別ユーザー", profileImageUrl: nil)
+        ])
+        // 保持対象: グローバルエモート
         try await service.saveGlobalEmotes([
             HelixEmote(id: "global1", name: "グローバルエモート", format: ["static"], emoteType: "globals")
         ])
-        // チャンネルエモート（保持対象）
+        // 保持対象: チャンネルエモート
         try await service.saveChannelEmotes([
             HelixEmote(id: "ch1", name: "チャンネルエモート", format: ["static"], emoteType: nil)
         ], broadcasterId: "チャンネルA配信者ID")
-        // チャット履歴（保持対象）
+        // 保持対象: チャット履歴
         try await service.appendMessages([
             ChatMessage(systemNotice: "残すメッセージ", roomId: "チャンネルA配信者ID")
         ])
 
-        // 操作: ユーザースコープのみクリア
+        // 操作: 削除対象ユーザーのスコープのみクリア
         await service.clearUserScoped(userId: userId)
 
-        // 検証: ユーザーエモートとプロフィールのみ削除される
+        // 検証: 削除対象ユーザーのエモートとプロフィールのみ削除される
         let userEmotes = await service.loadUserEmotes(userId: userId)
         let userProfiles = await service.loadUserProfiles(userIds: [userId])
         #expect(userEmotes.isEmpty)
         #expect(userProfiles.isEmpty)
+
+        // 別ユーザーのデータは保持される
+        let otherEmotes = await service.loadUserEmotes(userId: otherUserId)
+        let otherProfiles = await service.loadUserProfiles(userIds: [otherUserId])
+        #expect(otherEmotes.count == 1)
+        #expect(otherEmotes.first?.name == "別ユーザーエモート")
+        #expect(otherProfiles.count == 1)
+        #expect(otherProfiles.first?.displayName == "別ユーザー")
 
         // グローバル・チャンネル・履歴は保持される
         let globalEmotes = await service.loadGlobalEmotes()
@@ -557,7 +573,7 @@ private extension ChatMessage {
             text: text,
             colorHex: nil,
             badges: [],
-            emotes: [],
+            emotePositions: [],
             roomId: "テストチャンネルID",
             isAction: false,
             receivedAt: receivedAt,

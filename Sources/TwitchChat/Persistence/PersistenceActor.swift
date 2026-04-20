@@ -76,18 +76,22 @@ actor PersistenceActor {
         return rows.map { $0.toDomain() }
     }
 
-    /// ユーザープロフィールを保存する（upsert）
+    /// ユーザープロフィールを保存する（一括 upsert）
     func saveUserProfiles(_ profiles: [UserProfileSnapshot]) throws {
+        guard !profiles.isEmpty else { return }
+        let userIds = profiles.map { $0.userId }
+        let descriptor = FetchDescriptor<PersistedUser>(
+            predicate: #Predicate { userIds.contains($0.userId) }
+        )
+        let existing = try modelContext.fetch(descriptor)
+        let existingByUserId = Dictionary(uniqueKeysWithValues: existing.map { ($0.userId, $0) })
+        let now = Date()
         for profile in profiles {
-            let userId = profile.userId
-            let descriptor = FetchDescriptor<PersistedUser>(
-                predicate: #Predicate { $0.userId == userId }
-            )
-            if let existing = try? modelContext.fetch(descriptor).first {
-                existing.login = profile.login
-                existing.displayName = profile.displayName
-                existing.profileImageUrl = profile.profileImageUrl
-                existing.updatedAt = Date()
+            if let row = existingByUserId[profile.userId] {
+                row.login = profile.login
+                row.displayName = profile.displayName
+                row.profileImageUrl = profile.profileImageUrl
+                row.updatedAt = now
             } else {
                 modelContext.insert(PersistedUser(from: profile))
             }
@@ -117,17 +121,17 @@ actor PersistenceActor {
         return rows.compactMap { $0.toDomain() }
     }
 
-    /// チャットメッセージを追加する（重複 id は skip、uniqueness は @Attribute(.unique) が保証）
+    /// チャットメッセージを追加する（既存 id は skip、一括 fetch で N+1 を回避）
     func appendMessages(_ messages: [ChatMessage]) throws {
-        for message in messages {
-            let msgId = message.id
-            let descriptor = FetchDescriptor<PersistedChatMessage>(
-                predicate: #Predicate { $0.id == msgId }
-            )
-            // 既存レコードがない場合のみ insert（upsert ではなく append）
-            if (try? modelContext.fetch(descriptor).first) == nil {
-                modelContext.insert(PersistedChatMessage(from: message))
-            }
+        guard !messages.isEmpty else { return }
+        let newIds = messages.map { $0.id }
+        let descriptor = FetchDescriptor<PersistedChatMessage>(
+            predicate: #Predicate { newIds.contains($0.id) }
+        )
+        let existing = (try? modelContext.fetch(descriptor)) ?? []
+        let existingIds = Set(existing.map { $0.id })
+        for message in messages where !existingIds.contains(message.id) {
+            modelContext.insert(PersistedChatMessage(from: message))
         }
         try modelContext.save()
     }
@@ -200,16 +204,26 @@ actor PersistenceActor {
         let emoteDescriptor = FetchDescriptor<PersistedEmote>(
             predicate: #Predicate { $0.scope == userScopeRaw }
         )
-        if let rows = try? modelContext.fetch(emoteDescriptor) {
+        do {
+            let rows = try modelContext.fetch(emoteDescriptor)
             for row in rows { modelContext.delete(row) }
+        } catch {
+            print("[PersistenceActor] clearUserScoped: ユーザーエモート fetch 失敗 userId=\(userId) error=\(error)")
         }
         let userDescriptor = FetchDescriptor<PersistedUser>(
             predicate: #Predicate { $0.userId == userId }
         )
-        if let rows = try? modelContext.fetch(userDescriptor) {
+        do {
+            let rows = try modelContext.fetch(userDescriptor)
             for row in rows { modelContext.delete(row) }
+        } catch {
+            print("[PersistenceActor] clearUserScoped: ユーザープロフィール fetch 失敗 userId=\(userId) error=\(error)")
         }
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            print("[PersistenceActor] clearUserScoped: save 失敗 userId=\(userId) error=\(error)")
+        }
     }
 }
 
@@ -502,8 +516,20 @@ private let jsonDecoder = JSONDecoder()
 extension PersistedChatMessage {
     /// ChatMessage から PersistedChatMessage を生成する
     convenience init(from message: ChatMessage) {
-        let badgesRaw = (try? String(data: jsonEncoder.encode(message.badges), encoding: .utf8)) ?? "[]"
-        let emotesRaw = (try? String(data: jsonEncoder.encode(message.emotes), encoding: .utf8)) ?? "[]"
+        let badgesRaw: String
+        do {
+            badgesRaw = String(data: try jsonEncoder.encode(message.badges), encoding: .utf8) ?? "[]"
+        } catch {
+            print("[PersistenceActor] badges JSON エンコード失敗 id=\(message.id) error=\(error)")
+            badgesRaw = "[]"
+        }
+        let emotesRaw: String
+        do {
+            emotesRaw = String(data: try jsonEncoder.encode(message.emotes), encoding: .utf8) ?? "[]"
+        } catch {
+            print("[PersistenceActor] emotes JSON エンコード失敗 id=\(message.id) error=\(error)")
+            emotesRaw = "[]"
+        }
         self.init(
             id: message.id,
             username: message.username,
@@ -537,7 +563,7 @@ extension PersistedChatMessage {
             text: text,
             colorHex: colorHex,
             badges: badges,
-            emotes: emotes,
+            emotePositions: emotes,
             roomId: roomId,
             isAction: isAction,
             receivedAt: receivedAt,

@@ -47,9 +47,7 @@ struct PersistenceContainer: Sendable {
         )
         let bundleId = Bundle.main.bundleIdentifier ?? "TwitchChat"
         let dir = base.appending(path: bundleId, directoryHint: .isDirectory)
-        if !fileManager.fileExists(atPath: dir.path(percentEncoded: false)) {
-            try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appending(path: "TwitchChat.sqlite", directoryHint: .notDirectory)
     }
 }
