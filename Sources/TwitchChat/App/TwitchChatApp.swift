@@ -69,7 +69,11 @@ struct TwitchChatApp: App {
                 ProgressView("起動中...")
                     .onAppear {
                         let helixClient = HelixAPIClient(tokenProvider: authState)
-                        channelManager = ChannelManager(authState: authState)
+                        let persistenceContainer = PersistenceContainer.makeInMemory()
+                        channelManager = ChannelManager(
+                            authState: authState,
+                            persistenceService: persistenceContainer.service
+                        )
                         followedStreamStore = FollowedStreamStore(
                             apiClient: helixClient,
                             authState: authState
@@ -78,7 +82,10 @@ struct TwitchChatApp: App {
                             apiClient: helixClient,
                             authState: authState
                         )
-                        profileImageStore = ProfileImageStore(apiClient: helixClient)
+                        profileImageStore = ProfileImageStore(
+                            apiClient: helixClient,
+                            persistenceService: persistenceContainer.service
+                        )
                     }
             }
         }
