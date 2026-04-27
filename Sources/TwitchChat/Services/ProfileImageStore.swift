@@ -131,26 +131,29 @@ final class ProfileImageStore {
         // @MainActor の await サスペンション中に別タスクが同じ ID を重複リクエストする問題を防ぐ
         var newUserIds = userIds.filter { !fetchedUserIds.contains($0) && !inFlightUserIds.contains($0) }
 
-        // 永続化キャッシュから先読みして API 呼び出しを最小化する
-        if !newUserIds.isEmpty, let persistence = persistenceService {
-            let cached = await persistence.loadUserProfiles(userIds: newUserIds)
-            for snapshot in cached {
-                applyCachedSnapshot(snapshot)
-            }
-            // キャッシュで解決済みの ID は API から取得しない
-            let cachedIds = Set(cached.map(\.userId))
-            newUserIds = newUserIds.filter { !cachedIds.contains($0) }
-        }
-
         if !newUserIds.isEmpty {
-            // フェッチ中フラグを設定し、完了後に必ず解除する
-            inFlightUserIds.formUnion(newUserIds)
-            defer { inFlightUserIds.subtract(newUserIds) }
+            // 永続化 await の前に ID を予約して、await サスペンション中の再入による重複リクエストを防ぐ
+            let reservedUserIds = Set(newUserIds)
+            inFlightUserIds.formUnion(reservedUserIds)
+            defer { inFlightUserIds.subtract(reservedUserIds) }
+
+            // 永続化キャッシュから先読みして API 呼び出しを最小化する
+            if let persistence = persistenceService {
+                let cached = await persistence.loadUserProfiles(userIds: newUserIds)
+                for snapshot in cached {
+                    applyCachedSnapshot(snapshot)
+                }
+                // キャッシュで解決済みの ID は API から取得しない
+                let cachedIds = Set(cached.map(\.userId))
+                newUserIds = newUserIds.filter { !cachedIds.contains($0) }
+            }
 
             // Helix API の100件制限に合わせてチャンク分割してリクエスト
-            let chunks = newUserIds.chunked(into: Self.maxIdsPerRequest)
-            for chunk in chunks {
-                await fetchChunk(userIds: chunk)
+            if !newUserIds.isEmpty {
+                let chunks = newUserIds.chunked(into: Self.maxIdsPerRequest)
+                for chunk in chunks {
+                    await fetchChunk(userIds: chunk)
+                }
             }
         }
 

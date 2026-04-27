@@ -75,6 +75,21 @@ struct BadgeStorePersistenceTests {
         )
     }
 
+    /// 永続化サービスにバッジが保存されるまでポーリング待機する
+    private func waitForSavedBadges(
+        in persistence: InMemoryPersistenceService,
+        scope: BadgeScope,
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async -> [BadgeVersionSnapshot] {
+        let deadline = ContinuousClock.now + .nanoseconds(Int(timeoutNanoseconds))
+        while ContinuousClock.now < deadline {
+            let saved = await persistence.loadBadges(scope: scope)
+            if !saved.isEmpty { return saved }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return await persistence.loadBadges(scope: scope)
+    }
+
     /// バッジ成功レスポンス JSON（broadcaster バッジ1件）
     private func broadcasterBadgeJSON() -> String {
         let version = """
@@ -91,11 +106,11 @@ struct BadgeStorePersistenceTests {
     // MARK: - seed 正常系
 
     @Test("永続化済みグローバルバッジからseedすると画像URLを解決できる")
-    func 永続化済みグローバルバッジからseedすると画像URLを解決できる() async {
+    func 永続化済みグローバルバッジからseedすると画像URLを解決できる() async throws {
         // 前提: InMemoryPersistenceService にグローバルバッジを事前保存する
         let persistence = InMemoryPersistenceService()
         let badge = makeBroadcasterBadge()
-        try? await persistence.saveBadges([badge], scope: .global)
+        try await persistence.saveBadges([badge], scope: .global)
 
         // 操作: 永続化サービスを持つ BadgeStore を作成して seed する
         let store = BadgeStore(apiClient: MockHelixAPIClient(), persistenceService: persistence)
@@ -132,10 +147,8 @@ struct BadgeStorePersistenceTests {
         // 操作: グローバルバッジをフェッチする
         await store.fetchGlobalBadges()
 
-        // 検証: 永続化サービスにバッジが保存されている
-        // write-back は Task で非同期に行うため少し待機する
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        let saved = await persistence.loadBadges(scope: .global)
+        // 検証: 永続化サービスにバッジが保存されている（write-back の完了を bounded poll で待機）
+        let saved = await waitForSavedBadges(in: persistence, scope: .global)
         #expect(saved.contains { $0.setId == "broadcaster" })
     }
 
@@ -160,9 +173,11 @@ struct BadgeStorePersistenceTests {
         // 操作: チャンネルバッジをフェッチする
         await store.fetchChannelBadges(channelId: channelId)
 
-        // 検証: チャンネルスコープで永続化されている
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        let saved = await persistence.loadBadges(scope: .channel(broadcasterId: channelId))
+        // 検証: チャンネルスコープで永続化されている（write-back の完了を bounded poll で待機）
+        let saved = await waitForSavedBadges(
+            in: persistence,
+            scope: .channel(broadcasterId: channelId)
+        )
         #expect(saved.contains { $0.setId == "subscriber" })
     }
 
@@ -212,7 +227,7 @@ struct BadgeStorePersistenceTests {
     // MARK: - scope 分離
 
     @Test("グローバルバッジとチャンネルバッジは別スコープで独立して永続化される")
-    func グローバルバッジとチャンネルバッジは別スコープで独立して永続化される() async {
+    func グローバルバッジとチャンネルバッジは別スコープで独立して永続化される() async throws {
         // 前提: グローバルとチャンネルで異なるバッジを事前保存
         let persistence = InMemoryPersistenceService()
         let globalBadge = BadgeVersionSnapshot(
@@ -233,8 +248,8 @@ struct BadgeStorePersistenceTests {
             title: "6ヶ月サブスク",
             description: nil
         )
-        try? await persistence.saveBadges([globalBadge], scope: .global)
-        try? await persistence.saveBadges([channelBadge], scope: .channel(broadcasterId: "テストチャンネルID"))
+        try await persistence.saveBadges([globalBadge], scope: .global)
+        try await persistence.saveBadges([channelBadge], scope: .channel(broadcasterId: "テストチャンネルID"))
 
         // 操作: それぞれのスコープでタイムスタンプ付きバッジを取得
         let globalResult = await persistence.loadBadgesWithTimestamp(scope: .global)

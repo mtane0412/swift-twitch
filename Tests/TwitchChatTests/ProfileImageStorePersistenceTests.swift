@@ -22,10 +22,25 @@ struct ProfileImageStorePersistenceTests {
         )
     }
 
+    /// 永続化サービスに期待数のプロフィールが保存されるまでポーリング待機する
+    private func waitForSavedProfiles(
+        in persistence: InMemoryPersistenceService,
+        userIds: [String],
+        timeoutNanoseconds: UInt64 = 1_000_000_000
+    ) async -> [UserProfileSnapshot] {
+        let deadline = ContinuousClock.now + .nanoseconds(Int(timeoutNanoseconds))
+        while ContinuousClock.now < deadline {
+            let saved = await persistence.loadUserProfiles(userIds: userIds)
+            if saved.count == userIds.count { return saved }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return await persistence.loadUserProfiles(userIds: userIds)
+    }
+
     // MARK: - キャッシュ先読み（API 呼び出し抑制）
 
     @Test("永続化済みプロフィールはfetchUsers呼び出し時にAPIを呼ばずに解決される")
-    func 永続化済みプロフィールはfetchUsers呼び出し時にAPIを呼ばずに解決される() async {
+    func 永続化済みプロフィールはfetchUsers呼び出し時にAPIを呼ばずに解決される() async throws {
         // 前提: 山田太郎のプロフィールを InMemoryPersistenceService に事前保存する
         let persistence = InMemoryPersistenceService()
         let yamada = makeYamadaProfile()
@@ -43,8 +58,8 @@ struct ProfileImageStorePersistenceTests {
         #expect(callCount == 0)
 
         // 検証: 永続化から復元されたプロフィールで表示名・画像URLを解決できる
-        let displayName = await store.displayName(for: "ユーザーID001")
-        let imageURL = await store.profileImageUrl(for: "ユーザーID001")
+        let displayName = store.displayName(for: "ユーザーID001")
+        let imageURL = store.profileImageUrl(for: "ユーザーID001")
         #expect(displayName == "山田太郎")
         #expect(imageURL?.absoluteString == "https://cdn.example.com/profile/yamada.png")
     }
@@ -72,7 +87,7 @@ struct ProfileImageStorePersistenceTests {
         #expect(callCount == 1)
 
         // 検証: displayName が解決できる
-        let displayName = await store.displayName(for: "ユーザーID001")
+        let displayName = store.displayName(for: "ユーザーID001")
         #expect(displayName == "山田太郎")
     }
 
@@ -102,11 +117,11 @@ struct ProfileImageStorePersistenceTests {
         let store = ProfileImageStore(apiClient: apiClient, persistenceService: persistence)
         await store.fetchUsers(userIds: ["ユーザーID001", "ユーザーID002"])
 
-        // write-back は Task で非同期に行うため少し待機する
-        try? await Task.sleep(nanoseconds: 100_000_000)
-
-        // 検証: 永続化サービスに両ユーザーのプロフィールが保存されている
-        let saved = await persistence.loadUserProfiles(userIds: ["ユーザーID001", "ユーザーID002"])
+        // 検証: 永続化サービスに両ユーザーのプロフィールが保存されている（write-back の完了を bounded poll で待機）
+        let saved = await waitForSavedProfiles(
+            in: persistence,
+            userIds: ["ユーザーID001", "ユーザーID002"]
+        )
         #expect(saved.count == 2)
         #expect(saved.map(\.displayName).contains("山田太郎"))
         #expect(saved.map(\.displayName).contains("佐藤花子"))
@@ -115,7 +130,7 @@ struct ProfileImageStorePersistenceTests {
     // MARK: - clear 後の復元
 
     @Test("clear後にfetchUsersを呼ぶと永続化キャッシュから復元されAPIを呼ばない")
-    func clear後にfetchUsersを呼ぶと永続化キャッシュから復元されAPIを呼ばない() async {
+    func clear後にfetchUsersを呼ぶと永続化キャッシュから復元されAPIを呼ばない() async throws {
         // 前提: 永続化に山田太郎を保存済み
         let persistence = InMemoryPersistenceService()
         let yamada = makeYamadaProfile()
@@ -128,7 +143,7 @@ struct ProfileImageStorePersistenceTests {
         await store.fetchUsers(userIds: ["ユーザーID001"])
 
         // 操作: clear() を呼ぶ（in-memory キャッシュを消去、永続化データは保持）
-        await store.clear()
+        store.clear()
 
         // 操作: 再度 fetchUsers を呼ぶ
         await store.fetchUsers(userIds: ["ユーザーID001"])
@@ -138,7 +153,7 @@ struct ProfileImageStorePersistenceTests {
         #expect(callCount == 0)
 
         // 検証: clear 後でも displayName が解決できる
-        let displayName = await store.displayName(for: "ユーザーID001")
+        let displayName = store.displayName(for: "ユーザーID001")
         #expect(displayName == "山田太郎")
     }
 }

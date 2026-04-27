@@ -129,6 +129,18 @@ actor BadgeStore {
     func fetchChannelBadges(channelId: String) async {
         // Twitch の room-id は数字のみで構成される（URLパラメータインジェクション対策）
         guard !channelId.isEmpty, channelId.allSatisfy(\.isNumber) else { return }
+        let scope: BadgeScope = .channel(broadcasterId: channelId)
+        // 永続化キャッシュから先読みしてオフライン時の即時表示と API 呼び出し抑止を実現する
+        if let persistence = persistenceService {
+            let cached = await persistence.loadBadgesWithTimestamp(scope: scope)
+            if !cached.snapshots.isEmpty {
+                channelBadges = Self.buildMapping(from: cached.snapshots)
+                if let fetchedAt = cached.fetchedAt,
+                   Date().timeIntervalSince(fetchedAt) < Self.badgeTTL {
+                    return
+                }
+            }
+        }
         do {
             let response: HelixBadgesResponse = try await apiClient.get(
                 url: Self.helixChannelBadgesURL,
@@ -136,7 +148,7 @@ actor BadgeStore {
             )
             channelBadges = Self.buildMapping(from: response.data)
             // write-back: 永続化サービスが存在すればチャンネルスコープで非同期保存する
-            writeBackBadges(response.data, scope: .channel(broadcasterId: channelId))
+            writeBackBadges(response.data, scope: scope)
         } catch let error as URLError where error.code == .userAuthenticationRequired {
             // 未ログイン時はスキップ
         } catch HelixAPIError.unauthorized {
