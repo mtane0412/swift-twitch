@@ -59,6 +59,18 @@ struct SwiftDataPersistenceService: PersistenceService {
         try await actor.saveChannelEmotes(emotes, broadcasterId: broadcasterId)
     }
 
+    func loadGlobalEmotesWithTimestamp() async -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        await actor.loadGlobalEmotesWithTimestamp()
+    }
+
+    func loadUserEmotesWithTimestamp(userId: String) async -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        await actor.loadUserEmotesWithTimestamp(userId: userId)
+    }
+
+    func loadChannelEmotesWithTimestamp(broadcasterId: String) async -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        await actor.loadChannelEmotesWithTimestamp(broadcasterId: broadcasterId)
+    }
+
     // MARK: - バッジ・プロフィール
 
     func loadBadges(scope: BadgeScope) async -> [BadgeVersionSnapshot] {

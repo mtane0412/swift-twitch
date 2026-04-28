@@ -40,6 +40,24 @@ protocol PersistenceService: Sendable {
     /// - Throws: ディスクまたはデータベース書き込みに失敗した場合
     func saveChannelEmotes(_ emotes: [HelixEmote], broadcasterId: String) async throws
 
+    /// グローバルエモートをタイムスタンプ付きでロードする
+    ///
+    /// TTL 判定（24h stale-while-revalidate）に使用する。
+    /// 未保存の場合は `fetchedAt` に nil を返す。
+    func loadGlobalEmotesWithTimestamp() async -> (emotes: [HelixEmote], fetchedAt: Date?)
+
+    /// 指定ユーザーのエモートをタイムスタンプ付きでロードする
+    ///
+    /// TTL 判定（24h stale-while-revalidate）に使用する。
+    /// 未保存の場合は `fetchedAt` に nil を返す。
+    func loadUserEmotesWithTimestamp(userId: String) async -> (emotes: [HelixEmote], fetchedAt: Date?)
+
+    /// 指定チャンネルのエモートをタイムスタンプ付きでロードする
+    ///
+    /// TTL 判定（24h stale-while-revalidate）に使用する。
+    /// 未保存の場合は `fetchedAt` に nil を返す。
+    func loadChannelEmotesWithTimestamp(broadcasterId: String) async -> (emotes: [HelixEmote], fetchedAt: Date?)
+
     // MARK: - バッジ・プロフィール
 
     /// 指定スコープのバッジ一覧をロードする

@@ -17,9 +17,12 @@ actor InMemoryPersistenceService: PersistenceService {
 
     // MARK: - ストレージ
 
-    private var userEmotes: [String: [HelixEmote]] = [:]
-    private var globalEmotes: [HelixEmote] = []
-    private var channelEmotes: [String: [HelixEmote]] = [:]
+    /// ユーザーエモートとその保存時刻（TTL 判定用）
+    private var userEmotes: [String: (emotes: [HelixEmote], savedAt: Date)] = [:]
+    /// グローバルエモートとその保存時刻（TTL 判定用）
+    private var globalEmotes: (emotes: [HelixEmote], savedAt: Date)?
+    /// チャンネルエモートとその保存時刻（TTL 判定用）
+    private var channelEmotes: [String: (emotes: [HelixEmote], savedAt: Date)] = [:]
     /// バッジデータとその保存時刻を保持する（TTL 判定に使用）
     private var badges: [BadgeScope: (snapshots: [BadgeVersionSnapshot], savedAt: Date)] = [:]
     private var userProfiles: [String: UserProfileSnapshot] = [:]
@@ -32,27 +35,42 @@ actor InMemoryPersistenceService: PersistenceService {
     // MARK: - PersistenceService
 
     func loadUserEmotes(userId: String) async -> [HelixEmote] {
-        userEmotes[userId] ?? []
+        userEmotes[userId]?.emotes ?? []
     }
 
     func saveUserEmotes(_ emotes: [HelixEmote], userId: String) async throws {
-        userEmotes[userId] = emotes
+        userEmotes[userId] = (emotes: emotes, savedAt: Date())
     }
 
     func loadGlobalEmotes() async -> [HelixEmote] {
-        globalEmotes
+        globalEmotes?.emotes ?? []
     }
 
     func saveGlobalEmotes(_ emotes: [HelixEmote]) async throws {
-        globalEmotes = emotes
+        globalEmotes = (emotes: emotes, savedAt: Date())
     }
 
     func loadChannelEmotes(broadcasterId: String) async -> [HelixEmote] {
-        channelEmotes[broadcasterId] ?? []
+        channelEmotes[broadcasterId]?.emotes ?? []
     }
 
     func saveChannelEmotes(_ emotes: [HelixEmote], broadcasterId: String) async throws {
-        channelEmotes[broadcasterId] = emotes
+        channelEmotes[broadcasterId] = (emotes: emotes, savedAt: Date())
+    }
+
+    func loadGlobalEmotesWithTimestamp() async -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        guard let entry = globalEmotes else { return (emotes: [], fetchedAt: nil) }
+        return (emotes: entry.emotes, fetchedAt: entry.savedAt)
+    }
+
+    func loadUserEmotesWithTimestamp(userId: String) async -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        guard let entry = userEmotes[userId] else { return (emotes: [], fetchedAt: nil) }
+        return (emotes: entry.emotes, fetchedAt: entry.savedAt)
+    }
+
+    func loadChannelEmotesWithTimestamp(broadcasterId: String) async -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        guard let entry = channelEmotes[broadcasterId] else { return (emotes: [], fetchedAt: nil) }
+        return (emotes: entry.emotes, fetchedAt: entry.savedAt)
     }
 
     func loadBadges(scope: BadgeScope) async -> [BadgeVersionSnapshot] {
@@ -133,6 +151,21 @@ actor InMemoryPersistenceService: PersistenceService {
     /// テスト用: バッジを任意の保存日時で登録する（TTL 検証用）
     func saveBadgesWithDate(_ badgeList: [BadgeVersionSnapshot], scope: BadgeScope, savedAt: Date) async {
         badges[scope] = (snapshots: badgeList, savedAt: savedAt)
+    }
+
+    /// テスト用: グローバルエモートを任意の保存日時で登録する（TTL 検証用）
+    func saveGlobalEmotesWithDate(_ emotes: [HelixEmote], savedAt: Date) async {
+        globalEmotes = (emotes: emotes, savedAt: savedAt)
+    }
+
+    /// テスト用: ユーザーエモートを任意の保存日時で登録する（TTL 検証用）
+    func saveUserEmotesWithDate(_ emotes: [HelixEmote], userId: String, savedAt: Date) async {
+        userEmotes[userId] = (emotes: emotes, savedAt: savedAt)
+    }
+
+    /// テスト用: チャンネルエモートを任意の保存日時で登録する（TTL 検証用）
+    func saveChannelEmotesWithDate(_ emotes: [HelixEmote], broadcasterId: String, savedAt: Date) async {
+        channelEmotes[broadcasterId] = (emotes: emotes, savedAt: savedAt)
     }
 #endif
 }

@@ -15,6 +15,11 @@ actor EmoteStore {
 
     // MARK: - 定数
 
+    /// エモートの TTL（24 時間）
+    ///
+    /// stale-while-revalidate 判定に使用する。TTL 以内の永続化データがあれば API コールを抑止する。
+    private static let emoteTTL: TimeInterval = 86400
+
     /// Helix グローバルエモートエンドポイント
     private static let helixGlobalEmotesURL = URL(string: "https://api.twitch.tv/helix/chat/emotes/global")!
 
@@ -103,6 +108,7 @@ actor EmoteStore {
                 )
                 self.globalEmotes = response.data
                 self.isGlobalLoaded = true
+                self.writeBackEmotes(response.data, scope: .global)
             } catch let error as URLError where error.code == .userAuthenticationRequired {
                 // 未ログイン時は次回接続時に再取得できるよう isGlobalLoaded を更新しない
             } catch HelixAPIError.unauthorized {
@@ -130,12 +136,26 @@ actor EmoteStore {
     func fetchChannelEmotes(broadcasterId: String) async {
         // Twitch の room-id は ASCII 十進数のみで構成される（URLパラメータインジェクション対策）
         guard !broadcasterId.isEmpty, broadcasterId.allSatisfy({ $0.isASCII && $0.isNumber }) else { return }
+        // 永続化キャッシュから先読みしてオフライン時の即時表示と API 呼び出し抑止を実現する
+        if let persistence = persistenceService {
+            let cached = await persistence.loadChannelEmotesWithTimestamp(broadcasterId: broadcasterId)
+            // emotes が空でも fetchedAt があれば「取得済み空配列」として TTL を適用する
+            if !cached.emotes.isEmpty {
+                channelEmotes = cached.emotes
+                notifyUserEmoteSetsUpdated()
+            }
+            if let fetchedAt = cached.fetchedAt,
+               Date().timeIntervalSince(fetchedAt) < Self.emoteTTL {
+                return
+            }
+        }
         do {
             let response: HelixEmotesResponse = try await apiClient.get(
                 url: Self.helixChannelEmotesURL,
                 queryItems: [URLQueryItem(name: "broadcaster_id", value: broadcasterId)]
             )
             channelEmotes = response.data
+            writeBackEmotes(response.data, scope: .channel(broadcasterId: broadcasterId))
             // チャンネルエモートのロード完了をピッカーに通知する
             notifyUserEmoteSetsUpdated()
         } catch let error as URLError where error.code == .userAuthenticationRequired {
@@ -178,6 +198,8 @@ actor EmoteStore {
             #endif
             do {
                 let accumulated = try await self.performUserEmotesFetch(userId: userId)
+                // 全ページ完了後に write-back（途中キャンセル時は部分データを保存しない）
+                self.writeBackEmotes(accumulated, scope: .user(userId: userId))
                 self.isUserEmotesLoaded = true
                 #if DEBUG
                 print("[EmoteStore] fetchUserEmotes: フェッチ完了 \(accumulated.count)件")
@@ -453,6 +475,88 @@ actor EmoteStore {
     func cancelUserEmotesFetch() {
         userEmotesTask?.cancel()
         userEmotesTask = nil
+    }
+
+    /// 永続化済みグローバルエモートを読み込んでキャッシュを事前充填する
+    ///
+    /// チャンネル接続時に呼び出す。TTL（24h）以内のデータなら `isGlobalLoaded = true`
+    /// にして後続の `fetchGlobalEmotes()` による API 呼び出しを抑止する（stale-while-revalidate）。
+    /// TTL 超過時は古いデータでキャッシュを充填した上で `isGlobalLoaded = false` のままにし、
+    /// 後続の `fetchGlobalEmotes()` で再フェッチさせる。
+    func seedFromPersistence() async {
+        guard !isGlobalLoaded else { return }
+        guard let persistence = persistenceService else { return }
+        let result = await persistence.loadGlobalEmotesWithTimestamp()
+        // emotes が空でも fetchedAt があれば「取得済み空配列」として TTL を適用する
+        globalEmotes = result.emotes
+        if !result.emotes.isEmpty {
+            notifyUserEmoteSetsUpdated()
+        }
+        if let fetchedAt = result.fetchedAt,
+           Date().timeIntervalSince(fetchedAt) < Self.emoteTTL {
+            isGlobalLoaded = true
+        }
+    }
+
+    /// 永続化済みユーザーエモートを読み込んでキャッシュを事前充填する
+    ///
+    /// `ChannelManager.preloadUserEmotes()` の冒頭で呼び出す。
+    /// `setUserEmotes(_:)` と異なり `isUserEmotesLoaded` フラグを立てない。
+    /// TTL（24h）以内のデータがある場合のみフラグを立てて後続の `fetchUserEmotes` を抑止する。
+    ///
+    /// - Parameter userId: 認証済みユーザーの Twitch ユーザー ID
+    func seedUserEmotes(userId: String) async {
+        guard !isUserEmotesLoaded else { return }
+        guard let persistence = persistenceService else { return }
+        let result = await persistence.loadUserEmotesWithTimestamp(userId: userId)
+        // emotes が空でも fetchedAt があれば「取得済み空配列」として TTL を適用する
+        userEmotes = result.emotes
+        if !result.emotes.isEmpty {
+            notifyUserEmoteSetsUpdated()
+        }
+        if let fetchedAt = result.fetchedAt,
+           Date().timeIntervalSince(fetchedAt) < Self.emoteTTL {
+            isUserEmotesLoaded = true
+        }
+    }
+
+    /// 永続化済みチャンネルエモートを読み込んでキャッシュを事前充填する
+    ///
+    /// `joinChannel` 時の `fetchChannelEmotes` 呼び出し前にセットする。
+    /// チャンネルエモートに loaded フラグはないため、TTL 判定は `fetchChannelEmotes` 冒頭で行う。
+    ///
+    /// - Parameter broadcasterId: Twitch チャンネルID（数字のみ）
+    func seedChannelEmotes(broadcasterId: String) async {
+        guard let persistence = persistenceService else { return }
+        let result = await persistence.loadChannelEmotesWithTimestamp(broadcasterId: broadcasterId)
+        guard !result.emotes.isEmpty else { return }
+        channelEmotes = result.emotes
+        notifyUserEmoteSetsUpdated()
+    }
+
+    // MARK: - write-back
+
+    /// エモートを永続化サービスに非同期保存する（fire-and-forget）
+    ///
+    /// fetch 成功直後に呼び出すことで、次回起動時の seed を有効にする。
+    private func writeBackEmotes(_ emotes: [HelixEmote], scope: EmoteScope) {
+        guard let persistence = persistenceService else { return }
+        Task { [persistence] in
+            do {
+                switch scope {
+                case .global:
+                    try await persistence.saveGlobalEmotes(emotes)
+                case .channel(let broadcasterId):
+                    try await persistence.saveChannelEmotes(emotes, broadcasterId: broadcasterId)
+                case .user(let userId):
+                    try await persistence.saveUserEmotes(emotes, userId: userId)
+                }
+            } catch {
+                #if DEBUG
+                print("[EmoteStore] write-back 失敗 scope=\(scope.rawValue) error=\(error)")
+                #endif
+            }
+        }
     }
 
     /// ユーザーエモート一覧を直接設定する

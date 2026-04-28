@@ -48,6 +48,27 @@ actor PersistenceActor {
         try upsertEmotes(emotes, scope: .channel(broadcasterId: broadcasterId))
     }
 
+    /// グローバルエモートをタイムスタンプ付きで取得する
+    ///
+    /// `updatedAt` の最大値を `fetchedAt` として返す。未保存の場合は `fetchedAt` が nil。
+    func loadGlobalEmotesWithTimestamp() -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        fetchEmotesWithTimestamp(scopeRaw: EmoteScope.global.rawValue)
+    }
+
+    /// 指定ユーザーのエモートをタイムスタンプ付きで取得する
+    ///
+    /// `updatedAt` の最大値を `fetchedAt` として返す。未保存の場合は `fetchedAt` が nil。
+    func loadUserEmotesWithTimestamp(userId: String) -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        fetchEmotesWithTimestamp(scopeRaw: EmoteScope.user(userId: userId).rawValue)
+    }
+
+    /// 指定チャンネルのエモートをタイムスタンプ付きで取得する
+    ///
+    /// `updatedAt` の最大値を `fetchedAt` として返す。未保存の場合は `fetchedAt` が nil。
+    func loadChannelEmotesWithTimestamp(broadcasterId: String) -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        fetchEmotesWithTimestamp(scopeRaw: EmoteScope.channel(broadcasterId: broadcasterId).rawValue)
+    }
+
     // MARK: - バッジ
 
     /// 指定スコープのバッジを取得する
@@ -244,6 +265,20 @@ private extension PersistenceActor {
         )
         let rows = (try? modelContext.fetch(descriptor)) ?? []
         return rows.map { $0.toDomain() }
+    }
+
+    /// スコープ別エモートをタイムスタンプ付きで fetch する
+    ///
+    /// `updatedAt` の最大値を `fetchedAt` として返す。バッジの `fetchBadgeRows` と同じ流儀。
+    func fetchEmotesWithTimestamp(scopeRaw: String) -> (emotes: [HelixEmote], fetchedAt: Date?) {
+        let descriptor = FetchDescriptor<PersistedEmote>(
+            predicate: #Predicate { $0.scope == scopeRaw }
+        )
+        let rows = (try? modelContext.fetch(descriptor)) ?? []
+        guard !rows.isEmpty else { return (emotes: [], fetchedAt: nil) }
+        let emotes = rows.map { $0.toDomain() }
+        let fetchedAt = rows.map(\.updatedAt).max()
+        return (emotes: emotes, fetchedAt: fetchedAt)
     }
 
     /// エモートをスコープ単位で upsert する（既存を全件差し替え）

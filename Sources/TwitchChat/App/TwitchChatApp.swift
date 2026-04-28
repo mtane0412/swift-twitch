@@ -61,7 +61,10 @@ struct TwitchChatApp: App {
                         followedStreamStore.clear()
                         followedChannelStore.clear()
                         profileImageStore.clear()
-                        Task { await channelManager.disconnectAll() }
+                        Task {
+                            await channelManager.disconnectAll()
+                            await channelManager.clearPersistedUserData()
+                        }
                     case .unknown:
                         break
                     }
