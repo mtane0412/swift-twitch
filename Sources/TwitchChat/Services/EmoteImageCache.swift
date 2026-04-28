@@ -233,6 +233,10 @@ final class EmoteImageCache: @unchecked Sendable {
             if let data = gifData {
                 gifDataCache.setObject(data as NSData, forKey: emoteId as NSString)
             }
+        } else {
+            // スタティック版で上書きする場合、古いアニメーション状態を削除して矛盾を防ぐ
+            _ = lock.withLock { animatedEmoteIds.remove(emoteId) }
+            gifDataCache.removeObject(forKey: emoteId as NSString)
         }
     }
 

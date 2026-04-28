@@ -29,17 +29,22 @@ struct ImageDiskStoreTests {
         let store = try ImageDiskStore(rootDirectory: root)
         let key = ImageCacheKey(kind: .emote, identifier: "12345:2.0:animated")
 
-        // 前提: "emote:12345:2.0:animated" の SHA256 hex を CryptoKit で計算
+        // SHA256 hex を CryptoKit で手計算する（"emote:<identifier>" が入力）
         let input = "emote:12345:2.0:animated"
         let hashBytes = SHA256.hash(data: Data(input.utf8))
         let hex = hashBytes.compactMap { String(format: "%02x", $0) }.joined()
-        // ImageDiskStore.init と同じ realpath() 解決を手動で再現する
-        // テスト用の一時ディレクトリは存在前に realpath 解決できないため、先に存在確認してから比較
-        let expectedURL = store.fileURL(for: key)
 
-        // 検証: fileURL が SHA256 のパス階層に一致する（nonisolated のため await 不要）
+        // 期待するパス要素を組み立てる: <先頭2桁>/<次2桁>/<残り>.bin
+        let expectedDir1 = String(hex.prefix(2))
+        let expectedDir2 = String(hex.dropFirst(2).prefix(2))
+        let expectedFile = "\(String(hex.dropFirst(4))).bin"
+
+        // 検証: fileURL が SHA256 ハッシュから算出したパス階層と一致する（nonisolated のため await 不要）
         let fileURL = store.fileURL(for: key)
-        #expect(fileURL == expectedURL)
+        #expect(fileURL.lastPathComponent == expectedFile, "ファイル名が SHA256 の残りバイトと一致しない")
+        #expect(fileURL.deletingLastPathComponent().lastPathComponent == expectedDir2, "第2ディレクトリが SHA256 の3-4バイト目と一致しない")
+        #expect(fileURL.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent == expectedDir1, "第1ディレクトリが SHA256 の1-2バイト目と一致しない")
+        #expect(fileURL.path.contains("/ImageCache/emotes/"), "バケット 'emotes' 配下でない")
     }
 
     @Test("バッジキーのファイルパスがバケット 'badges' 配下に生成される")

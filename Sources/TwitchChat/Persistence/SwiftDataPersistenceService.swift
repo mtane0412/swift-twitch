@@ -13,7 +13,16 @@ import SwiftData
 /// `InMemoryPersistenceService` にフォールバックする。
 struct SwiftDataPersistenceService: PersistenceService {
 
+    // addObserver(forName:using:) のトークンを Sendable struct で保持するためのラッパー
+    // トークンをインスタンスが生きている間保持し、解放時に通知購読を自動解除する
+    private final class ObserverBox: @unchecked Sendable {
+        let token: any NSObjectProtocol
+        init(_ token: any NSObjectProtocol) { self.token = token }
+        deinit { NotificationCenter.default.removeObserver(token) }
+    }
+
     private let actor: PersistenceActor
+    private let resignActiveObserver: ObserverBox?
 
     /// 既存の ModelContainer から生成する（テスト向けに imageDiskStoreRoot を注入可能）
     ///
@@ -40,16 +49,21 @@ struct SwiftDataPersistenceService: PersistenceService {
                     await actor.runReconcileAndSweep()
                 }
                 // バックグラウンド移行時に sweep を実行する（テスト時は登録しない）
-                NotificationCenter.default.addObserver(
+                // トークンを保持して通知購読の重複を防ぐ
+                let token = NotificationCenter.default.addObserver(
                     forName: NSApplication.didResignActiveNotification,
                     object: nil,
                     queue: nil
                 ) { _ in
                     Task { await actor.runReconcileAndSweep() }
                 }
+                self.resignActiveObserver = ObserverBox(token)
+            } else {
+                self.resignActiveObserver = nil
             }
         } else {
             self.actor = PersistenceActor(modelContainer: container)
+            self.resignActiveObserver = nil
         }
     }
 
