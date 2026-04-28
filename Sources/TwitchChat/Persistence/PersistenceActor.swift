@@ -14,6 +14,30 @@ import SwiftData
 @ModelActor
 actor PersistenceActor {
 
+    // MARK: - ImageDiskStore 統合プロパティ
+
+    /// 実バイナリ I/O を担う ディスクキャッシュ actor（init 時または attachDiskStore で注入）
+    var imageDiskStore: ImageDiskStore?
+
+    /// lastAccessedAt の debounce 書き戻し待ちキャッシュキーセット
+    var pendingTouches: Set<String> = []
+
+    /// debounce flush Task が起動済みかどうか
+    var debounceFlushScheduled: Bool = false
+
+    // MARK: - ImageDiskStore 注入 init（カスタム）
+
+    /// ImageDiskStore を init 時に直接受け取る init（競合状態を回避）
+    ///
+    /// @ModelActor が生成する init(modelContainer:) と並列に定義できる。
+    /// imageDiskStore をデフォルト値なしで init することで nil チェックを不要にする。
+    init(modelContainer: ModelContainer, diskStore: ImageDiskStore) {
+        let modelContext = ModelContext(modelContainer)
+        self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
+        self.modelContainer = modelContainer
+        self.imageDiskStore = diskStore
+    }
+
     // MARK: - エモート
 
     /// 指定ユーザーのエモートを取得する
@@ -183,46 +207,6 @@ actor PersistenceActor {
         return rows.compactMap { $0.toDomain() }
     }
 
-    // MARK: - 画像バイナリ
-
-    /// キャッシュキーで画像バイナリを取得する
-    func loadImageData(key: ImageCacheKey) -> Data? {
-        let cacheKeyStr = imageCacheKeyRaw(key)
-        let descriptor = FetchDescriptor<PersistedImageAsset>(
-            predicate: #Predicate { $0.cacheKey == cacheKeyStr }
-        )
-        guard let asset = (try? modelContext.fetch(descriptor))?.first else { return nil }
-        // LRU 更新（失敗しても無視）
-        asset.lastAccessedAt = Date()
-        try? modelContext.save()
-        return asset.data
-    }
-
-    /// 画像バイナリを保存する（upsert）
-    func saveImageData(_ data: Data, key: ImageCacheKey, mime: String) throws {
-        let cacheKeyStr = imageCacheKeyRaw(key)
-        let descriptor = FetchDescriptor<PersistedImageAsset>(
-            predicate: #Predicate { $0.cacheKey == cacheKeyStr }
-        )
-        let now = Date()
-        if let existing = (try? modelContext.fetch(descriptor))?.first {
-            existing.data = data
-            existing.mime = mime
-            existing.lastAccessedAt = now
-        } else {
-            modelContext.insert(PersistedImageAsset(
-                cacheKey: cacheKeyStr,
-                kind: key.kind.rawValue,
-                identifier: key.identifier,
-                data: data,
-                mime: mime,
-                lastAccessedAt: now,
-                createdAt: now
-            ))
-        }
-        try modelContext.save()
-    }
-
     // MARK: - ライフサイクル
 
     /// ユーザー固有データを削除する（グローバル/チャンネル/バッジ/履歴/画像は保持）
@@ -380,10 +364,6 @@ private extension PersistenceActor {
         }
     }
 
-    /// ImageCacheKey をキャッシュキー文字列に変換する
-    func imageCacheKeyRaw(_ key: ImageCacheKey) -> String {
-        "\(key.kind.rawValue):\(key.identifier)"
-    }
 }
 
 // MARK: - EmoteScope

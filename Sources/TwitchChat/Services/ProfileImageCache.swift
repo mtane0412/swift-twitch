@@ -37,13 +37,25 @@ final class ProfileImageCache: @unchecked Sendable {
     /// 進行中のダウンロードタスク（キー: userId）
     private var inFlightTasks: [String: Task<NSImage?, Never>] = [:]
 
-    /// inFlightTasks へのアクセスを保護するロック
+    /// inFlightTasks / persistence へのアクセスを保護するロック
     private let lock = NSLock()
 
     /// ダウンロード失敗時のログ出力に使用するロガー
     private let logger = Logger(subsystem: "dev.mtane.TwitchChat", category: "ProfileImageCache")
 
+    /// L2 ディスクキャッシュサービス（nil の場合は L2 スキップ）
+    private var persistence: (any PersistenceService)?
+
     private init() {}
+
+    /// L2 永続化サービスを注入する（アプリ起動時に TwitchChatApp から呼ぶ）
+    func attachPersistence(_ service: any PersistenceService) {
+        lock.withLock { self.persistence = service }
+    }
+
+    private var currentPersistence: (any PersistenceService)? {
+        lock.withLock { persistence }
+    }
 
     // MARK: - 画像取得
 
@@ -70,9 +82,24 @@ final class ProfileImageCache: @unchecked Sendable {
                 guard let self else { return nil as NSImage? }
                 defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: userId) } }
 
-                guard let image = await self.download(from: imageUrl) else { return nil }
-                self.store(image, for: userId)
-                return image
+                let persistence = self.currentPersistence
+                let l2Key = ImageCacheKey(kind: .profile, identifier: userId)
+
+                // L2 ルックアップ
+                if let ps = persistence,
+                   let data = await ps.loadImageData(key: l2Key),
+                   let image = NSImage(data: data) {
+                    let resized = self.store(image, for: userId)
+                    return resized
+                }
+
+                // L3 HTTP ダウンロード
+                guard let (image, data) = await self.download(from: imageUrl) else { return nil }
+                let resized = self.store(image, for: userId)
+                if let ps = persistence {
+                    try? await ps.saveImageData(data, key: l2Key, mime: "image/png")
+                }
+                return resized
             }
             inFlightTasks[userId] = newTask
             return newTask
@@ -83,10 +110,10 @@ final class ProfileImageCache: @unchecked Sendable {
 
     // MARK: - プライベートメソッド
 
-    /// 指定 URL から画像をダウンロードする
-    private func download(from url: URL) async -> NSImage? {
+    /// 指定 URL から画像をダウンロードする（L2 保存用に生データも返す）
+    private func download(from url: URL) async -> (NSImage, Data)? {
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await ImageDownloadSession.shared.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse else {
                 logger.warning("プロフィール画像レスポンスが HTTPURLResponse でない: \(url)")
                 return nil
@@ -99,7 +126,7 @@ final class ProfileImageCache: @unchecked Sendable {
                 logger.warning("プロフィール画像データを NSImage に変換できない: \(url)")
                 return nil
             }
-            return image
+            return (image, data)
         } catch {
             logger.warning("プロフィール画像ダウンロード失敗: \(url) - \(error)")
             return nil
@@ -110,7 +137,9 @@ final class ProfileImageCache: @unchecked Sendable {
     ///
     /// NSGraphicsContext はメインスレッド以外での使用が未定義動作のため、
     /// CoreGraphics ベースの CGContext でリサイズする（バックグラウンドスレッドセーフ）。
-    private func store(_ image: NSImage, for userId: String) {
+    /// リサイズ後の NSImage を返すことで L2 ヒット時に呼び出し元が直接返却できる。
+    @discardableResult
+    private func store(_ image: NSImage, for userId: String) -> NSImage {
         let targetSize = NSSize(width: Self.displaySize, height: Self.displaySize)
         let resized: NSImage
         // CGImage を取得して CoreGraphics コンテキストでリサイズ描画する
@@ -140,5 +169,13 @@ final class ProfileImageCache: @unchecked Sendable {
             resized = image
         }
         imageCache.setObject(resized, forKey: userId as NSString)
+        return resized
     }
+
+#if DEBUG
+    /// テスト用: 永続化サービスを差し替える（nil でリセット）
+    func attachPersistenceForTesting(_ service: (any PersistenceService)?) {
+        lock.withLock { self.persistence = service }
+    }
+#endif
 }

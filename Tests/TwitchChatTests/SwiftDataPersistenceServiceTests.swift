@@ -10,9 +10,19 @@ import Testing
 @Suite("SwiftDataPersistenceService テスト")
 struct SwiftDataPersistenceServiceTests {
 
-    /// テスト用の in-memory SwiftDataPersistenceService を生成する
+    /// テスト用の in-memory SwiftDataPersistenceService を生成する（diskStore 無し）
     private func makeService() throws -> SwiftDataPersistenceService {
         try SwiftDataPersistenceService(inMemory: true)
+    }
+
+    /// 一時ディレクトリに ImageDiskStore を持つ SwiftDataPersistenceService を生成する
+    ///
+    /// 呼び出し元で `defer { try? FileManager.default.removeItem(at: tempRoot) }` を記述すること。
+    private func makeServiceWithDisk() throws -> (service: SwiftDataPersistenceService, tempRoot: URL) {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SwiftDataPersistenceTests-\(UUID().uuidString)", isDirectory: true)
+        let service = try SwiftDataPersistenceService(inMemory: true, imageDiskStoreRoot: tempRoot)
+        return (service: service, tempRoot: tempRoot)
     }
 
     // MARK: - エモート
@@ -449,10 +459,12 @@ struct SwiftDataPersistenceServiceTests {
 
     @Test("画像バイナリを保存して取得できる")
     func 画像バイナリを保存して取得できる() async throws {
-        // 前提: テスト用の画像データ
-        let service = try makeService()
-        let imageData = Data("テスト画像バイナリ".utf8)
-        let key = ImageCacheKey(kind: .emote, identifier: "emote_001:2x:static")
+        // 前提: 一時ディレクトリに ImageDiskStore を持つサービス
+        let (service, tempRoot) = try makeServiceWithDisk()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let imageData = Data("テスト画像バイナリ_エモートKappa".utf8)
+        let key = ImageCacheKey(kind: .emote, identifier: "emote_001:2.0:static")
 
         // 操作: 保存して取得
         try await service.saveImageData(imageData, key: key, mime: "image/png")
@@ -464,14 +476,16 @@ struct SwiftDataPersistenceServiceTests {
 
     @Test("画像バイナリを再保存すると最新データで上書きされる")
     func 画像バイナリを再保存すると最新データで上書きされる() async throws {
-        // 前提: 初期データを保存
-        let service = try makeService()
-        let key = ImageCacheKey(kind: .badge, identifier: "broadcaster:1:2x")
-        let originalData = Data("元の画像データ".utf8)
+        // 前提: 一時ディレクトリに ImageDiskStore を持つサービス
+        let (service, tempRoot) = try makeServiceWithDisk()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let key = ImageCacheKey(kind: .badge, identifier: "broadcaster:1")
+        let originalData = Data("元の画像データ_バッジ初版".utf8)
         try await service.saveImageData(originalData, key: key, mime: "image/png")
 
         // 操作: 同じキーで別データを保存
-        let updatedData = Data("更新後の画像データ".utf8)
+        let updatedData = Data("更新後の画像データ_バッジ改版".utf8)
         try await service.saveImageData(updatedData, key: key, mime: "image/webp")
 
         // 検証: 最新データが取得できる
@@ -481,11 +495,13 @@ struct SwiftDataPersistenceServiceTests {
 
     @Test("画像種別が異なれば同じidentifierでも分離される")
     func 画像種別が異なれば同じidentifierでも分離される() async throws {
-        // 前提: 同じ identifier で異なる kind の画像を保存
-        let service = try makeService()
-        let emoteData = Data("エモート画像".utf8)
-        let badgeData = Data("バッジ画像".utf8)
-        let sharedIdentifier = "12345:2x:static"
+        // 前提: 一時ディレクトリに ImageDiskStore を持つサービス
+        let (service, tempRoot) = try makeServiceWithDisk()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let emoteData = Data("エモート画像データ".utf8)
+        let badgeData = Data("バッジ画像データ".utf8)
+        let sharedIdentifier = "12345:2.0:static"
         let emoteKey = ImageCacheKey(kind: .emote, identifier: sharedIdentifier)
         let badgeKey = ImageCacheKey(kind: .badge, identifier: sharedIdentifier)
         try await service.saveImageData(emoteData, key: emoteKey, mime: "image/png")
@@ -496,6 +512,34 @@ struct SwiftDataPersistenceServiceTests {
         let loadedBadge = await service.loadImageData(key: badgeKey)
         #expect(loadedEmote == emoteData)
         #expect(loadedBadge == badgeData)
+    }
+
+    @Test("ファイルなしレコードは loadImageData で nil が返りレコードが削除される")
+    func ファイルなしレコードはloadImageDataでnilが返りレコードが削除される() async throws {
+        // 前提: 一時ディレクトリに ImageDiskStore を持つサービス
+        let (service, tempRoot) = try makeServiceWithDisk()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let key = ImageCacheKey(kind: .emote, identifier: "削除テストエモート:2.0:static")
+        let testData = Data("テスト画像バイナリ".utf8)
+
+        // 操作: 保存後に物理ファイルを手動削除して整合性違反を作る
+        try await service.saveImageData(testData, key: key, mime: "image/png")
+
+        // ImageDiskStore のファイルパスを取得して削除（内部ヘルパー経由で確認不可のため列挙で探す）
+        let imageCacheRoot = tempRoot.appendingPathComponent("ImageCache")
+        if FileManager.default.fileExists(atPath: imageCacheRoot.path) {
+            let enumerator = FileManager.default.enumerator(at: imageCacheRoot, includingPropertiesForKeys: nil)
+            while let url = enumerator?.nextObject() as? URL {
+                if url.pathExtension == "bin" {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+        }
+
+        // 検証: loadImageData が nil を返す（レコードは内部で削除される）
+        let loaded = await service.loadImageData(key: key)
+        #expect(loaded == nil)
     }
 
     // MARK: - バッジ（タイムスタンプ付き）

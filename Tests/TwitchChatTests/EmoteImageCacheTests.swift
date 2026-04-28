@@ -1,13 +1,16 @@
 // EmoteImageCacheTests.swift
 // EmoteImageCache の単体テスト
-// URL 生成ロジックとエモート表示サイズを検証する（画像ダウンロードは外部依存のためテスト対象外）
+// URL 生成ロジック・表示サイズ・L2 キャッシュ統合を検証する
 
+import AppKit
 import Foundation
 import Testing
 @testable import TwitchChat
 
 /// EmoteImageCache のテストスイート
-@Suite("EmoteImageCache テスト")
+///
+/// シングルトン EmoteImageCache.shared の状態を共有するため、テストを順次実行する。
+@Suite("EmoteImageCache テスト", .serialized)
 struct EmoteImageCacheTests {
 
     // MARK: - スタティック URL 生成
@@ -95,5 +98,79 @@ struct EmoteImageCacheTests {
 
         // 検証: 登録したデータが取得できる
         #expect(result == testGIFData)
+    }
+
+    // MARK: - L2 キャッシュ統合
+
+    @Test("L1 ヒット時は loadImageData を呼ばない")
+    func L1ヒット時はloadImageDataを呼ばない() async {
+        // 前提: テスト用エモートID で L1 に画像を直接登録する
+        let emoteId = "エモートID_L1テスト_\(UUID())"
+        defer { EmoteImageCache.shared.clearForTesting() }
+
+        let mock = MockPersistenceService()
+        EmoteImageCache.shared.attachPersistence(mock)
+
+        // テスト用の画像を L1 に直接登録する（L1 ヒットを確実にするため）
+        let testImage = makeTestNSImage()
+        EmoteImageCache.shared.storeImageForTesting(testImage, for: emoteId)
+
+        // 実行: image(for:) を呼ぶ（L1 ヒットのはず）
+        let result = await EmoteImageCache.shared.image(for: emoteId)
+
+        // 検証: 画像が返った
+        #expect(result != nil)
+        // 検証: L2 は参照されなかった
+        let loadCount = await mock.loadImageDataCallCount
+        #expect(loadCount == 0)
+    }
+
+    @Test("L2 に有効な画像データがある場合は HTTP なしで画像を返す")
+    func L2ヒット時はHTTPなしで画像を返す() async {
+        // 前提: テスト用エモートID の static キーを L2（モック）に事前投入する
+        let emoteId = "エモートID_L2テスト_\(UUID())"
+        defer { EmoteImageCache.shared.clearForTesting() }
+
+        let mock = MockPersistenceService()
+        guard let pngData = makeMiniPNGData() else {
+            Issue.record("テスト用 PNG データ生成失敗")
+            return
+        }
+        // static キーを L2 に投入（animated は投入しない）
+        let staticKey = ImageCacheKey(kind: .emote, identifier: "\(emoteId):2.0:static")
+        await mock.seedImageData(pngData, key: staticKey)
+        EmoteImageCache.shared.attachPersistence(mock)
+
+        // 実行: image(for:) を呼ぶ（L2 ヒットで返るはず）
+        let result = await EmoteImageCache.shared.image(for: emoteId)
+
+        // 検証: 画像が返った（L2 から復元）
+        #expect(result != nil)
+        // 検証: loadImageData が呼ばれた（animated: 1回 miss + static: 1回 hit）
+        let loadCount = await mock.loadImageDataCallCount
+        #expect(loadCount == 2)
+        // 検証: L2 保存は呼ばれなかった（HTTP は不発火）
+        let saveCount = await mock.saveImageDataCallCount
+        #expect(saveCount == 0)
+    }
+
+    // MARK: - テスト用ヘルパー
+
+    /// テスト用の最小 NSImage を生成する（L1 直接登録用）
+    private func makeTestNSImage() -> NSImage {
+        NSImage(size: NSSize(width: 20, height: 20))
+    }
+
+    /// CoreGraphics で 2×2 ピクセルの PNG データを生成する（L2 シード用）
+    private func makeMiniPNGData() -> Data? {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 2, pixelsHigh: 2,
+            bitsPerSample: 8, samplesPerPixel: 3,
+            hasAlpha: false, isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
     }
 }

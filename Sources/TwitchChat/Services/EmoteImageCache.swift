@@ -57,10 +57,22 @@ final class EmoteImageCache: @unchecked Sendable {
     /// 同一エモートへの並行リクエストを1回のダウンロードに集約し、重複ネットワーク通信を防ぐ。
     private var inFlightTasks: [String: Task<NSImage?, Never>] = [:]
 
-    /// animatedEmoteIds / inFlightTasks へのアクセスを保護するロック
+    /// animatedEmoteIds / inFlightTasks / persistence へのアクセスを保護するロック
     private let lock = NSLock()
 
+    /// L2 ディスクキャッシュサービス（nil の場合は L2 スキップ）
+    private var persistence: (any PersistenceService)?
+
     private init() {}
+
+    /// L2 永続化サービスを注入する（アプリ起動時に TwitchChatApp から呼ぶ）
+    func attachPersistence(_ service: any PersistenceService) {
+        lock.withLock { self.persistence = service }
+    }
+
+    private var currentPersistence: (any PersistenceService)? {
+        lock.withLock { persistence }
+    }
 
     // MARK: - 画像取得
 
@@ -90,14 +102,38 @@ final class EmoteImageCache: @unchecked Sendable {
                 guard let self else { return nil as NSImage? }
                 defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: emoteId) } }
 
-                // アニメーション版を先に試みる
+                let persistence = self.currentPersistence
+
+                // L2 ルックアップ: animated → static の順で試みる
+                if let ps = persistence {
+                    let animKey = ImageCacheKey(kind: .emote, identifier: "\(emoteId):2.0:animated")
+                    if let data = await ps.loadImageData(key: animKey), let image = NSImage(data: data) {
+                        self.store(image, gifData: data, for: emoteId, isAnimated: true)
+                        return image
+                    }
+                    let staticKey = ImageCacheKey(kind: .emote, identifier: "\(emoteId):2.0:static")
+                    if let data = await ps.loadImageData(key: staticKey), let image = NSImage(data: data) {
+                        self.store(image, gifData: nil, for: emoteId, isAnimated: false)
+                        return image
+                    }
+                }
+
+                // L3 HTTP ダウンロード: アニメーション版を先に試みる
                 if let (image, data) = await self.download(emoteId: emoteId, type: "animated") {
                     self.store(image, gifData: data, for: emoteId, isAnimated: true)
+                    if let ps = persistence {
+                        let animKey = ImageCacheKey(kind: .emote, identifier: "\(emoteId):2.0:animated")
+                        try? await ps.saveImageData(data, key: animKey, mime: "image/gif")
+                    }
                     return image
                 }
                 // スタティック版にフォールバック
-                if let (image, _) = await self.download(emoteId: emoteId, type: "default") {
+                if let (image, data) = await self.download(emoteId: emoteId, type: "default") {
                     self.store(image, gifData: nil, for: emoteId, isAnimated: false)
+                    if let ps = persistence {
+                        let staticKey = ImageCacheKey(kind: .emote, identifier: "\(emoteId):2.0:static")
+                        try? await ps.saveImageData(data, key: staticKey, mime: "image/png")
+                    }
                     return image
                 }
                 return nil
@@ -171,7 +207,7 @@ final class EmoteImageCache: @unchecked Sendable {
     /// - Returns: ダウンロード成功時は `(NSImage, Data)` タプル、HTTP 200 以外または解析失敗時は nil
     private func download(emoteId: String, type: String) async -> (NSImage, Data)? {
         let url = Self.emoteURL(emoteId: emoteId, type: type)
-        guard let (data, response) = try? await URLSession.shared.data(from: url),
+        guard let (data, response) = try? await ImageDownloadSession.shared.data(from: url),
               let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200,
               let image = NSImage(data: data) else { return nil }
@@ -197,6 +233,10 @@ final class EmoteImageCache: @unchecked Sendable {
             if let data = gifData {
                 gifDataCache.setObject(data as NSData, forKey: emoteId as NSString)
             }
+        } else {
+            // スタティック版で上書きする場合、古いアニメーション状態を削除して矛盾を防ぐ
+            _ = lock.withLock { animatedEmoteIds.remove(emoteId) }
+            gifDataCache.removeObject(forKey: emoteId as NSString)
         }
     }
 
@@ -204,21 +244,25 @@ final class EmoteImageCache: @unchecked Sendable {
 
 #if DEBUG
     /// テスト用: GIF 生データをキャッシュに直接登録する
-    ///
-    /// - Parameters:
-    ///   - gifData: 登録する GIF バイナリデータ
-    ///   - emoteId: Twitch エモートID
     func storeForTesting(gifData: Data, for emoteId: String) {
         gifDataCache.setObject(gifData as NSData, forKey: emoteId as NSString)
     }
 
-    /// テスト用: 全キャッシュをクリアする
-    ///
-    /// テスト間の状態汚染を防ぐため、テスト終了時に呼び出す。
+    /// テスト用: 画像を L1 キャッシュに直接登録する（L1 ヒット検証用）
+    func storeImageForTesting(_ image: NSImage, for emoteId: String) {
+        store(image, gifData: nil, for: emoteId, isAnimated: false)
+    }
+
+    /// テスト用: 全キャッシュと永続化サービス参照をクリアする
     func clearForTesting() {
         imageCache.removeAllObjects()
         gifDataCache.removeAllObjects()
-        lock.withLock { animatedEmoteIds.removeAll() }
+        lock.withLock {
+            animatedEmoteIds.removeAll()
+            persistence = nil
+            inFlightTasks.values.forEach { $0.cancel() }
+            inFlightTasks = [:]
+        }
     }
 #endif
 }

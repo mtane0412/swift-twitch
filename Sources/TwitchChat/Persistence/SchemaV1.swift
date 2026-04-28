@@ -232,10 +232,11 @@ final class PersistedUser {
 
 // MARK: - PersistedImageAsset
 
-/// 画像バイナリの永続化モデル（BLOB は外部ファイルに分離）
+/// 画像バイナリのメタデータ永続化モデル
 ///
-/// cacheKey は "<kindRaw>:<identifier>" 形式。
+/// cacheKey は "<kindRaw>:<identifier>" 形式。実バイナリは ImageDiskStore が管理する。
 /// lastAccessedAt は LRU eviction の軸として使用する。
+/// byteSize は容量上限チェック（バケット別集計）に使用する。
 @Model
 final class PersistedImageAsset {
     /// 主キー（"<kindRaw>:<identifier>"）
@@ -243,21 +244,21 @@ final class PersistedImageAsset {
     /// 画像種別文字列（"emote" / "badge" / "profile"）（インデックス対象）
     var kind: String
     var identifier: String
-    /// 画像バイナリ（外部ファイルに分離して保存）
-    @Attribute(.externalStorage) var data: Data
     var mime: String
+    /// 実バイナリのバイト数（LRU sweep の容量集計に使用）
+    var byteSize: Int
     /// 最終アクセス日時（LRU eviction 用、インデックス対象）
     var lastAccessedAt: Date
     var createdAt: Date
 
     #Index<PersistedImageAsset>([\.kind], [\.lastAccessedAt])
 
-    init(cacheKey: String, kind: String, identifier: String, data: Data, mime: String, lastAccessedAt: Date, createdAt: Date) {
+    init(cacheKey: String, kind: String, identifier: String, mime: String, byteSize: Int, lastAccessedAt: Date, createdAt: Date) {
         self.cacheKey = cacheKey
         self.kind = kind
         self.identifier = identifier
-        self.data = data
         self.mime = mime
+        self.byteSize = byteSize
         self.lastAccessedAt = lastAccessedAt
         self.createdAt = createdAt
     }
