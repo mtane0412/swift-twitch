@@ -234,6 +234,83 @@ struct PersistenceServiceTests {
         #expect(missing == nil)
     }
 
+    // MARK: - バッジ（タイムスタンプ付き）
+
+    @Test("バッジ保存後にloadBadgesWithTimestampでfetchedAtを取得できる")
+    func バッジ保存後にloadBadgesWithTimestampでfetchedAtを取得できる() async throws {
+        // 前提: グローバルバッジを保存する前後の時刻を記録する
+        let service = InMemoryPersistenceService()
+        let beforeSave = Date()
+        let badge = BadgeVersionSnapshot(
+            setId: "broadcaster",
+            version: "1",
+            imageUrl1x: "https://cdn.example.com/broadcaster/1/1x.png",
+            imageUrl2x: "https://cdn.example.com/broadcaster/1/2x.png",
+            imageUrl4x: "https://cdn.example.com/broadcaster/1/4x.png",
+            title: "配信者",
+            description: nil
+        )
+
+        // 操作: グローバルスコープで保存する
+        try await service.saveBadges([badge], scope: .global)
+        let afterSave = Date()
+
+        // 操作: タイムスタンプ付きで取得する
+        let result = await service.loadBadgesWithTimestamp(scope: .global)
+
+        // 検証: スナップショットが1件取得できる
+        #expect(result.snapshots.count == 1)
+        #expect(result.snapshots.first?.setId == "broadcaster")
+
+        // 検証: fetchedAt が保存操作の前後の時刻の範囲内にある
+        let fetchedAt = try #require(result.fetchedAt)
+        #expect(fetchedAt >= beforeSave)
+        #expect(fetchedAt <= afterSave)
+    }
+
+    @Test("未保存スコープのloadBadgesWithTimestampはfetchedAtにnilを返す")
+    func 未保存スコープのloadBadgesWithTimestampはfetchedAtにnilを返す() async throws {
+        // 前提: 何も保存していない空のサービス
+        let service = InMemoryPersistenceService()
+
+        // 操作: 未保存のグローバルスコープを取得する
+        let result = await service.loadBadgesWithTimestamp(scope: .global)
+
+        // 検証: スナップショットは空で fetchedAt は nil
+        #expect(result.snapshots.isEmpty)
+        #expect(result.fetchedAt == nil)
+    }
+
+    @Test("loadBadgesWithTimestampはスコープごとにタイムスタンプを分離する")
+    func loadBadgesWithTimestampはスコープごとにタイムスタンプを分離する() async throws {
+        // 前提: グローバルバッジのみ保存し、チャンネルバッジは保存しない
+        let service = InMemoryPersistenceService()
+        let globalBadge = BadgeVersionSnapshot(
+            setId: "moderator",
+            version: "1",
+            imageUrl1x: "https://cdn.example.com/mod/1/1x.png",
+            imageUrl2x: "https://cdn.example.com/mod/1/2x.png",
+            imageUrl4x: "https://cdn.example.com/mod/1/4x.png",
+            title: "モデレーター",
+            description: nil
+        )
+        try await service.saveBadges([globalBadge], scope: .global)
+
+        // 操作: グローバルとチャンネルそれぞれのタイムスタンプ付きバッジを取得する
+        let globalResult = await service.loadBadgesWithTimestamp(scope: .global)
+        let channelResult = await service.loadBadgesWithTimestamp(
+            scope: .channel(broadcasterId: "未保存チャンネルID")
+        )
+
+        // 検証: グローバルは保存済みなので fetchedAt が存在する
+        #expect(!globalResult.snapshots.isEmpty)
+        #expect(globalResult.fetchedAt != nil)
+
+        // 検証: チャンネルは未保存なので空かつ fetchedAt は nil
+        #expect(channelResult.snapshots.isEmpty)
+        #expect(channelResult.fetchedAt == nil)
+    }
+
     // MARK: - ライフサイクル
 
     @Test("clearUserScopedでユーザー固有データのみ削除される")

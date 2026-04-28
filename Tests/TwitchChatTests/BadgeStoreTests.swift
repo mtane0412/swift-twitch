@@ -180,7 +180,7 @@ struct BadgeStoreTests {
 
     @Test("空のバッジセット配列からは空マッピングを構築する")
     func testBuildMappingFromEmptyBadgeSets() {
-        let mapping = BadgeStore.buildMapping(from: [])
+        let mapping = BadgeStore.buildMapping(from: [] as [HelixBadgeSet])
         #expect(mapping.isEmpty)
     }
 

@@ -69,6 +69,10 @@ struct SwiftDataPersistenceService: PersistenceService {
         try await actor.saveBadges(badges, scope: scope)
     }
 
+    func loadBadgesWithTimestamp(scope: BadgeScope) async -> (snapshots: [BadgeVersionSnapshot], fetchedAt: Date?) {
+        await actor.loadBadgesWithTimestamp(scope: scope)
+    }
+
     func loadUserProfiles(userIds: [String]) async -> [UserProfileSnapshot] {
         await actor.loadUserProfiles(userIds: userIds)
     }
