@@ -638,6 +638,74 @@ struct SwiftDataPersistenceServiceTests {
     }
 }
 
+// MARK: - videoId round-trip テスト
+
+extension SwiftDataPersistenceServiceTests {
+
+    @Test("videoId付きメッセージを保存して復元できる")
+    func videoId付きメッセージを保存して復元できる() async throws {
+        // 前提: videoId を持つメッセージを作成
+        let service = try makeService()
+        let original = ChatMessage(
+            id: "vod_msg_001",
+            username: "suzuki_ichiro",
+            displayName: "鈴木一郎",
+            text: "VOD紐付けテスト",
+            colorHex: nil,
+            badges: [],
+            emotePositions: [],
+            roomId: "配信者チャンネルID_001",
+            isAction: false,
+            receivedAt: Date(),
+            replyParentMsgId: nil,
+            isOptimistic: false,
+            replyParentUserLogin: nil,
+            replyParentDisplayName: nil,
+            replyParentMsgBody: nil,
+            isSystemNotice: false,
+            videoId: "v987654321"
+        )
+
+        // 操作: 保存して取得
+        try await service.appendMessages([original])
+        let loaded = await service.loadRecentMessages(roomId: "配信者チャンネルID_001", limit: 10, before: nil)
+
+        // 検証: videoId が正しく復元される
+        #expect(loaded.first?.videoId == "v987654321")
+    }
+
+    @Test("videoIdがnilのメッセージを保存して復元できる")
+    func videoIdがnilのメッセージを保存して復元できる() async throws {
+        // 前提: videoId が nil のメッセージ（VOD保存無効チャンネル等）
+        let service = try makeService()
+        let original = ChatMessage(
+            id: "no_vod_msg_001",
+            username: "tanaka_jiro",
+            displayName: "田中次郎",
+            text: "VODなしテスト",
+            colorHex: nil,
+            badges: [],
+            emotePositions: [],
+            roomId: "配信者チャンネルID_002",
+            isAction: false,
+            receivedAt: Date(),
+            replyParentMsgId: nil,
+            isOptimistic: false,
+            replyParentUserLogin: nil,
+            replyParentDisplayName: nil,
+            replyParentMsgBody: nil,
+            isSystemNotice: false
+        )
+
+        // 操作: 保存して取得
+        try await service.appendMessages([original])
+        let loaded = await service.loadRecentMessages(roomId: "配信者チャンネルID_002", limit: 10, before: nil)
+
+        // 検証: videoId が nil のまま復元される
+        #expect(loaded.first?.videoId == nil)
+    }
+}
+
 // MARK: - テスト用 ChatMessage イニシャライザ
 
 private extension ChatMessage {

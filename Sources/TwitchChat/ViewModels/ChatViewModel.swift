@@ -44,12 +44,18 @@ final class ChatViewModel {
     // MARK: - 定数
 
     /// メモリ管理のための最大メッセージ保持件数
-    private static let maxMessages = 500
+    static let maxMessages = 500
+
+    /// 永続化バッファの flush 間隔
+    static let flushInterval: Duration = .milliseconds(200)
+
+    /// Helix /helix/videos エンドポイント URL
+    static let videosURL = URL(string: "https://api.twitch.tv/helix/videos")!
 
     // MARK: - Published プロパティ
 
     /// 受信済みチャットメッセージ（最新 500 件）
-    private(set) var messages: [ChatMessage] = []
+    var messages: [ChatMessage] = []
 
     /// 接続状態
     private(set) var connectionState: ConnectionState = .disconnected
@@ -129,6 +135,27 @@ final class ChatViewModel {
     /// ROOMSTATE 購読のポーリング条件として参照できるよう `private(set)` で公開する。
     private(set) var currentRoomId: String?
 
+    /// 現在配信中の VOD video_id（Helix /helix/videos から取得）
+    ///
+    /// ROOMSTATE 受信後に非同期で取得する。VOD 保存無効・archive 未生成の場合は nil。
+    /// テストからポーリング条件として参照できるよう公開する。
+    var currentVideoId: String?
+
+    /// 永続化サービス（nil の場合は永続化なし）
+    let persistenceService: (any PersistenceService)?
+
+    /// Helix API クライアント（video_id 取得に使用）
+    let helixAPIClient: any HelixAPIClientProtocol
+
+    /// 永続化待ちメッセージバッファ（200ms ごとに flush される）
+    var pendingPersistQueue: [ChatMessage] = []
+
+    /// 200ms 間隔で pendingPersistQueue を flush する Task
+    var flushTask: Task<Void, Never>?
+
+    /// Helix /helix/videos から video_id を取得する Task
+    private var videoIdFetchTask: Task<Void, Never>?
+
     /// room-id が確定したときに呼ばれるコールバック
     ///
     /// ChannelManager が EventSub の subscribeChatMessage を呼ぶタイミングを知るために使用する。
@@ -169,6 +196,8 @@ final class ChatViewModel {
         self.ircClient = ircClient
         self.authState = authState
         let helixClient = apiClient ?? HelixAPIClient(tokenProvider: authState)
+        self.helixAPIClient = helixClient
+        self.persistenceService = persistenceService
         self.badgeStore = BadgeStore(apiClient: helixClient, persistenceService: persistenceService)
         self.emoteStore = EmoteStore(apiClient: helixClient, persistenceService: persistenceService)
         self.moderationService = moderationService ?? ModerationService(apiClient: helixClient)
@@ -188,37 +217,16 @@ final class ChatViewModel {
         channelBadgesFetched = false
         channelEmotesFetched = false
         currentRoomId = nil
+        currentVideoId = nil
+        pendingPersistQueue.removeAll()
 
         // チャンネル切替時に前チャンネルのバッジ・エモートが誤解決されないようクリア
         await badgeStore.resetChannelBadges()
         await emoteStore.resetChannelEmotes()
 
-        // グローバルバッジ・エモート定義を並行フェッチ（切断時にキャンセルできるよう保持）
-        // seedFromPersistence でキャッシュを先読みしてから fetchGlobalBadges を実行する（stale-while-revalidate）
-        globalBadgeFetchTask = Task {
-            await badgeStore.seedFromPersistence()
-            await badgeStore.fetchGlobalBadges()
-        }
-        globalEmoteFetchTask = Task {
-            await emoteStore.seedFromPersistence()
-            await emoteStore.fetchGlobalEmotes()
-        }
-
-        // ユーザーエモートを並行フェッチ（user:read:emotes スコープがある場合のみ）
-        // ユーザースコープのため接続時に1回のみ取得し、チャンネル切替時には再取得しない
-        if let userId = authState.userId, authState.canReadUserEmotes {
-            userEmoteFetchTask = Task { await emoteStore.fetchUserEmotes(userId: userId) }
-        } else {
-            #if DEBUG
-            if authState.userId == nil {
-                print("[ChatViewModel] ユーザーエモートフェッチをスキップ: userId が未取得（未ログイン）")
-            } else if !authState.canReadUserEmotes {
-                print("[ChatViewModel] ユーザーエモートフェッチをスキップ: user:read:emotes スコープなし（再ログインで取得可能）")
-            }
-            #endif
-        }
-
+        startFetchTasks()
         startStreamTasks()
+        startFlushLoop()
 
         do {
             // ログイン済みなら認証接続、ログアウト中なら匿名接続にフォールバック
@@ -240,6 +248,31 @@ final class ChatViewModel {
             globalBadgeFetchTask?.cancel()
             globalEmoteFetchTask?.cancel()
             userEmoteFetchTask?.cancel()
+        }
+    }
+
+    /// グローバル・チャンネルバッジ、エモート、ユーザーエモートのフェッチタスクを開始する
+    ///
+    /// connect() の本体長を抑えるために切り出したヘルパーメソッド。
+    private func startFetchTasks() {
+        globalBadgeFetchTask = Task {
+            await badgeStore.seedFromPersistence()
+            await badgeStore.fetchGlobalBadges()
+        }
+        globalEmoteFetchTask = Task {
+            await emoteStore.seedFromPersistence()
+            await emoteStore.fetchGlobalEmotes()
+        }
+        if let userId = authState.userId, authState.canReadUserEmotes {
+            userEmoteFetchTask = Task { await emoteStore.fetchUserEmotes(userId: userId) }
+        } else {
+            #if DEBUG
+            if authState.userId == nil {
+                print("[ChatViewModel] ユーザーエモートフェッチをスキップ: userId が未取得（未ログイン）")
+            } else if !authState.canReadUserEmotes {
+                print("[ChatViewModel] ユーザーエモートフェッチをスキップ: user:read:emotes スコープなし（再ログインで取得可能）")
+            }
+            #endif
         }
     }
 
@@ -321,6 +354,11 @@ final class ChatViewModel {
 
     /// チャンネルから切断する
     func disconnect() async {
+        // flush ループと video_id 取得タスクを停止してから残存キューを書き出す
+        flushTask?.cancel()
+        videoIdFetchTask?.cancel()
+        await flushPendingPersistQueue()
+
         receiveTask?.cancel()
         noticeReceiveTask?.cancel()
         connectionStateReceiveTask?.cancel()
@@ -341,8 +379,10 @@ final class ChatViewModel {
         await ircClient.disconnect()
         connectionState = .disconnected
         currentRoomId = nil
+        currentVideoId = nil
         currentUserState = nil
         optimisticPendingMessages.removeAll()
+        pendingPersistQueue.removeAll()
     }
 
     // MARK: - プライベートメソッド
@@ -372,6 +412,7 @@ final class ChatViewModel {
         if messages.count > Self.maxMessages {
             messages.removeFirst(messages.count - Self.maxMessages)
         }
+        pendingPersistQueue.append(message)
     }
 
     /// ROOMSTATE から取得した room-id を currentRoomId に設定する
@@ -391,6 +432,10 @@ final class ChatViewModel {
                 channelEmotesFetched = true
                 channelEmoteFetchTask = Task { await emoteStore.fetchChannelEmotes(broadcasterId: roomId) }
             }
+            // 直近メッセージを永続化から先読みして seed する
+            Task { await self.seedFromPersistence(roomId: roomId) }
+            // 配信中の VOD video_id を Helix から取得する
+            videoIdFetchTask = Task { await self.fetchLatestVideoId(broadcasterId: roomId) }
         }
     }
 
@@ -694,4 +739,5 @@ final class ChatViewModel {
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
     }
+
 }

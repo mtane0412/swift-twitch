@@ -98,6 +98,12 @@ struct ChatMessage: Sendable, Identifiable {
     /// ユーザー名やバッジは表示せず、テキストのみをシステムスタイルで表示する。
     let isSystemNotice: Bool
 
+    /// このメッセージが投稿された配信の VOD video_id（Twitch Helix API の video.id）
+    ///
+    /// ROOMSTATE 受信後に Helix /helix/videos で取得した最新 archive の id をスタンプする。
+    /// VOD 保存無効の配信者や archive 未生成のタイミングでは nil になる。
+    let videoId: String?
+
     /// 楽観的 UI 表示のためのローカル ChatMessage を生成する
     ///
     /// Twitch IRC は自分が送信した PRIVMSG をエコーバックしないため、
@@ -141,6 +147,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentMsgBody = nil
         self.isOptimistic = true
         self.isSystemNotice = false
+        self.videoId = nil
     }
 
     /// IRCMessage から ChatMessage を生成する
@@ -189,6 +196,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentMsgBody = ircMessage.tags["reply-parent-msg-body"].flatMap { $0.isEmpty ? nil : $0 }
         self.isOptimistic = false
         self.isSystemNotice = false
+        self.videoId = nil
     }
 
     /// 楽観的 UI メッセージの ID を EventSub で受信した本物の message ID で差し替えた新しいインスタンスを生成する
@@ -218,6 +226,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentMsgBody = original.replyParentMsgBody
         self.isOptimistic = false
         self.isSystemNotice = original.isSystemNotice
+        self.videoId = original.videoId
     }
 
     /// 永続化層からの復元用イニシャライザ（PersistedChatMessage.toDomain() から呼ぶ）
@@ -241,7 +250,8 @@ struct ChatMessage: Sendable, Identifiable {
         replyParentUserLogin: String?,
         replyParentDisplayName: String?,
         replyParentMsgBody: String?,
-        isSystemNotice: Bool
+        isSystemNotice: Bool,
+        videoId: String? = nil
     ) {
         self.id = id
         self.username = username
@@ -260,6 +270,7 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentDisplayName = replyParentDisplayName
         self.replyParentMsgBody = replyParentMsgBody
         self.isSystemNotice = isSystemNotice
+        self.videoId = videoId
     }
 
     /// システム通知メッセージを生成する
@@ -287,5 +298,36 @@ struct ChatMessage: Sendable, Identifiable {
         self.replyParentMsgBody = nil
         self.isOptimistic = false
         self.isSystemNotice = true
+        self.videoId = nil
+    }
+}
+
+// MARK: - roomId / videoId の後付けヘルパー
+
+extension ChatMessage {
+    /// roomId と videoId を指定した値で上書きした新しいインスタンスを返す
+    ///
+    /// flush 時に ROOMSTATE 受信後の `currentRoomId` / Helix 取得後の `currentVideoId` を
+    /// 後付けスタンプするために使用する。nil を渡した場合は既存の値を維持する。
+    func withRoomIdAndVideoId(roomId: String?, videoId: String?) -> ChatMessage {
+        ChatMessage(
+            id: id,
+            username: username,
+            displayName: displayName,
+            text: text,
+            colorHex: colorHex,
+            badges: badges,
+            emotePositions: emotes,
+            roomId: roomId ?? self.roomId,
+            isAction: isAction,
+            receivedAt: receivedAt,
+            replyParentMsgId: replyParentMsgId,
+            isOptimistic: isOptimistic,
+            replyParentUserLogin: replyParentUserLogin,
+            replyParentDisplayName: replyParentDisplayName,
+            replyParentMsgBody: replyParentMsgBody,
+            isSystemNotice: isSystemNotice,
+            videoId: videoId ?? self.videoId
+        )
     }
 }

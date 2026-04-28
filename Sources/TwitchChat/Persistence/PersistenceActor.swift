@@ -596,7 +596,8 @@ extension PersistedChatMessage {
             replyParentMsgBody: message.replyParentMsgBody,
             isSystemNotice: message.isSystemNotice,
             tmiSentAt: nil,
-            senderUserId: nil
+            senderUserId: nil,
+            videoId: message.videoId
         )
     }
 
@@ -621,7 +622,8 @@ extension PersistedChatMessage {
             replyParentUserLogin: replyParentUserLogin,
             replyParentDisplayName: replyParentDisplayName,
             replyParentMsgBody: replyParentMsgBody,
-            isSystemNotice: isSystemNotice
+            isSystemNotice: isSystemNotice,
+            videoId: videoId
         )
     }
 }

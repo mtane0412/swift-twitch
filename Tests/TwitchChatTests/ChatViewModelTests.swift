@@ -912,7 +912,13 @@ struct ChatViewModelTests {
         let mockClient = MockTwitchIRCClient()
         let mockModeration = MockModerationService()
         let authState = try await makeLoggedInAuthState(userLogin: "モデレーター")
-        let viewModel = ChatViewModel(ircClient: mockClient, authState: authState, moderationService: mockModeration)
+        // Helix 副作用（fetchLatestVideoId）を抑止するためモックを注入する
+        let viewModel = ChatViewModel(
+            ircClient: mockClient,
+            authState: authState,
+            apiClient: MockHelixAPIClientForVideos(),
+            moderationService: mockModeration
+        )
         await viewModel.connect(to: "テストチャンネル")
         await waitFor { viewModel.connectionState == .connected }
 

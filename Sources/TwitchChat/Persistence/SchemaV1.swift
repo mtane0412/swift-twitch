@@ -107,8 +107,12 @@ final class PersistedChatMessage {
     var tmiSentAt: Date?
     /// V1 枠確保（user-id タグのパース後に充填予定）
     var senderUserId: String?
+    /// このメッセージが投稿された配信の VOD video_id（Helix /helix/videos から取得）
+    ///
+    /// VOD 保存無効・archive 未生成の場合は nil。
+    var videoId: String?
 
-    #Index<PersistedChatMessage>([\.roomId, \.receivedAt], [\.text])
+    #Index<PersistedChatMessage>([\.roomId, \.receivedAt], [\.text], [\.videoId, \.receivedAt])
 
     init(
         id: String,
@@ -128,7 +132,8 @@ final class PersistedChatMessage {
         replyParentMsgBody: String?,
         isSystemNotice: Bool,
         tmiSentAt: Date?,
-        senderUserId: String?
+        senderUserId: String?,
+        videoId: String? = nil
     ) {
         self.id = id
         self.username = username
@@ -148,6 +153,7 @@ final class PersistedChatMessage {
         self.isSystemNotice = isSystemNotice
         self.tmiSentAt = tmiSentAt
         self.senderUserId = senderUserId
+        self.videoId = videoId
     }
 }
 
