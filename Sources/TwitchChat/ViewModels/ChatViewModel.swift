@@ -55,7 +55,7 @@ final class ChatViewModel {
     // MARK: - Published プロパティ
 
     /// 受信済みチャットメッセージ（最新 500 件）
-    var messages: [ChatMessage] = []
+    private(set) var messages: [ChatMessage] = []
 
     /// 接続状態
     private(set) var connectionState: ConnectionState = .disconnected
@@ -138,8 +138,8 @@ final class ChatViewModel {
     /// 現在配信中の VOD video_id（Helix /helix/videos から取得）
     ///
     /// ROOMSTATE 受信後に非同期で取得する。VOD 保存無効・archive 未生成の場合は nil。
-    /// テストからポーリング条件として参照できるよう公開する。
-    var currentVideoId: String?
+    /// テストからポーリング条件として参照できるよう `private(set)` で公開する。
+    private(set) var currentVideoId: String?
 
     /// 永続化サービス（nil の場合は永続化なし）
     let persistenceService: (any PersistenceService)?
@@ -241,6 +241,9 @@ final class ChatViewModel {
             connectionState = .connected
         } catch {
             connectionState = .error(error.localizedDescription)
+            flushTask?.cancel()
+            videoIdFetchTask?.cancel()
+            pendingPersistQueue.removeAll()
             receiveTask?.cancel()
             noticeReceiveTask?.cancel()
             connectionStateReceiveTask?.cancel()
@@ -354,16 +357,17 @@ final class ChatViewModel {
 
     /// チャンネルから切断する
     func disconnect() async {
-        // flush ループと video_id 取得タスクを停止してから残存キューを書き出す
-        flushTask?.cancel()
-        videoIdFetchTask?.cancel()
-        await flushPendingPersistQueue()
-
+        // 先に受信タスクをすべて止めて pendingPersistQueue への追加を防いでから flush する
         receiveTask?.cancel()
         noticeReceiveTask?.cancel()
         connectionStateReceiveTask?.cancel()
         userStateReceiveTask?.cancel()
         roomStateReceiveTask?.cancel()
+        // flush ループを止め、残存キューを書き出す
+        flushTask?.cancel()
+        videoIdFetchTask?.cancel()
+        await flushPendingPersistQueue()
+
         globalBadgeFetchTask?.cancel()
         channelBadgeFetchTask?.cancel()
         globalEmoteFetchTask?.cancel()
@@ -386,6 +390,21 @@ final class ChatViewModel {
     }
 
     // MARK: - プライベートメソッド
+
+    /// 永続化 seed メッセージを messages 先頭に挿入し maxMessages に収める
+    ///
+    /// `seedFromPersistence` からのみ呼ぶ。private setter を extension から間接的に使う為に存在する。
+    func applyHistoricalSeed(_ ordered: [ChatMessage]) {
+        messages.insert(contentsOf: ordered, at: 0)
+        if messages.count > Self.maxMessages {
+            messages.removeFirst(messages.count - Self.maxMessages)
+        }
+    }
+
+    /// currentVideoId を更新する（fetchLatestVideoId からのみ呼ぶ）
+    func updateCurrentVideoId(_ id: String?) {
+        currentVideoId = id
+    }
 
     /// メッセージをリストに追加し、上限を超えた場合は古いものを削除する
     private func appendMessage(_ message: ChatMessage) {

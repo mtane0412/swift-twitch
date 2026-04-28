@@ -42,9 +42,11 @@ extension ChatViewModel {
                 videoId: $0.videoId ?? videoId
             )
         }
-        pendingPersistQueue.removeAll()
+        // removeAll() は appendMessages() 成功後に行う
+        // 失敗時はキューを保持して次の flush サイクルで再試行する
         do {
             try await persistenceService.appendMessages(snapshot)
+            pendingPersistQueue.removeFirst(min(snapshot.count, pendingPersistQueue.count))
         } catch {
             #if DEBUG
             print("[ChatViewModel] flushPendingPersistQueue 失敗 error=\(error)")
@@ -59,14 +61,16 @@ extension ChatViewModel {
     func seedFromPersistence(roomId: String) async {
         guard let persistenceService else { return }
         guard messages.isEmpty || messages.allSatisfy(\.isOptimistic) else { return }
+        // await 中に新着が届いた場合を検知するため件数をスナップショット
+        let initialCount = messages.count
         let recent = await persistenceService.loadRecentMessages(roomId: roomId, limit: 50, before: nil)
         guard !recent.isEmpty else { return }
+        // await 復帰後に状態が変化していたら seed を中止する
+        guard messages.count == initialCount,
+              messages.isEmpty || messages.allSatisfy(\.isOptimistic) else { return }
         // loadRecentMessages は降順（新しい順）で返すため昇順に変換して先頭に挿入
         let ordered = Array(recent.reversed())
-        messages.insert(contentsOf: ordered, at: 0)
-        if messages.count > Self.maxMessages {
-            messages.removeFirst(messages.count - Self.maxMessages)
-        }
+        applyHistoricalSeed(ordered)
     }
 
     /// Helix /helix/videos から現在配信中の VOD video_id を取得して currentVideoId に設定する
@@ -83,16 +87,17 @@ extension ChatViewModel {
                     URLQueryItem(name: "first", value: "1")
                 ]
             )
-            currentVideoId = response.data.first?.id
+            let videoId = response.data.first?.id
+            updateCurrentVideoId(videoId)
             #if DEBUG
-            if let videoId = currentVideoId {
+            if let videoId {
                 print("[ChatViewModel] currentVideoId 確定 broadcasterId=\(broadcasterId) videoId=\(videoId)")
             } else {
                 print("[ChatViewModel] currentVideoId 未取得（archive 未生成） broadcasterId=\(broadcasterId)")
             }
             #endif
         } catch {
-            currentVideoId = nil
+            updateCurrentVideoId(nil)
             #if DEBUG
             print("[ChatViewModel] fetchLatestVideoId 失敗 broadcasterId=\(broadcasterId) error=\(error) → nil で続行")
             #endif
