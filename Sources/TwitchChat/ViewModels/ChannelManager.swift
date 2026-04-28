@@ -112,8 +112,15 @@ final class ChannelManager {
 
     // MARK: - 公開メソッド
 
+    /// ログアウト時の `clearUserScoped` 呼び出しに使う userId キャッシュ
+    ///
+    /// `AuthState.logout()` では `userId = nil` が `.loggedOut` 状態遷移より先に走る経路があるため、
+    /// ログイン直後にキャッシュしておくことで安全に参照できるようにする。
+    private var lastPreloadedUserId: String?
+
     /// ログイン時・アプリ起動時にユーザーエモートを事前取得する
     ///
+    /// 永続化キャッシュが存在する場合は先にシードしてから API フェッチを行う。
     /// プリロードストアでユーザーエモートをフェッチしておくことで、`joinChannel` 呼び出し時に
     /// 新しい `ChatViewModel` のエモートストアへ即座にシードできるようにする。
     /// `user:read:emotes` スコープがない場合や未ログイン時はスキップする。
@@ -121,7 +128,18 @@ final class ChannelManager {
     /// `TwitchChatApp` のログイン検知（`.loggedIn` 状態遷移・セッション復元）から呼び出す。
     func preloadUserEmotes() async {
         guard let userId = authState.userId, authState.canReadUserEmotes else { return }
+        lastPreloadedUserId = userId
+        await preloadEmoteStore.seedUserEmotes(userId: userId)
         await preloadEmoteStore.fetchUserEmotes(userId: userId)
+    }
+
+    /// ログアウト時にユーザースコープの永続化データを削除する
+    ///
+    /// `lastPreloadedUserId` を使うことで、`AuthState` の userId が nil 化された後でも安全に呼び出せる。
+    func clearPersistedUserData() async {
+        guard let persistenceService, let userId = lastPreloadedUserId else { return }
+        await persistenceService.clearUserScoped(userId: userId)
+        lastPreloadedUserId = nil
     }
 
     /// プリロード済みユーザーエモートの ownerId に対応する表示名を ProfileImageStore に事前キャッシュする

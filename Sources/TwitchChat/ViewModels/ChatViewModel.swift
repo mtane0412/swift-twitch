@@ -170,7 +170,7 @@ final class ChatViewModel {
         self.authState = authState
         let helixClient = apiClient ?? HelixAPIClient(tokenProvider: authState)
         self.badgeStore = BadgeStore(apiClient: helixClient, persistenceService: persistenceService)
-        self.emoteStore = EmoteStore(apiClient: helixClient)
+        self.emoteStore = EmoteStore(apiClient: helixClient, persistenceService: persistenceService)
         self.moderationService = moderationService ?? ModerationService(apiClient: helixClient)
     }
 
@@ -199,7 +199,10 @@ final class ChatViewModel {
             await badgeStore.seedFromPersistence()
             await badgeStore.fetchGlobalBadges()
         }
-        globalEmoteFetchTask = Task { await emoteStore.fetchGlobalEmotes() }
+        globalEmoteFetchTask = Task {
+            await emoteStore.seedFromPersistence()
+            await emoteStore.fetchGlobalEmotes()
+        }
 
         // ユーザーエモートを並行フェッチ（user:read:emotes スコープがある場合のみ）
         // ユーザースコープのため接続時に1回のみ取得し、チャンネル切替時には再取得しない
