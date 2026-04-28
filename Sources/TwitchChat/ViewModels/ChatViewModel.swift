@@ -363,9 +363,17 @@ final class ChatViewModel {
         connectionStateReceiveTask?.cancel()
         userStateReceiveTask?.cancel()
         roomStateReceiveTask?.cancel()
+        // cancel() 後に終了を待ち、遅延受信が MainActor へ割り込むのを防ぐ
+        await receiveTask?.value
+        await noticeReceiveTask?.value
+        await connectionStateReceiveTask?.value
+        await userStateReceiveTask?.value
+        await roomStateReceiveTask?.value
         // flush ループを止め、残存キューを書き出す
         flushTask?.cancel()
         videoIdFetchTask?.cancel()
+        await flushTask?.value
+        await videoIdFetchTask?.value
         await flushPendingPersistQueue()
 
         globalBadgeFetchTask?.cancel()
