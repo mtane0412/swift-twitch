@@ -2,6 +2,7 @@
 // PersistenceActor に委譲する薄いラッパー実装
 // PersistenceService プロトコルを満たし、TwitchChatApp からの DI 対象となる
 
+import AppKit
 import Foundation
 import SwiftData
 
@@ -14,23 +15,58 @@ struct SwiftDataPersistenceService: PersistenceService {
 
     private let actor: PersistenceActor
 
-    /// 既存の ModelContainer からサービスを生成する
-    init(container: ModelContainer) {
-        self.actor = PersistenceActor(modelContainer: container)
+    /// 既存の ModelContainer から生成する（テスト向けに imageDiskStoreRoot を注入可能）
+    ///
+    /// - Parameters:
+    ///   - container: 構築済み ModelContainer
+    ///   - imageDiskStoreRoot: ImageDiskStore のルートディレクトリ（nil の場合は diskStore 無効）
+    ///   - attachAppKitTriggers: true の場合、起動 5 秒後 sweep と didResignActive 通知を登録する
+    /// - Throws: ImageDiskStore の初期化に失敗した場合
+    init(
+        container: ModelContainer,
+        imageDiskStoreRoot: URL? = nil,
+        attachAppKitTriggers: Bool = false
+    ) throws {
+        if let root = imageDiskStoreRoot {
+            let store = try ImageDiskStore(rootDirectory: root)
+            // diskStore を init 時に同期注入してレースコンディションを排除する
+            let actor = PersistenceActor(modelContainer: container, diskStore: store)
+            self.actor = actor
+
+            if attachAppKitTriggers {
+                // 起動 5 秒後に reconcile + sweep を実行する
+                Task {
+                    try? await Task.sleep(for: .seconds(5))
+                    await actor.runReconcileAndSweep()
+                }
+                // バックグラウンド移行時に sweep を実行する（テスト時は登録しない）
+                NotificationCenter.default.addObserver(
+                    forName: NSApplication.didResignActiveNotification,
+                    object: nil,
+                    queue: nil
+                ) { _ in
+                    Task { await actor.runReconcileAndSweep() }
+                }
+            }
+        } else {
+            self.actor = PersistenceActor(modelContainer: container)
+        }
     }
 
     /// ModelContainer を新規に構築してサービスを生成する
     ///
-    /// - Parameter inMemory: `true` の場合はディスクに書き込まない（テスト用）
+    /// - Parameters:
+    ///   - inMemory: `true` の場合はディスクに書き込まない（テスト用）
+    ///   - imageDiskStoreRoot: ImageDiskStore のルートディレクトリ（nil の場合は diskStore 無効）
     /// - Throws: `ModelContainer` の構築に失敗した場合
-    init(inMemory: Bool = false) throws {
+    init(inMemory: Bool = false, imageDiskStoreRoot: URL? = nil) throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: inMemory)
         let container = try ModelContainer(
             for: Schema(versionedSchema: SchemaV1.self),
             migrationPlan: ChatSchemaMigrationPlan.self,
             configurations: config
         )
-        self.init(container: container)
+        try self.init(container: container, imageDiskStoreRoot: imageDiskStoreRoot)
     }
 
     // MARK: - エモート

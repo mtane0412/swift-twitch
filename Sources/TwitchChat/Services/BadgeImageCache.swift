@@ -32,13 +32,25 @@ final class BadgeImageCache: @unchecked Sendable {
     /// 進行中のダウンロードタスク（キー: "badgeName/version"）
     private var inFlightTasks: [String: Task<NSImage?, Never>] = [:]
 
-    /// inFlightTasks へのアクセスを保護するロック
+    /// inFlightTasks / persistence へのアクセスを保護するロック
     private let lock = NSLock()
 
     /// バッジ画像取得失敗時のログ出力に使用するロガー
     private let logger = Logger(subsystem: "dev.mtane.TwitchChat", category: "BadgeImageCache")
 
+    /// L2 ディスクキャッシュサービス（nil の場合は L2 スキップ）
+    private var persistence: (any PersistenceService)?
+
     private init() {}
+
+    /// L2 永続化サービスを注入する（アプリ起動時に TwitchChatApp から呼ぶ）
+    func attachPersistence(_ service: any PersistenceService) {
+        lock.withLock { self.persistence = service }
+    }
+
+    private var currentPersistence: (any PersistenceService)? {
+        lock.withLock { persistence }
+    }
 
     // MARK: - 画像取得
 
@@ -66,10 +78,24 @@ final class BadgeImageCache: @unchecked Sendable {
                 guard let self else { return nil as NSImage? }
                 defer { _ = self.lock.withLock { self.inFlightTasks.removeValue(forKey: key) } }
 
-                // BadgeStore から URL を解決してダウンロード
+                let persistence = self.currentPersistence
+                let l2Key = ImageCacheKey(kind: .badge, identifier: "\(badge.name):\(badge.version)")
+
+                // L2 ルックアップ
+                if let ps = persistence,
+                   let data = await ps.loadImageData(key: l2Key),
+                   let image = NSImage(data: data) {
+                    self.store(image, for: key)
+                    return image
+                }
+
+                // L3 HTTP ダウンロード
                 guard let url = await store.imageURL(for: badge),
-                      let image = await self.download(from: url) else { return nil }
+                      let (image, data) = await self.download(from: url) else { return nil }
                 self.store(image, for: key)
+                if let ps = persistence {
+                    try? await ps.saveImageData(data, key: l2Key, mime: "image/png")
+                }
                 return image
             }
             inFlightTasks[key] = newTask
@@ -91,10 +117,10 @@ final class BadgeImageCache: @unchecked Sendable {
 
     // MARK: - プライベートメソッド
 
-    /// 指定 URL から画像をダウンロードする
-    private func download(from url: URL) async -> NSImage? {
+    /// 指定 URL から画像をダウンロードする（L2 保存用に生データも返す）
+    private func download(from url: URL) async -> (NSImage, Data)? {
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await ImageDownloadSession.shared.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse else {
                 logger.warning("バッジ画像レスポンスが HTTPURLResponse でない: \(url)")
                 return nil
@@ -107,7 +133,7 @@ final class BadgeImageCache: @unchecked Sendable {
                 logger.warning("バッジ画像データを NSImage に変換できない: \(url)")
                 return nil
             }
-            return image
+            return (image, data)
         } catch {
             logger.warning("バッジ画像ダウンロード失敗: \(url) - \(error)")
             return nil
@@ -119,4 +145,11 @@ final class BadgeImageCache: @unchecked Sendable {
         image.size = NSSize(width: Self.badgeDisplaySize, height: Self.badgeDisplaySize)
         imageCache.setObject(image, forKey: key as NSString)
     }
+
+#if DEBUG
+    /// テスト用: 永続化サービスを差し替える（nil でリセット）
+    func attachPersistenceForTesting(_ service: (any PersistenceService)?) {
+        lock.withLock { self.persistence = service }
+    }
+#endif
 }

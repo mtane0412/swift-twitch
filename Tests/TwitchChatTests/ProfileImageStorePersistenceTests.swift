@@ -1,6 +1,8 @@
 // ProfileImageStorePersistenceTests.swift
 // ProfileImageStore の永続化配線テスト（キャッシュ先読み / write-back / clear 後の復元）
+// および ProfileImageCache の L2 キャッシュ統合テスト
 
+import AppKit
 import Foundation
 import Testing
 @testable import TwitchChat
@@ -155,5 +157,60 @@ struct ProfileImageStorePersistenceTests {
         // 検証: clear 後でも displayName が解決できる
         let displayName = store.displayName(for: "ユーザーID001")
         #expect(displayName == "山田太郎")
+    }
+}
+
+// MARK: - ProfileImageCache L2 統合テスト
+
+/// ProfileImageCache の L2 キャッシュ（ImageDiskStore / PersistenceService）統合テストスイート
+///
+/// シングルトン ProfileImageCache.shared の状態を共有するため、テストを順次実行する。
+@Suite("ProfileImageCache L2 統合テスト", .serialized)
+struct ProfileImageCacheL2Tests {
+
+    @Test("L2 に有効な画像データがある場合は HTTP なしでプロフィール画像を返す")
+    func L2ヒット時はHTTPなしでプロフィール画像を返す() async {
+        // 前提: ユーザーID "ユーザーID_L2テスト_山田" の L2 データをモックに投入する
+        let userId = "ユーザーID_L2テスト_山田_\(UUID())"
+        let mock = MockPersistenceService()
+        guard let pngData = makeMiniPNGData() else {
+            Issue.record("テスト用 PNG データ生成失敗")
+            return
+        }
+        let l2Key = ImageCacheKey(kind: .profile, identifier: userId)
+        await mock.seedImageData(pngData, key: l2Key)
+
+        ProfileImageCache.shared.attachPersistence(mock)
+        defer { ProfileImageCache.shared.attachPersistenceForTesting(nil) }
+
+        // 前提: 存在しない URL（L2 ヒット時は HTTP は呼ばれないので何でも良い）
+        let dummyURL = URL(string: "https://example.com/dummy.png")!
+
+        // 実行: image(for:imageUrl:) を呼ぶ（L2 ヒットで返るはず）
+        let result = await ProfileImageCache.shared.image(for: userId, imageUrl: dummyURL)
+
+        // 検証: 画像が返った（L2 から復元）
+        #expect(result != nil)
+        // 検証: loadImageData が1回呼ばれた
+        let loadCount = await mock.loadImageDataCallCount
+        #expect(loadCount == 1)
+        // 検証: L2 保存は呼ばれなかった（HTTP は不発火）
+        let saveCount = await mock.saveImageDataCallCount
+        #expect(saveCount == 0)
+    }
+
+    // MARK: - ヘルパー
+
+    /// CoreGraphics で 2×2 ピクセルの PNG データを生成する（L2 シード用）
+    private func makeMiniPNGData() -> Data? {
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 2, pixelsHigh: 2,
+            bitsPerSample: 8, samplesPerPixel: 3,
+            hasAlpha: false, isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
     }
 }

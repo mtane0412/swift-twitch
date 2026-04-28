@@ -97,6 +97,10 @@ struct TwitchChatApp: App {
                             apiClient: helixClient,
                             persistenceService: persistenceContainer.service
                         )
+                        // 3 ImageCache に L2 ディスクキャッシュを注入する
+                        EmoteImageCache.shared.attachPersistence(persistenceContainer.service)
+                        BadgeImageCache.shared.attachPersistence(persistenceContainer.service)
+                        ProfileImageCache.shared.attachPersistence(persistenceContainer.service)
                     }
             }
         }

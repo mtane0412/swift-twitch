@@ -21,19 +21,25 @@ struct PersistenceContainer: Sendable {
 
     /// SwiftData ディスク永続化で初期化する
     ///
-    /// Application Support 配下の SQLite ファイルにデータを保存する。
+    /// Application Support 配下の SQLite ファイルと ImageCache ディレクトリにデータを保存する。
     /// 構築に失敗した場合は呼び出し側で `makeInMemory()` にフォールバックすること。
     ///
     /// - Throws: ディレクトリ作成または `ModelContainer` の構築に失敗した場合
     static func makeOnDisk() throws -> PersistenceContainer {
         let storeURL = try defaultOnDiskStoreURL()
+        let imageCacheRoot = try defaultImageCacheRoot()
         let config = ModelConfiguration(url: storeURL)
         let container = try ModelContainer(
             for: Schema(versionedSchema: SchemaV1.self),
             migrationPlan: ChatSchemaMigrationPlan.self,
             configurations: config
         )
-        return PersistenceContainer(service: SwiftDataPersistenceService(container: container))
+        let service = try SwiftDataPersistenceService(
+            container: container,
+            imageDiskStoreRoot: imageCacheRoot,
+            attachAppKitTriggers: true
+        )
+        return PersistenceContainer(service: service)
     }
 
     /// Application Support 配下の SQLite ファイル URL を返す
@@ -49,5 +55,20 @@ struct PersistenceContainer: Sendable {
         let dir = base.appending(path: bundleId, directoryHint: .isDirectory)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appending(path: "TwitchChat.sqlite", directoryHint: .notDirectory)
+    }
+
+    /// Application Support 配下の ImageCache ルートディレクトリ URL を返す
+    static func defaultImageCacheRoot() throws -> URL {
+        let fileManager = FileManager.default
+        let base = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let bundleId = Bundle.main.bundleIdentifier ?? "TwitchChat"
+        let dir = base.appending(path: bundleId, directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 }
