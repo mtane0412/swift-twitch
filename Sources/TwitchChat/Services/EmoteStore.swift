@@ -139,13 +139,14 @@ actor EmoteStore {
         // 永続化キャッシュから先読みしてオフライン時の即時表示と API 呼び出し抑止を実現する
         if let persistence = persistenceService {
             let cached = await persistence.loadChannelEmotesWithTimestamp(broadcasterId: broadcasterId)
+            // emotes が空でも fetchedAt があれば「取得済み空配列」として TTL を適用する
             if !cached.emotes.isEmpty {
                 channelEmotes = cached.emotes
                 notifyUserEmoteSetsUpdated()
-                if let fetchedAt = cached.fetchedAt,
-                   Date().timeIntervalSince(fetchedAt) < Self.emoteTTL {
-                    return
-                }
+            }
+            if let fetchedAt = cached.fetchedAt,
+               Date().timeIntervalSince(fetchedAt) < Self.emoteTTL {
+                return
             }
         }
         do {
@@ -486,9 +487,11 @@ actor EmoteStore {
         guard !isGlobalLoaded else { return }
         guard let persistence = persistenceService else { return }
         let result = await persistence.loadGlobalEmotesWithTimestamp()
-        guard !result.emotes.isEmpty else { return }
+        // emotes が空でも fetchedAt があれば「取得済み空配列」として TTL を適用する
         globalEmotes = result.emotes
-        notifyUserEmoteSetsUpdated()
+        if !result.emotes.isEmpty {
+            notifyUserEmoteSetsUpdated()
+        }
         if let fetchedAt = result.fetchedAt,
            Date().timeIntervalSince(fetchedAt) < Self.emoteTTL {
             isGlobalLoaded = true
@@ -506,9 +509,11 @@ actor EmoteStore {
         guard !isUserEmotesLoaded else { return }
         guard let persistence = persistenceService else { return }
         let result = await persistence.loadUserEmotesWithTimestamp(userId: userId)
-        guard !result.emotes.isEmpty else { return }
+        // emotes が空でも fetchedAt があれば「取得済み空配列」として TTL を適用する
         userEmotes = result.emotes
-        notifyUserEmoteSetsUpdated()
+        if !result.emotes.isEmpty {
+            notifyUserEmoteSetsUpdated()
+        }
         if let fetchedAt = result.fetchedAt,
            Date().timeIntervalSince(fetchedAt) < Self.emoteTTL {
             isUserEmotesLoaded = true

@@ -127,8 +127,11 @@ final class ChannelManager {
     ///
     /// `TwitchChatApp` のログイン検知（`.loggedIn` 状態遷移・セッション復元）から呼び出す。
     func preloadUserEmotes() async {
-        guard let userId = authState.userId, authState.canReadUserEmotes else { return }
+        guard let userId = authState.userId else { return }
+        // canReadUserEmotes に関わらず userId が取れた時点でキャッシュし、
+        // ログアウト時の clearPersistedUserData() が必ず userId を参照できるようにする
         lastPreloadedUserId = userId
+        guard authState.canReadUserEmotes else { return }
         await preloadEmoteStore.seedUserEmotes(userId: userId)
         await preloadEmoteStore.fetchUserEmotes(userId: userId)
     }
@@ -138,8 +141,9 @@ final class ChannelManager {
     /// `lastPreloadedUserId` を使うことで、`AuthState` の userId が nil 化された後でも安全に呼び出せる。
     func clearPersistedUserData() async {
         guard let persistenceService, let userId = lastPreloadedUserId else { return }
-        await persistenceService.clearUserScoped(userId: userId)
+        // await 前にクリアして、次のログインが lastPreloadedUserId を上書きする競合を防ぐ
         lastPreloadedUserId = nil
+        await persistenceService.clearUserScoped(userId: userId)
     }
 
     /// プリロード済みユーザーエモートの ownerId に対応する表示名を ProfileImageStore に事前キャッシュする
