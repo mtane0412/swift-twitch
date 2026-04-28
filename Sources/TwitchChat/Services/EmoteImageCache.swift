@@ -260,6 +260,8 @@ final class EmoteImageCache: @unchecked Sendable {
         lock.withLock {
             animatedEmoteIds.removeAll()
             persistence = nil
+            inFlightTasks.values.forEach { $0.cancel() }
+            inFlightTasks = [:]
         }
     }
 #endif
