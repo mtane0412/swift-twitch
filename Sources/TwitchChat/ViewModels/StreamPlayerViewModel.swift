@@ -43,6 +43,12 @@ final class StreamPlayerViewModel {
     private(set) var currentLatency: Double?
     /// バッファ不足による stall 中かどうか
     private(set) var isStalled: Bool = false
+    /// ユーザーが明示的に一時停止中かどうか
+    private(set) var isPaused: Bool = false
+    /// 現在の音量（0.0 ... 1.0）。ミュート中もこの値は保持する
+    private(set) var volume: Float = 1.0
+    /// ミュート中かどうか
+    private(set) var isMuted: Bool = false
 
     // MARK: - プライベートプロパティ
 
@@ -62,10 +68,20 @@ final class StreamPlayerViewModel {
 
     /// `StreamPlayerViewModel` を初期化する
     ///
-    /// - Parameter resolver: HLS マニフェスト URL を解決するリゾルバー
-    init(resolver: any StreamPlaybackResolverProtocol = StreamPlaybackResolver()) {
+    /// - Parameters:
+    ///   - resolver: HLS マニフェスト URL を解決するリゾルバー
+    ///   - initialVolume: 起動時の音量（0.0 ... 1.0）。@AppStorage から復元した値を渡す
+    ///   - initialMuted: 起動時のミュート状態。@AppStorage から復元した値を渡す
+    init(
+        resolver: any StreamPlaybackResolverProtocol = StreamPlaybackResolver(),
+        initialVolume: Float = 1.0,
+        initialMuted: Bool = false
+    ) {
         self.resolver = resolver
         self.player = AVPlayer()
+        self.volume = min(max(initialVolume, 0.0), 1.0)
+        self.isMuted = initialMuted
+        applyEffectiveVolume()
     }
 
     // MARK: - 公開メソッド
@@ -86,6 +102,8 @@ final class StreamPlayerViewModel {
         isStalled = false
         currentLatency = nil
         lastSeekDate = nil
+        // チャンネル切替時は再生状態に戻す
+        isPaused = false
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -107,12 +125,44 @@ final class StreamPlayerViewModel {
         isStalled = false
         currentLatency = nil
         lastSeekDate = nil
+        isPaused = false
+        // volume / isMuted はユーザー設定なので維持する
     }
 
     /// 直前のエラーから再試行する
     func retry() async {
         guard let login = currentLogin else { return }
         await load(login: login)
+    }
+
+    /// 再生と一時停止をトグルする（state == .playing のときのみ意味を持つ）
+    ///
+    /// 再開時は LL-HLS のライブエッジ追従判定（shouldSeekToLive）に委ねる。
+    func togglePlayPause() {
+        guard state == .playing else { return }
+        if isPaused {
+            player.playImmediately(atRate: 1.0)
+            isPaused = false
+        } else {
+            player.pause()
+            isPaused = true
+        }
+    }
+
+    /// 音量を設定する（0.0 ... 1.0 にクランプ）
+    ///
+    /// ゼロ以外の値をセットするとミュートが自動解除される。
+    func setVolume(_ newValue: Float) {
+        let clamped = min(max(newValue, 0.0), 1.0)
+        volume = clamped
+        if clamped > 0 && isMuted { isMuted = false }
+        applyEffectiveVolume()
+    }
+
+    /// ミュートをトグルする（volume の値は保持し、player.volume だけを 0 にする）
+    func toggleMute() {
+        isMuted.toggle()
+        applyEffectiveVolume()
     }
 
     // MARK: - ライブエッジ追従
@@ -143,6 +193,11 @@ final class StreamPlayerViewModel {
 
     // MARK: - プライベートヘルパー
 
+    /// 現在の volume/isMuted に応じて player.volume を適用する
+    private func applyEffectiveVolume() {
+        player.volume = isMuted ? 0 : volume
+    }
+
     private func performLoad(login: String) async {
         do {
             let manifest = try await resolver.resolve(login: login)
@@ -157,6 +212,8 @@ final class StreamPlayerViewModel {
             item.preferredForwardBufferDuration = 1.0
             player.automaticallyWaitsToMinimizeStalling = false
             player.replaceCurrentItem(with: item)
+            // item 差し替え後にユーザーの音量設定を再適用する
+            applyEffectiveVolume()
             player.playImmediately(atRate: 1.0)
             state = .playing
             startObservers()

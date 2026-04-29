@@ -20,8 +20,27 @@ struct TwitchChatApp: App {
     @State private var followedChannelStore: FollowedChannelStore?
     /// ユーザープロフィール画像URLストア
     @State private var profileImageStore: ProfileImageStore?
-    /// ライブ配信プレイヤー ViewModel（アプリ起動時に生成、チャンネル全体で共有）
-    @State private var streamPlayer = StreamPlayerViewModel()
+    /// プレイヤーの音量（次回起動時に復元するため UserDefaults に永続化）
+    @AppStorage(AppStorageKeys.playerVolume) private var storedVolume: Double = 1.0
+    /// プレイヤーのミュート状態（次回起動時に復元するため UserDefaults に永続化）
+    @AppStorage(AppStorageKeys.playerMuted) private var storedMuted: Bool = false
+    /// ライブ配信プレイヤー ViewModel（アプリ起動時に永続化済み音量で生成、チャンネル全体で共有）
+    @State private var streamPlayer: StreamPlayerViewModel
+
+    init() {
+        // UserDefaults から前回の音量・ミュート状態を読み出して ViewModel を初期化する
+        let defaults = UserDefaults.standard
+        let volume = Float(
+            defaults.object(forKey: AppStorageKeys.playerVolume) != nil
+                ? defaults.double(forKey: AppStorageKeys.playerVolume)
+                : 1.0
+        )
+        let muted = defaults.bool(forKey: AppStorageKeys.playerMuted)
+        _streamPlayer = State(initialValue: StreamPlayerViewModel(
+            initialVolume: volume,
+            initialMuted: muted
+        ))
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -108,6 +127,13 @@ struct TwitchChatApp: App {
             }
         }
         .defaultSize(width: 800, height: 700)
+        // streamPlayer の音量・ミュート変更を UserDefaults に書き戻す（永続化）
+        .onChange(of: streamPlayer.volume) { _, newValue in
+            storedVolume = Double(newValue)
+        }
+        .onChange(of: streamPlayer.isMuted) { _, newValue in
+            storedMuted = newValue
+        }
 
         Settings {
             SettingsView()

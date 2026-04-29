@@ -33,7 +33,7 @@ private struct AVPlayerNSViewRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> ExpandingAVPlayerView {
         let view = ExpandingAVPlayerView()
         view.player = player
-        view.controlsStyle = .floating
+        view.controlsStyle = .none
         view.videoGravity = .resizeAspect
         return view
     }
@@ -52,12 +52,15 @@ private struct AVPlayerNSViewRepresentable: NSViewRepresentable {
 /// `StreamPlayerViewModel` の状態に応じて以下を表示する:
 /// - `.idle`: 黒背景（Color.black）
 /// - `.resolving`: ProgressView（読み込み中）
-/// - `.playing`: AVPlayerView（フローティングコントロール付き）
+/// - `.playing`: AVPlayerView + ホバー時のシンプルなオーバーレイ（再生/停止・音量）
 /// - `.offline`: オフライン表示
 /// - `.error(message:)`: エラー表示 + 再試行ボタン
 struct StreamPlayerView: View {
 
     var viewModel: StreamPlayerViewModel
+
+    /// マウスがプレイヤー領域に入っているかどうか（オーバーレイ表示制御）
+    @State private var isHovered = false
 
     var body: some View {
         Group {
@@ -68,8 +71,34 @@ struct StreamPlayerView: View {
                 ProgressView("読み込み中...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .playing:
-                AVPlayerNSViewRepresentable(player: viewModel.player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack(alignment: .bottomLeading) {
+                    AVPlayerNSViewRepresentable(player: viewModel.player)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if isHovered {
+                        // 下部グラデーション（コントロールの視認性確保）
+                        LinearGradient(
+                            colors: [.clear, .black.opacity(0.6)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 80)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+
+                        StreamPlayerControlsOverlay(viewModel: viewModel)
+                            .padding(.leading, 12)
+                            .padding(.bottom, 8)
+                            .transition(.opacity)
+                    }
+                }
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isHovered = hovering
+                    }
+                }
+                .contentShape(Rectangle())
             case .offline:
                 offlineView
             case .error(let message):
