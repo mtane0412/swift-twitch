@@ -20,6 +20,10 @@ struct TwitchChatApp: App {
     @State private var followedChannelStore: FollowedChannelStore?
     /// ユーザープロフィール画像URLストア
     @State private var profileImageStore: ProfileImageStore?
+    /// プレイヤーの音量（次回起動時に復元するため UserDefaults に永続化）
+    @AppStorage(AppStorageKeys.playerVolume) private var storedVolume: Double = 1.0
+    /// プレイヤーのミュート状態（次回起動時に復元するため UserDefaults に永続化）
+    @AppStorage(AppStorageKeys.playerMuted) private var storedMuted: Bool = false
     /// ライブ配信プレイヤー ViewModel（アプリ起動時に生成、チャンネル全体で共有）
     @State private var streamPlayer = StreamPlayerViewModel()
 
@@ -38,6 +42,13 @@ struct TwitchChatApp: App {
                     profileImageStore: profileImageStore,
                     streamPlayer: streamPlayer
                 )
+                .onAppear {
+                    // 初回表示時のみ永続化済み音量・ミュートを適用する（2 回目以降は無視）
+                    streamPlayer.restoreSettingsIfNeeded(
+                        volume: Float(storedVolume),
+                        muted: storedMuted
+                    )
+                }
                 .task {
                     await authState.restoreSession()
                     if case .loggedIn = authState.status {
@@ -108,6 +119,13 @@ struct TwitchChatApp: App {
             }
         }
         .defaultSize(width: 800, height: 700)
+        // streamPlayer の音量・ミュート変更を UserDefaults に書き戻す（永続化）
+        .onChange(of: streamPlayer.volume) { _, newValue in
+            storedVolume = Double(newValue)
+        }
+        .onChange(of: streamPlayer.isMuted) { _, newValue in
+            storedMuted = newValue
+        }
 
         Settings {
             SettingsView()

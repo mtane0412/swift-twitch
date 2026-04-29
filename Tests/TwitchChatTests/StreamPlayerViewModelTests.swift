@@ -402,6 +402,235 @@ struct StreamPlayerViewModelTests {
 
         #expect(viewModel.player.automaticallyWaitsToMinimizeStalling == false)
     }
+
+    // MARK: - 再生/一時停止テスト
+
+    @Test("初期状態で isPaused は false である")
+    func initialIsPausedIsFalse() {
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        #expect(viewModel.isPaused == false)
+    }
+
+    @Test("playing 状態で togglePlayPause() を呼ぶと isPaused が true になる")
+    func togglePlayPausePausesWhenPlaying() async {
+        // 前提: 再生中（playing 状態）のとき togglePlayPause() を呼ぶ
+        // 検証: isPaused が true になること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+
+        viewModel.togglePlayPause()
+
+        #expect(viewModel.isPaused == true)
+    }
+
+    @Test("playing 状態で togglePlayPause() を 2 回呼ぶと isPaused が false に戻る")
+    func togglePlayPauseResumesWhenPaused() async {
+        // 前提: 再生中に pauseして再度 togglePlayPause() を呼ぶ
+        // 検証: isPaused が false に戻ること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+
+        viewModel.togglePlayPause()
+        viewModel.togglePlayPause()
+
+        #expect(viewModel.isPaused == false)
+    }
+
+    @Test("idle 状態で togglePlayPause() を呼んでも isPaused は変わらない")
+    func togglePlayPauseDoesNothingWhenIdle() {
+        // 前提: idle 状態（再生中でない）で togglePlayPause() を呼ぶ
+        // 検証: isPaused が変わらず false のまま
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.togglePlayPause()
+        #expect(viewModel.isPaused == false)
+    }
+
+    @Test("load() を呼ぶと isPaused が false にリセットされる")
+    func loadResetsPausedState() async {
+        // 前提: 一時停止中にチャンネルを切り替える
+        // 検証: 新しい load では isPaused が false（再生状態）になること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+        viewModel.togglePlayPause()
+        #expect(viewModel.isPaused == true, "前提: 一時停止中であること")
+
+        await viewModel.load(login: "forsen")
+        #expect(viewModel.isPaused == false)
+    }
+
+    // MARK: - 音量テスト
+
+    @Test("初期状態で volume は 1.0 である")
+    func initialVolumeIsOne() {
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        #expect(viewModel.volume == 1.0)
+    }
+
+    @Test("initialVolume を指定して初期化すると player.volume に反映される")
+    func initialVolumeAppliedToPlayer() {
+        // 前提: initialVolume=0.5 で初期化する
+        // 検証: player.volume が 0.5 になること
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver(), initialVolume: 0.5)
+        #expect(viewModel.volume == 0.5)
+        #expect(viewModel.player.volume == 0.5)
+    }
+
+    @Test("setVolume(0.5) で volume が 0.5 になり player.volume にも反映される")
+    func setVolumeUpdatesVolumeAndPlayer() {
+        // 前提: デフォルト音量 1.0 の状態
+        // 検証: setVolume 後に volume と player.volume の両方が更新されること
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.setVolume(0.5)
+        #expect(viewModel.volume == 0.5)
+        #expect(viewModel.player.volume == 0.5)
+    }
+
+    @Test("setVolume(-0.1) は 0.0 にクランプされる")
+    func setVolumeClampsBelowZero() {
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.setVolume(-0.1)
+        #expect(viewModel.volume == 0.0)
+    }
+
+    @Test("setVolume(1.5) は 1.0 にクランプされる")
+    func setVolumeClampAboveOne() {
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.setVolume(1.5)
+        #expect(viewModel.volume == 1.0)
+    }
+
+    @Test("isMuted=true のとき setVolume(0.7) を呼ぶと isMuted が false に戻る")
+    func setVolumeUnmuteWhenMuted() {
+        // 前提: ミュート中にスライダーで音量を変更する
+        // 検証: ミュートが解除されること（音量ゼロ以外の値をセットしたため）
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.toggleMute()
+        #expect(viewModel.isMuted == true, "前提: ミュート中であること")
+
+        viewModel.setVolume(0.7)
+        #expect(viewModel.isMuted == false)
+    }
+
+    // MARK: - ミュートテスト
+
+    @Test("初期状態で isMuted は false である")
+    func initialIsMutedIsFalse() {
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        #expect(viewModel.isMuted == false)
+    }
+
+    @Test("initialMuted=true で初期化すると player.volume は 0 になる（volume の値は保持）")
+    func initialMutedAppliedToPlayer() {
+        // 前提: initialMuted=true で初期化する
+        // 検証: player.volume が 0 になり、volume 自体は初期値のまま
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver(), initialMuted: true)
+        #expect(viewModel.isMuted == true)
+        #expect(viewModel.player.volume == 0)
+        #expect(viewModel.volume == 1.0)
+    }
+
+    @Test("toggleMute() で isMuted が true になると player.volume は 0 になる")
+    func toggleMuteSetsPlayerVolumeToZero() {
+        // 前提: 通常再生中（isMuted=false）のとき toggleMute() を呼ぶ
+        // 検証: player.volume が 0 になること
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.setVolume(0.8)
+
+        viewModel.toggleMute()
+
+        #expect(viewModel.isMuted == true)
+        #expect(viewModel.player.volume == 0)
+    }
+
+    @Test("toggleMute() を 2 回呼ぶと volume の値が player.volume に復元される")
+    func toggleMuteRestoresVolume() {
+        // 前提: 音量 0.6 でミュートしてから復帰する
+        // 検証: player.volume が 0.6 に戻ること
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.setVolume(0.6)
+        viewModel.toggleMute()
+        #expect(viewModel.player.volume == 0, "前提: ミュート中は player.volume が 0")
+
+        viewModel.toggleMute()
+        #expect(viewModel.isMuted == false)
+        #expect(viewModel.player.volume == 0.6)
+    }
+
+    @Test("toggleMute() しても volume プロパティの値は変わらない")
+    func toggleMuteDoesNotChangeVolumeProperty() {
+        // 前提: 音量 0.8 の状態でミュートする
+        // 検証: volume 自体は 0.8 のまま保持されること
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.setVolume(0.8)
+        viewModel.toggleMute()
+        #expect(viewModel.volume == 0.8)
+    }
+
+    // MARK: - 起動時設定復元テスト
+
+    @Test("restoreSettingsIfNeeded は volume と isMuted を player に適用する")
+    func restoreSettingsIfNeededAppliesSettings() {
+        // 前提: デフォルト状態の ViewModel に設定を復元する
+        // 検証: volume と isMuted が設定値になり player.volume も反映されること
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.restoreSettingsIfNeeded(volume: 0.3, muted: true)
+        #expect(viewModel.volume == 0.3)
+        #expect(viewModel.isMuted == true)
+        #expect(viewModel.player.volume == 0)
+    }
+
+    @Test("restoreSettingsIfNeeded を 2 回呼んでも 1 回目の値が保持される")
+    func restoreSettingsIfNeededIsIdempotent() {
+        // 前提: 1 回目に (0.3, muted) を適用した後、2 回目で別の値を渡す
+        // 検証: 2 回目の呼び出しは無視されること（起動時に一度だけ適用するため）
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.restoreSettingsIfNeeded(volume: 0.3, muted: false)
+        viewModel.restoreSettingsIfNeeded(volume: 0.8, muted: true)
+        #expect(viewModel.volume == 0.3)
+        #expect(viewModel.isMuted == false)
+    }
+
+    // MARK: - 音量永続性テスト
+
+    @Test("stop() を呼んでも volume と isMuted は維持される（ユーザー設定）")
+    func stopPreservesVolumeAndMute() async {
+        // 前提: 音量 0.5・ミュート中の状態で stop() を呼ぶ
+        // 検証: volume/isMuted は変わらないこと（これらはユーザー設定なのでリセットしない）
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+        viewModel.setVolume(0.5)
+        viewModel.toggleMute()
+
+        viewModel.stop()
+
+        #expect(viewModel.volume == 0.5)
+        #expect(viewModel.isMuted == true)
+    }
+
+    @Test("load() でチャンネルを切り替えても volume と isMuted は維持される")
+    func loadPreservesVolumeAndMute() async {
+        // 前提: 音量 0.4・ミュート中の状態でチャンネルを切り替える
+        // 検証: 新チャンネル再生後も volume/isMuted は変わらないこと
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+        viewModel.setVolume(0.4)
+        viewModel.toggleMute()
+
+        await viewModel.load(login: "forsen")
+
+        #expect(viewModel.volume == 0.4)
+        #expect(viewModel.isMuted == true)
+    }
 }
 
 // MARK: - MockStreamPlaybackResolver セッターヘルパー

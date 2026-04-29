@@ -6,4 +6,8 @@
 enum AppStorageKeys {
     /// ライブ配信プレイヤー機能の有効・無効
     static let livePlayerEnabled = "livePlayerEnabled"
+    /// プレイヤーの音量（0.0 ... 1.0、Double で保存）
+    static let playerVolume = "playerVolume"
+    /// プレイヤーのミュート状態
+    static let playerMuted = "playerMuted"
 }
