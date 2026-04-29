@@ -91,6 +91,12 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 600, minHeight: 400)
+        .onAppear {
+            // 起動時に livePlayerEnabled かつ選択中チャンネルがある場合、即座に再生を開始する
+            // onChange は値が変化したときのみ発火するため、起動時の初期再生はここで行う
+            guard livePlayerEnabled, let login = channelManager.selectedChannel else { return }
+            Task { await streamPlayer.load(login: login) }
+        }
         .onChange(of: channelManager.selectedChannel) { _, newChannel in
             // livePlayerEnabled かつチャンネルが切り替わった場合にのみ再生を開始する
             guard livePlayerEnabled, let login = newChannel else {
