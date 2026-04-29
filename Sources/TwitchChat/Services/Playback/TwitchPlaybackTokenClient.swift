@@ -58,6 +58,8 @@ actor TwitchPlaybackTokenClient: TwitchPlaybackTokenClientProtocol {
 
     private let dataFetcher: any URLSessionDataFetcher
     private let clientID: String
+    /// SSAI セッション管理用デバイス識別子（32 文字 lowercase hex、インスタンスごとに生成）
+    private let deviceID: String
 
     // MARK: - 初期化
 
@@ -66,12 +68,15 @@ actor TwitchPlaybackTokenClient: TwitchPlaybackTokenClientProtocol {
     /// - Parameters:
     ///   - dataFetcher: HTTP リクエストを実行するデータフェッチャー（テスト時はモックを渡す）
     ///   - clientID: GQL リクエストに付与する Client-Id ヘッダー値
+    ///   - deviceID: `X-Device-Id` ヘッダー値（`nil` のとき内部でランダム生成する。テスト時に固定値を注入可能）
     init(
         dataFetcher: any URLSessionDataFetcher = TwitchPlaybackTokenClient.makeDefaultSession(),
-        clientID: String = TwitchPlaybackTokenClient.webClientID
+        clientID: String = TwitchPlaybackTokenClient.webClientID,
+        deviceID: String? = nil
     ) {
         self.dataFetcher = dataFetcher
         self.clientID = clientID
+        self.deviceID = deviceID ?? TwitchPlaybackTokenClient.makeDeviceID()
     }
 
     // MARK: - 公開メソッド
@@ -95,6 +100,7 @@ actor TwitchPlaybackTokenClient: TwitchPlaybackTokenClientProtocol {
         request.httpMethod = "POST"
         request.setValue(clientID, forHTTPHeaderField: "Client-Id")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(deviceID, forHTTPHeaderField: "X-Device-Id")
         request.httpBody = try JSONEncoder().encode(GQLPlaybackTokenBody(login: login))
         return request
     }
@@ -158,6 +164,7 @@ private struct GQLVariables: Encodable {
     let isVod = false
     let vodID = ""
     let playerType = "site"
+    let platform = "web"
 }
 
 // MARK: - ファクトリ
@@ -175,5 +182,10 @@ extension TwitchPlaybackTokenClient {
         config.urlCache = URLCache(memoryCapacity: 0, diskCapacity: 0)
         config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         return URLSession(configuration: config)
+    }
+
+    /// SSAI セッション管理用デバイス識別子を生成する（32 文字 lowercase hex）
+    static func makeDeviceID() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
 }

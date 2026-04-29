@@ -93,6 +93,13 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
             queryItems.append(URLQueryItem(name: "low_latency", value: "true"))
         }
 
+        if options.adServingEnabled {
+            queryItems.append(URLQueryItem(name: "platform", value: "web"))
+            queryItems.append(URLQueryItem(name: "player_type", value: "site"))
+            queryItems.append(URLQueryItem(name: "server_ads", value: "true"))
+            queryItems.append(URLQueryItem(name: "allow_audio_only", value: "true"))
+        }
+
         components.queryItems = queryItems
 
         guard let url = components.url else {

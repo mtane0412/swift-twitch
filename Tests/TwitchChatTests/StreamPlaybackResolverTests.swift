@@ -221,6 +221,126 @@ struct StreamPlaybackResolverTests {
         #expect(codecsValue == "avc1,hevc", "supported_codecs が期待値と異なる: \(codecsValue ?? "nil")")
     }
 
+    // MARK: - 広告サーブパラメータテスト
+
+    @Test("PlaybackOptions.default で resolve すると platform=web クエリが付与される")
+    func defaultBuildsUsherWithPlatformWeb() async throws {
+        // 前提: adServingEnabled=true（PlaybackOptions.default）で resolve したとき
+        // 検証: Usher URL に platform=web クエリが含まれること
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: .default)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let value = components?.queryItems?.first(where: { $0.name == "platform" })?.value
+        #expect(value == "web", "platform=web クエリが含まれていない: \(manifest.url)")
+    }
+
+    @Test("PlaybackOptions.default で resolve すると player_type=site クエリが付与される")
+    func defaultBuildsUsherWithPlayerTypeSite() async throws {
+        // 前提: adServingEnabled=true（PlaybackOptions.default）で resolve したとき
+        // 検証: Usher URL に player_type=site クエリが含まれること
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: .default)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let value = components?.queryItems?.first(where: { $0.name == "player_type" })?.value
+        #expect(value == "site", "player_type=site クエリが含まれていない: \(manifest.url)")
+    }
+
+    @Test("PlaybackOptions.default で resolve すると server_ads=true クエリが付与される")
+    func defaultBuildsUsherWithServerAdsTrue() async throws {
+        // 前提: adServingEnabled=true（PlaybackOptions.default）で resolve したとき
+        // 検証: Usher URL に server_ads=true クエリが含まれること（SSAI 有効化に最重要）
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: .default)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let value = components?.queryItems?.first(where: { $0.name == "server_ads" })?.value
+        #expect(value == "true", "server_ads=true クエリが含まれていない: \(manifest.url)")
+    }
+
+    @Test("PlaybackOptions.default で resolve すると allow_audio_only=true クエリが付与される")
+    func defaultBuildsUsherWithAllowAudioOnlyTrue() async throws {
+        // 前提: adServingEnabled=true（PlaybackOptions.default）で resolve したとき
+        // 検証: Usher URL に allow_audio_only=true クエリが含まれること
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: .default)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let value = components?.queryItems?.first(where: { $0.name == "allow_audio_only" })?.value
+        #expect(value == "true", "allow_audio_only=true クエリが含まれていない: \(manifest.url)")
+    }
+
+    @Test("adServingEnabled=false のとき広告サーブ用クエリ 4 個が全て付与されない")
+    func adServingDisabledExcludesAllAdParams() async throws {
+        // 前提: adServingEnabled=false の PlaybackOptions で resolve したとき
+        // 検証: platform / player_type / server_ads / allow_audio_only クエリが全て含まれないこと
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let options = PlaybackOptions(lowLatencyEnabled: true, supportedCodecs: ["avc1"], adServingEnabled: false)
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: options)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let keys = components?.queryItems?.map { $0.name } ?? []
+        #expect(!keys.contains("platform"), "platform クエリが誤って付与されている")
+        #expect(!keys.contains("player_type"), "player_type クエリが誤って付与されている")
+        #expect(!keys.contains("server_ads"), "server_ads クエリが誤って付与されている")
+        #expect(!keys.contains("allow_audio_only"), "allow_audio_only クエリが誤って付与されている")
+    }
+
+    @Test("広告サーブ設定に関わらず token / sig / play_session_id クエリは常に付与される")
+    func nonAdParamsAlwaysPresentRegardlessOfAdServing() async throws {
+        // 前提: adServingEnabled が true / false のどちらでも既存の必須クエリは失われないこと
+        // 検証: token, sig, play_session_id が両方の設定で存在すること
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken(value: "検証用トークン", signature: "検証用シグネチャ"))
+
+        let optionsOn = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: ["avc1"], adServingEnabled: true)
+        let resolverOn = StreamPlaybackResolver(tokenClient: tokenClient, options: optionsOn)
+        let manifestOn = try await resolverOn.resolve(login: "forsen")
+
+        let optionsOff = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: ["avc1"], adServingEnabled: false)
+        let resolverOff = StreamPlaybackResolver(tokenClient: tokenClient, options: optionsOff)
+        let manifestOff = try await resolverOff.resolve(login: "forsen")
+
+        for manifest in [manifestOn, manifestOff] {
+            let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+            let keys = components?.queryItems?.map { $0.name } ?? []
+            #expect(keys.contains("token"), "token クエリが消えている: \(manifest.url)")
+            #expect(keys.contains("sig"), "sig クエリが消えている: \(manifest.url)")
+            #expect(keys.contains("play_session_id"), "play_session_id クエリが消えている: \(manifest.url)")
+        }
+    }
+
+    @Test("adServingEnabled=true のとき Usher URL のクエリ件数は 17 個である")
+    func usherQueryItemCountWithAdServingOn() async throws {
+        // 前提: PlaybackOptions.default（adServingEnabled=true、lowLatencyEnabled=true）で resolve
+        // 検証: 既存 13 クエリ（基本 12 + low_latency）+ 広告 4 = 17 個であること（現状ロック）
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: .default)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let count = components?.queryItems?.count ?? 0
+        #expect(count == 17, "クエリ件数が期待値 17 と異なる: 実際は \(count) 件")
+    }
+
     // MARK: - エラー伝搬テスト
 
     @Test("tokenDecodingFailed はそのまま再スローされる")

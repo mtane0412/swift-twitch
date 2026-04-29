@@ -132,6 +132,107 @@ struct TwitchPlaybackTokenClientTests {
         #expect(requests.first?.httpMethod == "POST")
     }
 
+    // MARK: - 広告サーブ・デバイス識別子テスト
+
+    @Test("GQL リクエストボディの variables に platform=\"web\" が含まれる")
+    func gqlVariablesIncludePlatformWeb() async throws {
+        // 前提: TwitchPlaybackTokenClient がリクエストを送信したとき
+        // 検証: リクエストボディ JSON の variables.platform が "web" であること
+        let fetcher = MockURLSessionDataFetcher()
+        await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
+
+        let client = TwitchPlaybackTokenClient(dataFetcher: fetcher, clientID: "テストクライアントID")
+        _ = try await client.fetchLiveToken(login: "argstar")
+
+        let requests = await fetcher.capturedRequests
+        guard let bodyData = requests.first?.httpBody,
+              let bodyString = String(data: bodyData, encoding: .utf8) else {
+            Issue.record("リクエストボディが nil")
+            return
+        }
+        #expect(bodyString.contains("\"platform\""), "variables に platform キーが含まれていない: \(bodyString)")
+        #expect(bodyString.contains("\"web\""), "variables.platform の値が web でない: \(bodyString)")
+    }
+
+    @Test("GQL リクエストに X-Device-Id ヘッダーが付与され 32 文字の lowercase hex である")
+    func xDeviceIdHeaderIsHex32Lowercase() async throws {
+        // 前提: デフォルト初期化した TwitchPlaybackTokenClient でリクエストを送信したとき
+        // 検証: X-Device-Id ヘッダーが 32 文字の lowercase hex 文字列であること
+        let fetcher = MockURLSessionDataFetcher()
+        await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
+
+        let client = TwitchPlaybackTokenClient(dataFetcher: fetcher, clientID: "テストクライアントID")
+        _ = try await client.fetchLiveToken(login: "forsen")
+
+        let requests = await fetcher.capturedRequests
+        guard let deviceId = requests.first?.allHTTPHeaderFields?["X-Device-Id"] else {
+            Issue.record("X-Device-Id ヘッダーが nil")
+            return
+        }
+        #expect(deviceId.count == 32, "X-Device-Id が 32 文字でない: \(deviceId)")
+        let allLowercaseHex = deviceId.allSatisfy { $0.isHexDigit && ($0.isLetter ? $0.isLowercase : true) }
+        #expect(allLowercaseHex, "X-Device-Id に lowercase hex 以外の文字が含まれる: \(deviceId)")
+    }
+
+    @Test("同一インスタンスで 2 回リクエストしても X-Device-Id ヘッダーは同じ値である")
+    func xDeviceIdHeaderIsStablePerInstance() async throws {
+        // 前提: 同一の TwitchPlaybackTokenClient インスタンスで複数回リクエストを送信したとき
+        // 検証: X-Device-Id の値がリクエスト間で変わらないこと（インスタンスごとに固定）
+        let fetcher = MockURLSessionDataFetcher()
+        await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
+
+        let client = TwitchPlaybackTokenClient(dataFetcher: fetcher, clientID: "テストクライアントID")
+        _ = try await client.fetchLiveToken(login: "argstar")
+        _ = try await client.fetchLiveToken(login: "forsen")
+
+        let requests = await fetcher.capturedRequests
+        let deviceId1 = requests[0].allHTTPHeaderFields?["X-Device-Id"]
+        let deviceId2 = requests[1].allHTTPHeaderFields?["X-Device-Id"]
+        #expect(deviceId1 != nil, "1 回目の X-Device-Id が nil")
+        #expect(deviceId2 != nil, "2 回目の X-Device-Id が nil")
+        #expect(deviceId1 == deviceId2, "同一インスタンスで X-Device-Id が変わっている: \(deviceId1 ?? "") / \(deviceId2 ?? "")")
+    }
+
+    @Test("別インスタンスでは X-Device-Id ヘッダーの値が異なる")
+    func xDeviceIdHeaderDiffersAcrossInstances() async throws {
+        // 前提: 別々の TwitchPlaybackTokenClient インスタンスでリクエストを送信したとき
+        // 検証: X-Device-Id の値がインスタンス間で異なること（永続化なし・都度生成の確認）
+        let fetcher = MockURLSessionDataFetcher()
+        await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
+
+        let client1 = TwitchPlaybackTokenClient(dataFetcher: fetcher, clientID: "テストクライアントID")
+        let client2 = TwitchPlaybackTokenClient(dataFetcher: fetcher, clientID: "テストクライアントID")
+        _ = try await client1.fetchLiveToken(login: "argstar")
+        _ = try await client2.fetchLiveToken(login: "argstar")
+
+        let requests = await fetcher.capturedRequests
+        let deviceId1 = requests[0].allHTTPHeaderFields?["X-Device-Id"]
+        let deviceId2 = requests[1].allHTTPHeaderFields?["X-Device-Id"]
+        #expect(deviceId1 != nil, "インスタンス 1 の X-Device-Id が nil")
+        #expect(deviceId2 != nil, "インスタンス 2 の X-Device-Id が nil")
+        #expect(deviceId1 != deviceId2, "別インスタンスで X-Device-Id が同じ値になっている: \(deviceId1 ?? "")")
+    }
+
+    @Test("init の deviceID 引数でテスト用の固定値を X-Device-Id ヘッダーに注入できる")
+    func canInjectDeviceIdForTesting() async throws {
+        // 前提: deviceID 引数に固定値を指定して初期化したとき
+        // 検証: X-Device-Id ヘッダーに注入した固定値が使われること
+        let fetcher = MockURLSessionDataFetcher()
+        await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
+
+        let テスト用デバイスID = "abcdef1234567890abcdef1234567890"
+        let client = TwitchPlaybackTokenClient(
+            dataFetcher: fetcher,
+            clientID: "テストクライアントID",
+            deviceID: テスト用デバイスID
+        )
+        _ = try await client.fetchLiveToken(login: "argstar")
+
+        let requests = await fetcher.capturedRequests
+        let deviceId = requests.first?.allHTTPHeaderFields?["X-Device-Id"]
+        #expect(deviceId == テスト用デバイスID, "注入した deviceID が反映されていない: \(deviceId ?? "nil")")
+    }
+
     // MARK: - エラーパステスト
 
     @Test("HTTP 401 のとき tokenRequestFailed(statusCode: 401) を投げる")
