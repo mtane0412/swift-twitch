@@ -35,6 +35,9 @@ private struct AVPlayerNSViewRepresentable: NSViewRepresentable {
         view.player = player
         view.controlsStyle = .floating
         view.videoGravity = .resizeAspect
+        // AVPlayerView は player を設定すると内部的にレートをリセットするため、
+        // 明示的に再生を再開する（currentItem がない場合は no-op）
+        player.play()
         return view
     }
 
