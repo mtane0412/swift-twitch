@@ -36,14 +36,21 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
     // MARK: - プロパティ
 
     private let tokenClient: any TwitchPlaybackTokenClientProtocol
+    private let options: PlaybackOptions
 
     // MARK: - 初期化
 
     /// `StreamPlaybackResolver` を初期化する
     ///
-    /// - Parameter tokenClient: GQL アクセストークン取得クライアント
-    init(tokenClient: any TwitchPlaybackTokenClientProtocol = TwitchPlaybackTokenClient()) {
+    /// - Parameters:
+    ///   - tokenClient: GQL アクセストークン取得クライアント
+    ///   - options: HLS 再生オプション（省略時は `.default`）
+    init(
+        tokenClient: any TwitchPlaybackTokenClientProtocol = TwitchPlaybackTokenClient(),
+        options: PlaybackOptions = .default
+    ) {
         self.tokenClient = tokenClient
+        self.options = options
     }
 
     // MARK: - 公開メソッド
@@ -67,7 +74,7 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
             throw PlaybackError.badURL
         }
 
-        components.queryItems = [
+        var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "allow_source", value: "true"),
             URLQueryItem(name: "fast_bread", value: "true"),
             URLQueryItem(name: "p", value: String(Int.random(in: 100000...999999))),
@@ -76,11 +83,17 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
             URLQueryItem(name: "playlist_include_framerate", value: "true"),
             URLQueryItem(name: "reassignments_supported", value: "true"),
             URLQueryItem(name: "sig", value: token.signature),
-            URLQueryItem(name: "supported_codecs", value: "avc1"),
+            URLQueryItem(name: "supported_codecs", value: options.supportedCodecs.joined(separator: ",")),
             URLQueryItem(name: "token", value: token.value),
             URLQueryItem(name: "cdm", value: "wv"),
             URLQueryItem(name: "player_version", value: "1.27.0")
         ]
+
+        if options.lowLatencyEnabled {
+            queryItems.append(URLQueryItem(name: "low_latency", value: "true"))
+        }
+
+        components.queryItems = queryItems
 
         guard let url = components.url else {
             throw PlaybackError.badURL

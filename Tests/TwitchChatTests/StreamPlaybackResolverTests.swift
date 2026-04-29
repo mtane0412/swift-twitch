@@ -172,6 +172,55 @@ struct StreamPlaybackResolverTests {
         #expect(manifest.fetchedAt <= after)
     }
 
+    // MARK: - PlaybackOptions テスト
+
+    @Test("PlaybackOptions.default で resolve すると low_latency=true クエリが付与される")
+    func defaultOptionsIncludesLowLatencyParam() async throws {
+        // 前提: PlaybackOptions.default の lowLatencyEnabled は true
+        // 検証: Usher URL に low_latency=true クエリが含まれること
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: .default)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let lowLatencyValue = components?.queryItems?.first(where: { $0.name == "low_latency" })?.value
+        #expect(lowLatencyValue == "true", "low_latency=true が含まれていない: \(manifest.url)")
+    }
+
+    @Test("PlaybackOptions(lowLatencyEnabled: false) のとき low_latency クエリは付与されない")
+    func disabledLowLatencyExcludesParam() async throws {
+        // 前提: lowLatencyEnabled=false の PlaybackOptions を渡したとき
+        // 検証: Usher URL に low_latency クエリが含まれないこと
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let options = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: ["avc1"])
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: options)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let hasLowLatency = components?.queryItems?.contains(where: { $0.name == "low_latency" }) ?? false
+        #expect(!hasLowLatency, "low_latency クエリが含まれてしまっている: \(manifest.url)")
+    }
+
+    @Test("supportedCodecs が複数のとき supported_codecs はカンマ連結される")
+    func multipleCodecsAreJoinedWithComma() async throws {
+        // 前提: ["avc1", "hevc"] を supportedCodecs に指定したとき
+        // 検証: supported_codecs=avc1,hevc としてクエリに含まれること
+        let tokenClient = MockTwitchPlaybackTokenClient()
+        await tokenClient.setToken(makeToken())
+
+        let options = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: ["avc1", "hevc"])
+        let resolver = StreamPlaybackResolver(tokenClient: tokenClient, options: options)
+        let manifest = try await resolver.resolve(login: "argstar")
+
+        let components = URLComponents(url: manifest.url, resolvingAgainstBaseURL: false)
+        let codecsValue = components?.queryItems?.first(where: { $0.name == "supported_codecs" })?.value
+        #expect(codecsValue == "avc1,hevc", "supported_codecs が期待値と異なる: \(codecsValue ?? "nil")")
+    }
+
     // MARK: - エラー伝搬テスト
 
     @Test("tokenDecodingFailed はそのまま再スローされる")
