@@ -196,7 +196,7 @@ final class EmotePickerViewModel {
         lastBuiltUserIds    = Set(user.map(\.id))
         #if DEBUG
         loggedAvailableIds.removeAll()
-        print("[EmotePickerVM] load currentBroadcasterId=\(currentBroadcasterId ?? "nil") channel=\(channel.count) user=\(user.count) global=\(global.count)")
+        print("[EmotePickerVM] load broadcasterId=\(currentBroadcasterId ?? "nil") ch=\(channel.count) usr=\(user.count) gl=\(global.count)")
         print("[EmotePickerVM] load userEmoteIds=\(userEmoteIds.count) userEmoteSets=\(userEmoteSets.map { String($0.count) } ?? "nil")")
         if let sets = userEmoteSets, !sets.isEmpty {
             print("[EmotePickerVM] load emote-sets: \(sets.sorted().joined(separator: ","))")
@@ -237,6 +237,15 @@ final class EmotePickerViewModel {
         return assembleSections(classified: classified, global: global, seen: &seen)
     }
 
+    #if DEBUG
+    private func emoteClassifyLog(_ emote: HelixEmote, section: String) {
+        let type  = emote.emoteType ?? "nil"
+        let owner = emote.ownerId   ?? "nil"
+        let setId = emote.emoteSetId ?? "nil"
+        print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) type=\(type) owner=\(owner) setId=\(setId) → \(section)")
+    }
+    #endif
+
     /// エモートをセクション種別ごとに分類して中間構造を返す
     ///
     /// 分類ルール（優先順位）:
@@ -266,20 +275,20 @@ final class EmotePickerViewModel {
         for emote in channel where seen.insert(emote.id).inserted {
             currentChannelEmotes.append(emote)
             #if DEBUG
-            print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → currentChannel(channel-ep)")
+            emoteClassifyLog(emote, section: "currentChannel(channel-ep)")
             #endif
         }
         for emote in user {
             guard seen.insert(emote.id).inserted else {
                 #if DEBUG
-                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → skipped(seen)")
+                emoteClassifyLog(emote, section: "skipped(seen)")
                 #endif
                 continue
             }
             if emote.emoteType == "hypetrain" {
                 hypeEmotes.append(emote)
                 #if DEBUG
-                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → hypeTrain")
+                emoteClassifyLog(emote, section: "hypeTrain")
                 #endif
             } else if emote.emoteType == "globals" || globalIdSet.contains(emote.id) {
                 // globals タイプまたはグローバルエンドポイントに存在する ID は global セクションへ送る
@@ -287,25 +296,25 @@ final class EmotePickerViewModel {
                 seen.remove(emote.id)
                 otherEmotes.append(emote)
                 #if DEBUG
-                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → global")
+                emoteClassifyLog(emote, section: "global")
                 #endif
             } else if let ownerId = emote.ownerId, ownerId == currentBroadcasterId {
                 currentChannelEmotes.append(emote)
                 #if DEBUG
-                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(ownerId) emoteSetId=\(emote.emoteSetId ?? "nil") → currentChannel(user-ep)")
+                emoteClassifyLog(emote, section: "currentChannel(user-ep)")
                 #endif
             } else if let ownerId = emote.ownerId, ownerId != "0", !ownerId.isEmpty {
                 if subscribedByOwnerId[ownerId] == nil { subscribedOwnerIds.append(ownerId) }
                 subscribedByOwnerId[ownerId, default: []].append(emote)
                 #if DEBUG
-                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(ownerId) emoteSetId=\(emote.emoteSetId ?? "nil") → subscribedChannel(\(ownerId))")
+                emoteClassifyLog(emote, section: "subscribedChannel(\(ownerId))")
                 #endif
             } else {
                 // ownerId なし / "0" / 空文字エモートは global セクションで処理するため seen から除外する
                 seen.remove(emote.id)
                 otherEmotes.append(emote)
                 #if DEBUG
-                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → global(no-owner)")
+                emoteClassifyLog(emote, section: "global(no-owner)")
                 #endif
             }
         }
