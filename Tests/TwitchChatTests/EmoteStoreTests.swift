@@ -754,7 +754,7 @@ struct EmoteStoreTests {
         #expect(loaded == true)
     }
 
-    @Test("seedUserEmotesFromPreload はエモートをセットするが isUserEmotesLoaded フラグを立てない")
+    @Test("seedUserEmotesFromPreload はエモートをセットするが isUserEmotesFullyLoaded フラグを立てない")
     func testSeedUserEmotesFromPreloadDoesNotSetLoadedFlag() async {
         // 前提: プリロード途中のスナップショット（ページ 1 のみ取得済み）をシミュレート
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
