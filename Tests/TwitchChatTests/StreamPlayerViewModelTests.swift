@@ -233,6 +233,72 @@ struct StreamPlayerViewModelTests {
 
         #expect(viewModel.currentLogin == "forsen")
     }
+
+    // MARK: - AVPlayer LL-HLS チューニングテスト
+
+    @Test("load 後の AVPlayerItem で automaticallyPreservesTimeOffsetFromLive が true になる")
+    func playerItemPreservesTimeOffsetFromLive() async throws {
+        // 前提: resolve が成功し playing 状態になったとき
+        // 検証: AVPlayerItem.automaticallyPreservesTimeOffsetFromLive が true であること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+
+        guard let item = viewModel.player.currentItem else {
+            Issue.record("player.currentItem が nil")
+            return
+        }
+        #expect(item.automaticallyPreservesTimeOffsetFromLive == true)
+    }
+
+    @Test("load 後の AVPlayerItem で configuredTimeOffsetFromLive が 2.0 秒になる")
+    func playerItemConfiguredTimeOffsetFromLiveIs2Seconds() async throws {
+        // 前提: resolve が成功し playing 状態になったとき
+        // 検証: AVPlayerItem.configuredTimeOffsetFromLive が 2.0 秒であること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+
+        guard let item = viewModel.player.currentItem else {
+            Issue.record("player.currentItem が nil")
+            return
+        }
+        #expect(item.configuredTimeOffsetFromLive.seconds == 2.0)
+    }
+
+    @Test("load 後の AVPlayerItem で preferredForwardBufferDuration が 1.0 秒になる")
+    func playerItemPreferredForwardBufferDurationIs1Second() async throws {
+        // 前提: Twitch は 1 秒セグメント配信のため、1 セグメント分だけ先読みする設定
+        // 検証: AVPlayerItem.preferredForwardBufferDuration が 1.0 であること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+
+        guard let item = viewModel.player.currentItem else {
+            Issue.record("player.currentItem が nil")
+            return
+        }
+        #expect(item.preferredForwardBufferDuration == 1.0)
+    }
+
+    @Test("load 後の AVPlayer で automaticallyWaitsToMinimizeStalling が false になる")
+    func playerDoesNotWaitToMinimizeStalling() async throws {
+        // 前提: ライブエッジへの積極的な追従を優先するため自動待機を無効化する
+        // 検証: AVPlayer.automaticallyWaitsToMinimizeStalling が false であること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+
+        #expect(viewModel.player.automaticallyWaitsToMinimizeStalling == false)
+    }
 }
 
 // MARK: - MockStreamPlaybackResolver セッターヘルパー

@@ -103,8 +103,14 @@ final class StreamPlayerViewModel {
 
             let asset = AVURLAsset(url: manifest.url)
             let item = AVPlayerItem(asset: asset)
+            // LL-HLS チューニング: ライブエッジへの追従を最優先にする
+            // Twitch は 1 秒セグメント配信（fast_bread）のため 1 セグメント分だけ先読みする
+            item.automaticallyPreservesTimeOffsetFromLive = true
+            item.configuredTimeOffsetFromLive = CMTime(seconds: 2.0, preferredTimescale: 1000)
+            item.preferredForwardBufferDuration = 1.0
+            player.automaticallyWaitsToMinimizeStalling = false
             player.replaceCurrentItem(with: item)
-            player.play()
+            player.playImmediately(atRate: 1.0)
             state = .playing
         } catch let error as PlaybackError {
             guard !Task.isCancelled else { return }
