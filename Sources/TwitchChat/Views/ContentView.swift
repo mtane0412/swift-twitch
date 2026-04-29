@@ -21,9 +21,14 @@ struct ContentView: View {
     var followedStreamStore: FollowedStreamStore
     var followedChannelStore: FollowedChannelStore
     var profileImageStore: ProfileImageStore
+    /// ライブ配信プレイヤー ViewModel（TwitchChatApp から注入）
+    var streamPlayer: StreamPlayerViewModel
 
     /// blank tab（チャンネル名入力フォーム）が開いているかどうか
     @State private var isBlankTabOpen: Bool = false
+
+    /// ライブ配信プレイヤー機能の有効・無効（SettingsView から変更可能）
+    @AppStorage(AppStorageKeys.livePlayerEnabled) private var livePlayerEnabled = false
 
     var body: some View {
         NavigationSplitView {
@@ -65,7 +70,12 @@ struct ContentView: View {
                         }
                     )
                 } else if let viewModel = channelManager.selectedViewModel {
-                    ChatDetailView(viewModel: viewModel, authState: authState, profileImageStore: profileImageStore)
+                    ChatDetailView(
+                        viewModel: viewModel,
+                        authState: authState,
+                        profileImageStore: profileImageStore,
+                        streamPlayer: streamPlayer
+                    )
                 } else {
                     // タブ0個の初期状態: チャンネル名入力フォームを直接表示
                     ChannelSearchView(
@@ -81,5 +91,22 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 600, minHeight: 400)
+        .onChange(of: channelManager.selectedChannel) { _, newChannel in
+            // livePlayerEnabled かつチャンネルが切り替わった場合にのみ再生を開始する
+            guard livePlayerEnabled, let login = newChannel else {
+                if newChannel == nil { streamPlayer.stop() }
+                return
+            }
+            Task { await streamPlayer.load(login: login) }
+        }
+        .onChange(of: livePlayerEnabled) { _, enabled in
+            // 機能を OFF にしたら再生を停止する
+            if !enabled {
+                streamPlayer.stop()
+            } else if let login = channelManager.selectedChannel {
+                // ON にしたとき、選択中チャンネルがあれば即座に読み込む
+                Task { await streamPlayer.load(login: login) }
+            }
+        }
     }
 }
