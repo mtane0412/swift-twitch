@@ -40,7 +40,7 @@ final class StreamPlayerViewModel {
     /// View が参照する AVPlayer インスタンス（1インスタンスで item を差し替える）
     let player: AVPlayer
     /// 現在のライブエッジとの遅延秒数（再生中のみ更新、デバッグ用）
-    private(set) var currentLatency: Double? = nil
+    private(set) var currentLatency: Double?
     /// バッファ不足による stall 中かどうか
     private(set) var isStalled: Bool = false
 
