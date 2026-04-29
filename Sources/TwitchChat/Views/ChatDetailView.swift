@@ -1,12 +1,14 @@
 // ChatDetailView.swift
 // チャット詳細ペイン
 // 選択中チャンネルのメッセージリスト・エラー表示・コメント入力バーを担当する
+// livePlayerEnabled が true のとき上部にライブプレイヤーを VSplitView で表示する
 
 import SwiftUI
 
 /// 選択中チャンネルのチャット詳細ペイン
 ///
 /// - エラー時はエラーメッセージを表示
+/// - livePlayerEnabled が true のとき上部に StreamPlayerView を VSplitView で表示
 /// - チャットメッセージを ScrollView + LazyVStack で表示
 /// - 新メッセージ到着時に自動スクロール
 /// - 下部にコメント投稿用入力バーを表示
@@ -15,6 +17,11 @@ struct ChatDetailView: View {
     var authState: AuthState
     /// プロフィール画像・表示名ストア（エモートピッカーのセクションヘッダー用）
     var profileImageStore: ProfileImageStore
+    /// ライブプレイヤー ViewModel（nil の場合はプレイヤーを表示しない）
+    var streamPlayer: StreamPlayerViewModel?
+
+    /// ライブ配信プレイヤー機能の有効・無効（SettingsView から変更可能）
+    @AppStorage("livePlayerEnabled") private var livePlayerEnabled = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,8 +34,17 @@ struct ChatDetailView: View {
                 Divider()
             }
 
-            // チャットメッセージリスト
-            chatListView
+            // livePlayerEnabled かつ streamPlayer がある場合はプレイヤーと VSplitView
+            if livePlayerEnabled, let streamPlayer {
+                VSplitView {
+                    StreamPlayerView(viewModel: streamPlayer)
+                        .frame(minHeight: 180)
+                    chatListView
+                }
+            } else {
+                // チャットのみ表示（既存挙動）
+                chatListView
+            }
 
             // コメント投稿用入力バー
             Divider()

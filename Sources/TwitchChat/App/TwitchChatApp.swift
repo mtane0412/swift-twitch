@@ -20,6 +20,8 @@ struct TwitchChatApp: App {
     @State private var followedChannelStore: FollowedChannelStore?
     /// ユーザープロフィール画像URLストア
     @State private var profileImageStore: ProfileImageStore?
+    /// ライブ配信プレイヤー ViewModel（アプリ起動時に生成、チャンネル全体で共有）
+    @State private var streamPlayer = StreamPlayerViewModel()
 
     var body: some Scene {
         WindowGroup {
@@ -33,7 +35,8 @@ struct TwitchChatApp: App {
                     channelManager: channelManager,
                     followedStreamStore: followedStreamStore,
                     followedChannelStore: followedChannelStore,
-                    profileImageStore: profileImageStore
+                    profileImageStore: profileImageStore,
+                    streamPlayer: streamPlayer
                 )
                 .task {
                     await authState.restoreSession()
@@ -105,5 +108,9 @@ struct TwitchChatApp: App {
             }
         }
         .defaultSize(width: 800, height: 700)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
