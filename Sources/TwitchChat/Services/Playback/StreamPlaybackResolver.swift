@@ -43,13 +43,13 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
     /// `StreamPlaybackResolver` を初期化する
     ///
     /// - Parameters:
-    ///   - tokenClient: GQL アクセストークン取得クライアント
+    ///   - tokenClient: GQL アクセストークン取得クライアント（`nil` のとき `options.adServingEnabled` を反映して生成する）
     ///   - options: HLS 再生オプション（省略時は `.default`）
     init(
-        tokenClient: any TwitchPlaybackTokenClientProtocol = TwitchPlaybackTokenClient(),
+        tokenClient: (any TwitchPlaybackTokenClientProtocol)? = nil,
         options: PlaybackOptions = .default
     ) {
-        self.tokenClient = tokenClient
+        self.tokenClient = tokenClient ?? TwitchPlaybackTokenClient(adServingEnabled: options.adServingEnabled)
         self.options = options
     }
 

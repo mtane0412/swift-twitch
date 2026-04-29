@@ -58,8 +58,13 @@ actor TwitchPlaybackTokenClient: TwitchPlaybackTokenClientProtocol {
 
     private let dataFetcher: any URLSessionDataFetcher
     private let clientID: String
-    /// SSAI セッション管理用デバイス識別子（32 文字 lowercase hex、インスタンスごとに生成）
+    /// SSAI セッション管理用デバイス識別子
+    ///
+    /// デフォルトでは `makeDeviceID()` で生成する 32 文字 lowercase hex。
+    /// テスト時は `init(deviceID:)` 引数で固定値を注入できる。
     private let deviceID: String
+    /// 広告サーブ有効フラグ（`false` のとき `X-Device-Id` ヘッダーと GQL `platform` を省略する）
+    private let adServingEnabled: Bool
 
     // MARK: - 初期化
 
@@ -69,14 +74,17 @@ actor TwitchPlaybackTokenClient: TwitchPlaybackTokenClientProtocol {
     ///   - dataFetcher: HTTP リクエストを実行するデータフェッチャー（テスト時はモックを渡す）
     ///   - clientID: GQL リクエストに付与する Client-Id ヘッダー値
     ///   - deviceID: `X-Device-Id` ヘッダー値（`nil` のとき内部でランダム生成する。テスト時に固定値を注入可能）
+    ///   - adServingEnabled: `false` のとき `X-Device-Id` ヘッダーと GQL `variables.platform` を省略する
     init(
         dataFetcher: any URLSessionDataFetcher = TwitchPlaybackTokenClient.makeDefaultSession(),
         clientID: String = TwitchPlaybackTokenClient.webClientID,
-        deviceID: String? = nil
+        deviceID: String? = nil,
+        adServingEnabled: Bool = true
     ) {
         self.dataFetcher = dataFetcher
         self.clientID = clientID
         self.deviceID = deviceID ?? TwitchPlaybackTokenClient.makeDeviceID()
+        self.adServingEnabled = adServingEnabled
     }
 
     // MARK: - 公開メソッド
@@ -100,8 +108,10 @@ actor TwitchPlaybackTokenClient: TwitchPlaybackTokenClientProtocol {
         request.httpMethod = "POST"
         request.setValue(clientID, forHTTPHeaderField: "Client-Id")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(deviceID, forHTTPHeaderField: "X-Device-Id")
-        request.httpBody = try JSONEncoder().encode(GQLPlaybackTokenBody(login: login))
+        if adServingEnabled {
+            request.setValue(deviceID, forHTTPHeaderField: "X-Device-Id")
+        }
+        request.httpBody = try JSONEncoder().encode(GQLPlaybackTokenBody(login: login, adServingEnabled: adServingEnabled))
         return request
     }
 
@@ -141,11 +151,11 @@ private struct GQLPlaybackTokenBody: Encodable {
     let extensions: GQLExtensions
     let variables: GQLVariables
 
-    init(login: String) {
+    init(login: String, adServingEnabled: Bool) {
         self.extensions = GQLExtensions(
             persistedQuery: GQLPersistedQuery(sha256Hash: TwitchPlaybackTokenClient.liveQueryHash)
         )
-        self.variables = GQLVariables(login: login)
+        self.variables = GQLVariables(login: login, platform: adServingEnabled ? "web" : nil)
     }
 }
 
@@ -164,7 +174,22 @@ private struct GQLVariables: Encodable {
     let isVod = false
     let vodID = ""
     let playerType = "site"
-    let platform = "web"
+    /// `nil` のとき JSON エンコード時にフィールドを省略する（adServingEnabled=false 時）
+    let platform: String?
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isLive, forKey: .isLive)
+        try container.encode(login, forKey: .login)
+        try container.encode(isVod, forKey: .isVod)
+        try container.encode(vodID, forKey: .vodID)
+        try container.encode(playerType, forKey: .playerType)
+        try container.encodeIfPresent(platform, forKey: .platform)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isLive, login, isVod, vodID, playerType, platform
+    }
 }
 
 // MARK: - ファクトリ

@@ -137,7 +137,7 @@ struct TwitchPlaybackTokenClientTests {
     @Test("GQL リクエストボディの variables に platform=\"web\" が含まれる")
     func gqlVariablesIncludePlatformWeb() async throws {
         // 前提: TwitchPlaybackTokenClient がリクエストを送信したとき
-        // 検証: リクエストボディ JSON の variables.platform が "web" であること
+        // 検証: リクエストボディ JSON の variables.platform が厳密に "web" であること
         let fetcher = MockURLSessionDataFetcher()
         await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
 
@@ -145,13 +145,17 @@ struct TwitchPlaybackTokenClientTests {
         _ = try await client.fetchLiveToken(login: "argstar")
 
         let requests = await fetcher.capturedRequests
-        guard let bodyData = requests.first?.httpBody,
-              let bodyString = String(data: bodyData, encoding: .utf8) else {
+        guard let bodyData = requests.first?.httpBody else {
             Issue.record("リクエストボディが nil")
             return
         }
-        #expect(bodyString.contains("\"platform\""), "variables に platform キーが含まれていない: \(bodyString)")
-        #expect(bodyString.contains("\"web\""), "variables.platform の値が web でない: \(bodyString)")
+        guard let root = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+              let variables = root["variables"] as? [String: Any] else {
+            Issue.record("JSON 構造が想定外")
+            return
+        }
+        let platform = variables["platform"] as? String
+        #expect(platform == "web", "variables.platform が \"web\" でない: \(String(describing: platform))")
     }
 
     @Test("GQL リクエストに X-Device-Id ヘッダーが付与され 32 文字の lowercase hex である")
@@ -220,17 +224,64 @@ struct TwitchPlaybackTokenClientTests {
         let fetcher = MockURLSessionDataFetcher()
         await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
 
-        let テスト用デバイスID = "abcdef1234567890abcdef1234567890"
+        let testDeviceID = "abcdef1234567890abcdef1234567890"
         let client = TwitchPlaybackTokenClient(
             dataFetcher: fetcher,
             clientID: "テストクライアントID",
-            deviceID: テスト用デバイスID
+            deviceID: testDeviceID
         )
         _ = try await client.fetchLiveToken(login: "argstar")
 
         let requests = await fetcher.capturedRequests
         let deviceId = requests.first?.allHTTPHeaderFields?["X-Device-Id"]
-        #expect(deviceId == テスト用デバイスID, "注入した deviceID が反映されていない: \(deviceId ?? "nil")")
+        #expect(deviceId == testDeviceID, "注入した deviceID が反映されていない: \(deviceId ?? "nil")")
+    }
+
+    @Test("adServingEnabled=false のとき X-Device-Id ヘッダーが送信されない")
+    func adServingDisabledOmitsXDeviceIdHeader() async throws {
+        // 前提: adServingEnabled=false で初期化した TwitchPlaybackTokenClient
+        // 検証: X-Device-Id ヘッダーがリクエストに含まれないこと（カットバック時の完全無効化）
+        let fetcher = MockURLSessionDataFetcher()
+        await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
+
+        let client = TwitchPlaybackTokenClient(
+            dataFetcher: fetcher,
+            clientID: "テストクライアントID",
+            adServingEnabled: false
+        )
+        _ = try await client.fetchLiveToken(login: "argstar")
+
+        let requests = await fetcher.capturedRequests
+        let deviceId = requests.first?.allHTTPHeaderFields?["X-Device-Id"]
+        #expect(deviceId == nil, "adServingEnabled=false なのに X-Device-Id が送信された: \(deviceId ?? "")")
+    }
+
+    @Test("adServingEnabled=false のとき GQL variables に platform フィールドが含まれない")
+    func adServingDisabledOmitsPlatformFromGQLVariables() async throws {
+        // 前提: adServingEnabled=false で初期化した TwitchPlaybackTokenClient
+        // 検証: リクエストボディ JSON の variables に platform キーが存在しないこと（null ではなく省略）
+        let fetcher = MockURLSessionDataFetcher()
+        await fetcher.setStub(.init(statusCode: 200, data: makeSuccessResponseData()))
+
+        let client = TwitchPlaybackTokenClient(
+            dataFetcher: fetcher,
+            clientID: "テストクライアントID",
+            adServingEnabled: false
+        )
+        _ = try await client.fetchLiveToken(login: "argstar")
+
+        let requests = await fetcher.capturedRequests
+        guard let bodyData = requests.first?.httpBody else {
+            Issue.record("リクエストボディが nil")
+            return
+        }
+        guard let root = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+              let variables = root["variables"] as? [String: Any] else {
+            Issue.record("JSON 構造が想定外")
+            return
+        }
+        let hasPlatformKey = variables.keys.contains("platform")
+        #expect(!hasPlatformKey, "adServingEnabled=false なのに variables に platform が含まれている: \(variables)")
     }
 
     // MARK: - エラーパステスト
