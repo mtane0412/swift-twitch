@@ -64,6 +64,9 @@ final class StreamPlayerViewModel {
     /// - Parameter login: チャンネルログイン名
     func load(login: String) async {
         loadTask?.cancel()
+        // チャンネル切替直後に前の配信音声が流れ続けないよう即座に停止する
+        player.pause()
+        player.replaceCurrentItem(with: nil)
         state = .resolving
         currentLogin = login
 
@@ -105,9 +108,13 @@ final class StreamPlayerViewModel {
             state = .playing
         } catch let error as PlaybackError {
             guard !Task.isCancelled else { return }
+            player.pause()
+            player.replaceCurrentItem(with: nil)
             state = mapPlaybackError(error)
         } catch {
             guard !Task.isCancelled else { return }
+            player.pause()
+            player.replaceCurrentItem(with: nil)
             state = .error(message: error.localizedDescription)
         }
     }
@@ -118,6 +125,8 @@ final class StreamPlayerViewModel {
             return .offline
         case .geoOrSubscriberRestricted:
             return .error(message: "この配信は視聴できません（地域制限またはサブスクライバー限定）")
+        case .badURL:
+            return .error(message: "マニフェスト URL の生成に失敗しました（内部エラー）")
         case .tokenDecodingFailed:
             return .error(message: "再生トークンの取得に失敗しました（APIが変更された可能性があります）")
         case .tokenRequestFailed(let statusCode):

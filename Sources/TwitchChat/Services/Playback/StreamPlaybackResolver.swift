@@ -64,7 +64,7 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
 
     private func buildUsherURL(login: String, token: StreamPlaybackToken) throws -> URL {
         guard var components = URLComponents(string: "\(Self.usherBaseURL)/\(login).m3u8") else {
-            throw PlaybackError.manifestUnreachable(statusCode: 0)
+            throw PlaybackError.badURL
         }
 
         components.queryItems = [
@@ -83,7 +83,7 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
         ]
 
         guard let url = components.url else {
-            throw PlaybackError.manifestUnreachable(statusCode: 0)
+            throw PlaybackError.badURL
         }
         return url
     }

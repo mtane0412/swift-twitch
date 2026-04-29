@@ -28,7 +28,7 @@ struct ContentView: View {
     @State private var isBlankTabOpen: Bool = false
 
     /// ライブ配信プレイヤー機能の有効・無効（SettingsView から変更可能）
-    @AppStorage("livePlayerEnabled") private var livePlayerEnabled = false
+    @AppStorage(AppStorageKeys.livePlayerEnabled) private var livePlayerEnabled = false
 
     var body: some View {
         NavigationSplitView {

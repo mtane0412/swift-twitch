@@ -12,7 +12,7 @@ struct SettingsView: View {
     /// ライブ配信プレイヤー機能の有効・無効（永続化）
     ///
     /// Twitch GQL は非公式 API のため、デフォルト OFF の Opt-in とする。
-    @AppStorage("livePlayerEnabled") private var livePlayerEnabled = false
+    @AppStorage(AppStorageKeys.livePlayerEnabled) private var livePlayerEnabled = false
 
     var body: some View {
         Form {

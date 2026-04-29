@@ -21,8 +21,46 @@ actor MockStreamPlaybackResolver: StreamPlaybackResolverProtocol {
     /// resolve が呼ばれた回数
     var callCount: Int { capturedLogins.count }
 
+    // MARK: - ブロッキングサポート（in-flight 競合テスト用）
+
+    /// 次の resolve をサスペンドするかどうか
+    private var shouldSuspend = false
+    /// サスペンド中の continuation（unblock/キャンセルで resume する）
+    private var blockedContinuation: CheckedContinuation<StreamPlaybackManifest, Error>?
+    /// サスペンド到達を呼び出し元に通知する continuation
+    private var onSuspendedContinuation: CheckedContinuation<Void, Never>?
+
+    /// 次の resolve をサスペンドするよう予約する
+    func suspendNextResolve() {
+        shouldSuspend = true
+    }
+
+    /// resolve がサスペンド状態に入るまで待機する（テストの同期に使用）
+    func waitUntilSuspended() async {
+        await withCheckedContinuation { cont in
+            onSuspendedContinuation = cont
+        }
+    }
+
     func resolve(login: String) async throws -> StreamPlaybackManifest {
         capturedLogins.append(login)
+        if shouldSuspend {
+            shouldSuspend = false
+            // 呼び出し元に「サスペンド到達」を通知
+            onSuspendedContinuation?.resume()
+            onSuspendedContinuation = nil
+            // キャンセル時に continuation を resume して CancellationError を伝播する
+            return try await withTaskCancellationHandler(
+                operation: {
+                    try await withCheckedThrowingContinuation { cont in
+                        self.blockedContinuation = cont
+                    }
+                },
+                onCancel: {
+                    Task { await self.resumeBlockedWithCancellation() }
+                }
+            )
+        }
         if let error = errorToThrow {
             throw error
         }
@@ -30,6 +68,12 @@ actor MockStreamPlaybackResolver: StreamPlaybackResolverProtocol {
             throw PlaybackError.channelOffline
         }
         return manifest
+    }
+
+    /// ブロック中の continuation をキャンセルエラーで resume する
+    private func resumeBlockedWithCancellation() {
+        blockedContinuation?.resume(throwing: CancellationError())
+        blockedContinuation = nil
     }
 }
 
@@ -60,18 +104,15 @@ struct StreamPlayerViewModelTests {
 
     // MARK: - load テスト
 
-    @Test("load 開始直後の state は resolving になる")
-    func stateIsResolvingDuringLoad() async throws {
-        // 前提: resolver の呼び出しを確認するため、resolve 完了を確認するだけでよい
+    @Test("resolve 成功後 state は playing になる")
+    func stateIsPlayingAfterLoad() async throws {
         let resolver = MockStreamPlaybackResolver()
         await resolver.setManifest(makeManifest())
 
         let viewModel = StreamPlayerViewModel(resolver: resolver)
-        // Task で非同期に load を走らせて、resolving 状態をキャプチャするのは
-        // タイミング依存のため、ここでは resolve 完了後の最終状態のみ確認する
         await viewModel.load(login: "argstar")
-        // load 完了後は playing 状態（AVPlayer の status は wait しない）
-        #expect(viewModel.state != .idle)
+
+        #expect(viewModel.state == .playing)
     }
 
     @Test("resolve 成功後 currentLogin が更新される")
@@ -159,16 +200,35 @@ struct StreamPlayerViewModelTests {
 
     // MARK: - 重複 load テスト
 
-    @Test("load 中に別 login で load を呼んでも currentLogin は最後の値になる")
-    func secondLoadOverridesFirst() async throws {
+    @Test("load 中に別 login で load を呼ぶと前のロードがキャンセルされ最後の login だけが反映される")
+    func secondLoadCancelsFirstInFlight() async throws {
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        // 1回目の resolve をサスペンドして in-flight 状態を作る
+        await resolver.suspendNextResolve()
+
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+
+        // 1回目の load を Task で開始（await せず in-flight のまま保持）
+        let firstLoadTask = Task { await viewModel.load(login: "argstar") }
+        // resolver がサスペンド到達するまで待機（確実な同期）
+        await resolver.waitUntilSuspended()
+
+        // 2回目の load を呼ぶ（1回目がキャンセルされ、2回目が優先される）
+        await viewModel.load(login: "forsen")
+        await firstLoadTask.value
+
+        #expect(viewModel.currentLogin == "forsen")
+    }
+
+    @Test("複数回 load を順番に呼んでも currentLogin は最後の値になる")
+    func sequentialLoadsUpdateCurrentLogin() async throws {
         let resolver = MockStreamPlaybackResolver()
         await resolver.setManifest(makeManifest())
 
         let viewModel = StreamPlayerViewModel(resolver: resolver)
 
-        // 最初の load
         await viewModel.load(login: "argstar")
-        // 別チャンネルで再 load
         await viewModel.load(login: "forsen")
 
         #expect(viewModel.currentLogin == "forsen")

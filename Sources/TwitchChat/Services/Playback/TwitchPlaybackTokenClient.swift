@@ -108,7 +108,9 @@ actor TwitchPlaybackTokenClient: TwitchPlaybackTokenClientProtocol {
     }
 
     private func validateHTTPResponse(_ response: URLResponse, data: Data) throws {
-        guard let http = response as? HTTPURLResponse else { return }
+        guard let http = response as? HTTPURLResponse else {
+            throw PlaybackError.network(URLError(.badServerResponse))
+        }
         guard http.statusCode == 200 else {
             throw PlaybackError.tokenRequestFailed(statusCode: http.statusCode)
         }

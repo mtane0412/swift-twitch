@@ -50,7 +50,8 @@ private struct AVPlayerNSViewRepresentable: NSViewRepresentable {
 /// Twitch ライブ配信を表示するビュー
 ///
 /// `StreamPlayerViewModel` の状態に応じて以下を表示する:
-/// - `.idle` / `.resolving`: ProgressView
+/// - `.idle`: 黒背景（Color.black）
+/// - `.resolving`: ProgressView（読み込み中）
 /// - `.playing`: AVPlayerView（フローティングコントロール付き）
 /// - `.offline`: オフライン表示
 /// - `.error(message:)`: エラー表示 + 再試行ボタン

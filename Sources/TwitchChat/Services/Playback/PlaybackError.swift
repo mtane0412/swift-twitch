@@ -12,6 +12,9 @@ enum PlaybackError: Error, Equatable {
     /// GQL レスポンスのデコードに失敗した（形式変更などで発生する可能性がある）
     case tokenDecodingFailed
 
+    /// Usher マニフェスト URL の組み立てに失敗した（内部ロジックの誤りで発生する）
+    case badURL
+
     /// Usher マニフェストの取得に失敗した（想定外のステータスコード）
     case manifestUnreachable(statusCode: Int)
 
@@ -28,6 +31,7 @@ enum PlaybackError: Error, Equatable {
         switch (lhs, rhs) {
         case let (.tokenRequestFailed(l), .tokenRequestFailed(r)): return l == r
         case (.tokenDecodingFailed, .tokenDecodingFailed): return true
+        case (.badURL, .badURL): return true
         case let (.manifestUnreachable(l), .manifestUnreachable(r)): return l == r
         case (.channelOffline, .channelOffline): return true
         case (.geoOrSubscriberRestricted, .geoOrSubscriberRestricted): return true

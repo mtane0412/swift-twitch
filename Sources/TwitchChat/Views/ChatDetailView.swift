@@ -21,10 +21,21 @@ struct ChatDetailView: View {
     var streamPlayer: StreamPlayerViewModel?
 
     /// ライブ配信プレイヤー機能の有効・無効（SettingsView から変更可能）
-    @AppStorage("livePlayerEnabled") private var livePlayerEnabled = false
+    @AppStorage(AppStorageKeys.livePlayerEnabled) private var livePlayerEnabled = false
 
-    /// プレイヤー高さ（横幅を onGeometryChange で計測して 16:9 から算出）
-    @State private var playerHeight: CGFloat = 0
+    /// プレイヤー横幅（onGeometryChange で計測）
+    @State private var playerWidth: CGFloat = 0
+    /// コンテナ（VStack 全体）高さ（playerHeight の上限算出に使用）
+    @State private var containerHeight: CGFloat = 0
+
+    /// 16:9 比率かつコンテナの 65% 以下に制限したプレイヤー高さ
+    ///
+    /// 横幅フルの 16:9 をそのまま使うと横長ウィンドウでチャット領域が潰れるため、
+    /// コンテナ高さの 65% を上限としてチャットエリアを確保する。
+    private var playerHeight: CGFloat {
+        guard playerWidth > 0, containerHeight > 0 else { return 0 }
+        return min(playerWidth * 9 / 16, containerHeight * 0.65)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,11 +53,12 @@ struct ChatDetailView: View {
             // onGeometryChange で横幅を計測して高さを明示的に設定する
             if livePlayerEnabled, let streamPlayer {
                 StreamPlayerView(viewModel: streamPlayer)
-                    .frame(maxWidth: .infinity, minHeight: playerHeight, maxHeight: playerHeight > 0 ? playerHeight : .infinity)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: playerHeight > 0 ? playerHeight : nil)
                     .onGeometryChange(for: CGFloat.self) { proxy in
                         proxy.size.width
                     } action: { newWidth in
-                        playerHeight = newWidth * 9 / 16
+                        if newWidth != playerWidth { playerWidth = newWidth }
                     }
                 Divider()
                 chatListView
@@ -61,6 +73,12 @@ struct ChatDetailView: View {
         }
         // タブバーのアクティブタブ色（controlBackgroundColor）と一致させる
         .background(Color(.controlBackgroundColor))
+        // VStack 全体の高さを追跡し、playerHeight の上限計算に使う
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { newHeight in
+            if newHeight != containerHeight { containerHeight = newHeight }
+        }
     }
 
     /// チャットメッセージのスクロールビュー
