@@ -1,10 +1,14 @@
 // StreamPlayerView.swift
 // Twitch ライブ配信 AVPlayer の表示ビュー
-// StreamPlayerViewModel の state に応じてプレイヤーまたはオーバーレイを表示する
+// StreamPlayerViewModel の state に応じてオーバーレイを切り替える
 //
 // macOS 26 では SwiftUI の VideoPlayer（_AVKit_SwiftUI 経由）が
 // 'So12AVPlayerViewC' の demangling に失敗してクラッシュするため、
 // AVPlayerView を NSViewRepresentable で直接ラップして回避する。
+//
+// AVPlayerNSViewRepresentable は ZStack 最下層に常時配置する。
+// state 遷移ごとに makeNSView が再呼び出しされると view.player 再設定で
+// rate がリセットされてしまうため、この構造でその問題を回避する。
 
 import AVKit
 import SwiftUI
@@ -35,9 +39,6 @@ private struct AVPlayerNSViewRepresentable: NSViewRepresentable {
         view.player = player
         view.controlsStyle = .floating
         view.videoGravity = .resizeAspect
-        // AVPlayerView は player を設定すると内部的にレートをリセットするため、
-        // 明示的に再生を再開する（currentItem がない場合は no-op）
-        player.play()
         return view
     }
 
@@ -52,41 +53,51 @@ private struct AVPlayerNSViewRepresentable: NSViewRepresentable {
 
 /// Twitch ライブ配信を表示するビュー
 ///
-/// `StreamPlayerViewModel` の状態に応じて以下を表示する:
-/// - `.idle`: 黒背景（Color.black）
-/// - `.resolving`: ProgressView（読み込み中）
-/// - `.playing`: AVPlayerView（フローティングコントロール付き）
-/// - `.offline`: オフライン表示
-/// - `.error(message:)`: エラー表示 + 再試行ボタン
+/// `AVPlayerNSViewRepresentable` を ZStack 最下層に常時配置し、
+/// `StreamPlayerViewModel` の状態に応じてオーバーレイを切り替える:
+/// - `.idle`: 黒オーバーレイ（プレイヤーを隠す）
+/// - `.resolving`: ProgressView オーバーレイ（読み込み中）
+/// - `.playing`: オーバーレイなし（プレイヤーが見える）
+/// - `.offline`: オフライン表示オーバーレイ
+/// - `.error(message:)`: エラー表示 + 再試行ボタンオーバーレイ
 struct StreamPlayerView: View {
 
     var viewModel: StreamPlayerViewModel
 
     var body: some View {
-        Group {
-            switch viewModel.state {
-            case .idle:
-                idleView
-            case .resolving:
-                ProgressView("読み込み中...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .playing:
-                AVPlayerNSViewRepresentable(player: viewModel.player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .offline:
-                offlineView
-            case .error(let message):
-                errorView(message: message)
-            }
+        ZStack {
+            // AVPlayer は state によらず常にビュー階層に保持する
+            // state 変化で makeNSView が再呼び出しされると view.player 設定で
+            // rate がリセットされるため、このビューを常駐させて回避する
+            AVPlayerNSViewRepresentable(player: viewModel.player)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            overlayForCurrentState
         }
         .background(Color.black)
     }
 
-    // MARK: - サブビュー
+    // MARK: - オーバーレイ
 
-    private var idleView: some View {
-        Color.black
+    @ViewBuilder
+    private var overlayForCurrentState: some View {
+        switch viewModel.state {
+        case .idle:
+            Color.black
+        case .resolving:
+            ProgressView("読み込み中...")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+        case .playing:
+            EmptyView()
+        case .offline:
+            offlineView
+        case .error(let message):
+            errorView(message: message)
+        }
     }
+
+    // MARK: - サブビュー
 
     private var offlineView: some View {
         VStack(spacing: 8) {
