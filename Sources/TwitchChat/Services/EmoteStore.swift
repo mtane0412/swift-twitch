@@ -559,6 +559,33 @@ actor EmoteStore {
         }
     }
 
+    /// ユーザーエモートが完全に取得済みかどうかを返す
+    ///
+    /// `ChannelManager.joinChannel` がプリロードストアの完了状態を確認するために使用する。
+    /// `fetchUserEmotes` が全ページ完了した場合、または TTL 内の永続化データを
+    /// `seedUserEmotes` でロードした場合に `true` になる。
+    ///
+    /// - Returns: 完全取得済みなら `true`、未ロードまたは途中の場合は `false`
+    func isUserEmotesFullyLoaded() -> Bool {
+        isUserEmotesLoaded
+    }
+
+    /// プリロードストアのスナップショットからユーザーエモートを仮充填する
+    ///
+    /// `ChannelManager.joinChannel` がプリロード未完了時に呼び出す。
+    /// `setUserEmotes(_:)` と異なり `isUserEmotesLoaded` フラグを立てないため、
+    /// `startFetchTasks` の `fetchUserEmotes` が引き続き完全取得を実行できる。
+    /// ピッカーの即時表示と正確な全エモート取得を両立する。
+    /// 完全取得完了後は `fetchUserEmotes` 内の `notifyUserEmoteSetsUpdated()` で追加通知が行われる。
+    ///
+    /// - Parameter emotes: 仮充填するユーザーエモート一覧（プリロード途中のスナップショット）
+    func seedUserEmotesFromPreload(_ emotes: [HelixEmote]) {
+        userEmotes = emotes
+        if !emotes.isEmpty {
+            notifyUserEmoteSetsUpdated()
+        }
+    }
+
     /// ユーザーエモート一覧を直接設定する
     ///
     /// `ChannelManager` が新規接続チャンネルの `ChatViewModel` にプリロード済み

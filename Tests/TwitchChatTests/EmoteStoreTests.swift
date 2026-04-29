@@ -732,4 +732,69 @@ struct EmoteStoreTests {
         // 検証: グローバルエモート未設定のため空配列
         #expect(snapshot.isEmpty)
     }
+
+    // MARK: - プリロード競合対策
+
+    @Test("isUserEmotesFullyLoaded は初期状態で false を返す")
+    func testIsUserEmotesFullyLoadedInitiallyFalse() async {
+        // 前提: エモートが設定されていない初期状態
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        // 検証: 初期状態では false
+        let loaded = await store.isUserEmotesFullyLoaded()
+        #expect(loaded == false)
+    }
+
+    @Test("isUserEmotesFullyLoaded は setUserEmotes 後に true を返す")
+    func testIsUserEmotesFullyLoadedTrueAfterSetUserEmotes() async {
+        // 前提: ユーザーエモートを直接セット（プリロード完了をシミュレート）
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+        await store.setUserEmotes([.ユーザーエモート別チャンネルSub])
+        // 検証: setUserEmotes 後は fully loaded
+        let loaded = await store.isUserEmotesFullyLoaded()
+        #expect(loaded == true)
+    }
+
+    @Test("seedUserEmotesFromPreload はエモートをセットするが isUserEmotesFullyLoaded フラグを立てない")
+    func testSeedUserEmotesFromPreloadDoesNotSetLoadedFlag() async {
+        // 前提: プリロード途中のスナップショット（ページ 1 のみ取得済み）をシミュレート
+        let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
+
+        await store.seedUserEmotesFromPreload([.ユーザーエモート別チャンネルSub])
+
+        // 検証: エモートはセットされているが isUserEmotesLoaded は false のまま
+        let snapshot = await store.userEmotesSnapshot()
+        let loaded = await store.isUserEmotesFullyLoaded()
+        #expect(snapshot.count == 1)
+        #expect(snapshot.first?.id == HelixEmote.ユーザーエモート別チャンネルSub.id)
+        #expect(loaded == false)
+    }
+
+    @Test("seedUserEmotesFromPreload 後の fetchUserEmotes は新規フェッチを実行する")
+    func testFetchUserEmotesRunsAfterSeedFromPreload() async {
+        // 前提: fetchUserEmotes のカウントを計測するモッククライアント
+        let counter = FetchCounter()
+        let store = EmoteStore(apiClient: CountingMockClient(counter: counter, countedEndpoint: "/emotes/user"))
+
+        // プリロード途中データをシードしてから fetchUserEmotes を呼ぶ
+        await store.seedUserEmotesFromPreload([.ユーザーエモート別チャンネルSub])
+        await store.fetchUserEmotes(userId: "123456")
+
+        // 検証: fetchUserEmotes が実際に API を呼んだこと（loaded フラグで弾かれていない）
+        let count = await counter.value
+        #expect(count == 1)
+    }
+
+    @Test("setUserEmotes 後の fetchUserEmotes はフェッチをスキップする（最適化パス）")
+    func testFetchUserEmotesSkipsAfterSetUserEmotes() async {
+        // 前提: プリロード完了済み（setUserEmotes で isLoaded=true）をシミュレート
+        let counter = FetchCounter()
+        let store = EmoteStore(apiClient: CountingMockClient(counter: counter, countedEndpoint: "/emotes/user"))
+
+        await store.setUserEmotes([.ユーザーエモート別チャンネルSub])
+        await store.fetchUserEmotes(userId: "123456")
+
+        // 検証: setUserEmotes 後は fetchUserEmotes が API を呼ばない（isLoaded=true でガード）
+        let count = await counter.value
+        #expect(count == 0)
+    }
 }
