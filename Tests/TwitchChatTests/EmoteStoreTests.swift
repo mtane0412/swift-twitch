@@ -739,7 +739,6 @@ struct EmoteStoreTests {
     func testIsUserEmotesFullyLoadedInitiallyFalse() async {
         // 前提: エモートが設定されていない初期状態
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
-
         // 検証: 初期状態では false
         let loaded = await store.isUserEmotesFullyLoaded()
         #expect(loaded == false)
@@ -749,9 +748,7 @@ struct EmoteStoreTests {
     func testIsUserEmotesFullyLoadedTrueAfterSetUserEmotes() async {
         // 前提: ユーザーエモートを直接セット（プリロード完了をシミュレート）
         let store = EmoteStore(apiClient: MockHelixAPIClientForEmote())
-
         await store.setUserEmotes([.ユーザーエモート別チャンネルSub])
-
         // 検証: setUserEmotes 後は fully loaded
         let loaded = await store.isUserEmotesFullyLoaded()
         #expect(loaded == true)
