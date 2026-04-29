@@ -137,8 +137,12 @@ final class StreamPlayerViewModel {
     // MARK: - stall ハンドラ（テスト用に internal）
 
     /// stall 通知を受けたときの処理
+    ///
+    /// `automaticallyWaitsToMinimizeStalling = false` 環境では stall 後の自動再開は行われないため、
+    /// 明示的に `player.play()` を呼んで再生を再開する。
     func handlePlaybackStalled() {
         isStalled = true
+        player.play()
     }
 
     // MARK: - プライベートヘルパー
