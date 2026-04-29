@@ -85,6 +85,7 @@ final class StreamPlayerViewModel {
         currentLogin = login
         isStalled = false
         currentLatency = nil
+        lastSeekDate = nil
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -105,6 +106,7 @@ final class StreamPlayerViewModel {
         currentLogin = nil
         isStalled = false
         currentLatency = nil
+        lastSeekDate = nil
     }
 
     /// 直前のエラーから再試行する
@@ -172,6 +174,8 @@ final class StreamPlayerViewModel {
     }
 
     private func startObservers() {
+        // 二重登録を防ぐため既存オブザーバーを事前解除する
+        stopObservers()
         // 1. 1秒ごとのライブエッジ乖離チェック
         let interval = CMTime(seconds: 1.0, preferredTimescale: 1000)
         periodicTimeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
@@ -192,10 +196,10 @@ final class StreamPlayerViewModel {
             }
         }
 
-        // 3. バッファ不足による stall 通知
+        // 3. バッファ不足による stall 通知（この ViewModel の item のみ対象）
         stalledObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.playbackStalledNotification,
-            object: nil,
+            object: player.currentItem,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
