@@ -35,20 +35,16 @@ private struct AVPlayerNSViewRepresentable: NSViewRepresentable {
     let player: AVPlayer
 
     func makeNSView(context: Context) -> ExpandingAVPlayerView {
-        print("[AVPlayerView] makeNSView 呼び出し rate=\(player.rate) timeControlStatus=\(player.timeControlStatus.rawValue)")
         let view = ExpandingAVPlayerView()
         view.player = player
         view.controlsStyle = .floating
         view.videoGravity = .resizeAspect
-        print("[AVPlayerView] makeNSView 完了 rate=\(player.rate) timeControlStatus=\(player.timeControlStatus.rawValue)")
         return view
     }
 
     func updateNSView(_ nsView: ExpandingAVPlayerView, context: Context) {
-        print("[AVPlayerView] updateNSView 呼び出し rate=\(player.rate) playerChanged=\(nsView.player !== player)")
         if nsView.player !== player {
             nsView.player = player
-            print("[AVPlayerView] updateNSView: player を差し替え")
         }
     }
 }

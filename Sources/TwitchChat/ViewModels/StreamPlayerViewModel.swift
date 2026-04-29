@@ -57,8 +57,6 @@ final class StreamPlayerViewModel {
     private var timeControlObservation: NSKeyValueObservation?
     /// AVPlayerItemPlaybackStalledNotification 購読トークン（removeObserver 用）
     private var stalledObserver: NSObjectProtocol?
-    /// player.rate KVO（デバッグ用：rate が変化するたびに出力）
-    private var rateObservation: NSKeyValueObservation?
     /// AVPlayerItem.status KVO（readyToPlay 検知用）
     private var itemStatusObservation: NSKeyValueObservation?
 
@@ -165,9 +163,7 @@ final class StreamPlayerViewModel {
             item.preferredForwardBufferDuration = 1.0
             player.automaticallyWaitsToMinimizeStalling = false
             player.replaceCurrentItem(with: item)
-            print("[Player] replaceCurrentItem 完了 rate=\(player.rate) status=\(item.status.rawValue)")
             player.playImmediately(atRate: 1.0)
-            print("[Player] playImmediately 呼び出し後 rate=\(player.rate) timeControlStatus=\(player.timeControlStatus.rawValue)")
             state = .playing
             startObservers()
         } catch let error as PlaybackError {
@@ -218,21 +214,17 @@ final class StreamPlayerViewModel {
         }
 
         // 4. AVPlayerItem.status KVO: readyToPlay で再生を確実に開始する
+        // automaticallyWaitsToMinimizeStalling=false + LL-HLS の live edge 位置決め処理により
+        // playImmediately 直後に rate が 0 に戻ることがある。
+        // アイテムが readyToPlay になった（マニフェスト取得・live edge 確定後）タイミングで
+        // 再度 playImmediately を呼ぶことで自動再生を保証する。
         if let item = player.currentItem {
             itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
-                print("[Player] item.status 変化 → \(item.status.rawValue)")
                 guard item.status == .readyToPlay else { return }
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    print("[Player] item readyToPlay: rate=\(self.player.rate) → playImmediately 呼び出し")
-                    self.player.playImmediately(atRate: 1.0)
+                    self?.player.playImmediately(atRate: 1.0)
                 }
             }
-        }
-
-        // 5. player.rate KVO: rate 変化をすべてログ出力（デバッグ用）
-        rateObservation = player.observe(\.rate, options: [.new]) { player, change in
-            print("[Player] rate 変化 → \(change.newValue ?? -1) timeControlStatus=\(player.timeControlStatus.rawValue)")
         }
     }
 
@@ -249,8 +241,6 @@ final class StreamPlayerViewModel {
         }
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
-        rateObservation?.invalidate()
-        rateObservation = nil
     }
 
     private func updateLiveEdgeLatency() {
