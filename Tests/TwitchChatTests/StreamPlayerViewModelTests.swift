@@ -234,6 +234,109 @@ struct StreamPlayerViewModelTests {
         #expect(viewModel.currentLogin == "forsen")
     }
 
+    // MARK: - shouldSeekToLive 純粋関数テスト
+
+    @Test("currentLatency が recommended * 1.5 を超えたら shouldSeekToLive は true を返す")
+    func shouldSeekToLiveReturnsTrueWhenLatencyExceedsThreshold() {
+        // 前提: currentLatency=4.5, recommended=2.0（閾値 = 2.0 * 1.5 = 3.0 を超える）
+        // 検証: shouldSeekToLive が true を返すこと
+        let result = StreamPlayerViewModel.shouldSeekToLive(
+            currentLatency: 4.5,
+            recommended: 2.0,
+            lastSeekAge: 10.0
+        )
+        #expect(result == true)
+    }
+
+    @Test("直近5秒以内に seek していたら shouldSeekToLive は false（クールダウン）")
+    func shouldSeekToLiveReturnsFalseWhenInCooldown() {
+        // 前提: lastSeekAge=3.0（5秒以内のクールダウン中）、latency は閾値超え
+        // 検証: クールダウン中は false を返すこと（チャクチャク防止）
+        let result = StreamPlayerViewModel.shouldSeekToLive(
+            currentLatency: 10.0,
+            recommended: 2.0,
+            lastSeekAge: 3.0
+        )
+        #expect(result == false)
+    }
+
+    @Test("currentLatency が recommended * 1.5 以下なら shouldSeekToLive は false")
+    func shouldSeekToLiveReturnsFalseWhenLatencyWithinThreshold() {
+        // 前提: currentLatency=2.5, recommended=2.0（閾値 = 3.0 以下）
+        // 検証: ライブエッジに十分近い場合は seek しないこと
+        let result = StreamPlayerViewModel.shouldSeekToLive(
+            currentLatency: 2.5,
+            recommended: 2.0,
+            lastSeekAge: 10.0
+        )
+        #expect(result == false)
+    }
+
+    @Test("recommended が 0 のとき shouldSeekToLive は false")
+    func shouldSeekToLiveReturnsFalseWhenRecommendedIsZero() {
+        // 前提: recommended=0（AVPlayer が推奨オフセットを未確立）
+        // 検証: recommended=0 のときは不用意に seek しないこと
+        let result = StreamPlayerViewModel.shouldSeekToLive(
+            currentLatency: 5.0,
+            recommended: 0,
+            lastSeekAge: 10.0
+        )
+        #expect(result == false)
+    }
+
+    // MARK: - isStalled / currentLatency テスト
+
+    @Test("初期状態で isStalled は false である")
+    func initialIsStalledIsFalse() {
+        let resolver = MockStreamPlaybackResolver()
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        #expect(viewModel.isStalled == false)
+    }
+
+    @Test("初期状態で currentLatency は nil である")
+    func initialCurrentLatencyIsNil() {
+        let resolver = MockStreamPlaybackResolver()
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        #expect(viewModel.currentLatency == nil)
+    }
+
+    @Test("handlePlaybackStalled() を呼ぶと isStalled が true になる")
+    func handlePlaybackStalledSetsIsStalledTrue() {
+        // 前提: 通常再生中のとき（AVPlayerItemPlaybackStalledNotification を受信した状況を再現）
+        // 検証: isStalled が true になること
+        let resolver = MockStreamPlaybackResolver()
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        viewModel.handlePlaybackStalled()
+        #expect(viewModel.isStalled == true)
+    }
+
+    @Test("stop() 後に isStalled が false にリセットされる")
+    func stopResetsIsStalled() async {
+        // 前提: stall 状態のとき stop() を呼ぶ
+        // 検証: isStalled が false にリセットされること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        await viewModel.load(login: "argstar")
+        viewModel.handlePlaybackStalled()
+        #expect(viewModel.isStalled == true, "前提: stall 状態であること")
+        viewModel.stop()
+        #expect(viewModel.isStalled == false)
+    }
+
+    @Test("load() を呼ぶと isStalled がリセットされる")
+    func loadResetsIsStalled() async {
+        // 前提: stall 状態のとき別チャンネルの load() を呼ぶ
+        // 検証: 新しい load 開始時に isStalled が false にリセットされること
+        let resolver = MockStreamPlaybackResolver()
+        await resolver.setManifest(makeManifest())
+        let viewModel = StreamPlayerViewModel(resolver: resolver)
+        viewModel.handlePlaybackStalled()
+        #expect(viewModel.isStalled == true, "前提: stall 状態であること")
+        await viewModel.load(login: "forsen")
+        #expect(viewModel.isStalled == false)
+    }
+
     // MARK: - AVPlayer LL-HLS チューニングテスト
 
     @Test("load 後の AVPlayerItem で automaticallyPreservesTimeOffsetFromLive が true になる")
