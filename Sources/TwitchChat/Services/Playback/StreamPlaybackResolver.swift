@@ -43,13 +43,13 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
     /// `StreamPlaybackResolver` を初期化する
     ///
     /// - Parameters:
-    ///   - tokenClient: GQL アクセストークン取得クライアント
+    ///   - tokenClient: GQL アクセストークン取得クライアント（`nil` のとき `options.adServingEnabled` を反映して生成する）
     ///   - options: HLS 再生オプション（省略時は `.default`）
     init(
-        tokenClient: any TwitchPlaybackTokenClientProtocol = TwitchPlaybackTokenClient(),
+        tokenClient: (any TwitchPlaybackTokenClientProtocol)? = nil,
         options: PlaybackOptions = .default
     ) {
-        self.tokenClient = tokenClient
+        self.tokenClient = tokenClient ?? TwitchPlaybackTokenClient(adServingEnabled: options.adServingEnabled)
         self.options = options
     }
 
@@ -91,6 +91,13 @@ actor StreamPlaybackResolver: StreamPlaybackResolverProtocol {
 
         if options.lowLatencyEnabled {
             queryItems.append(URLQueryItem(name: "low_latency", value: "true"))
+        }
+
+        if options.adServingEnabled {
+            queryItems.append(URLQueryItem(name: "platform", value: "web"))
+            queryItems.append(URLQueryItem(name: "player_type", value: "site"))
+            queryItems.append(URLQueryItem(name: "server_ads", value: "true"))
+            queryItems.append(URLQueryItem(name: "allow_audio_only", value: "true"))
         }
 
         components.queryItems = queryItems

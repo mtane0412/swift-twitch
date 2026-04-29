@@ -63,4 +63,38 @@ struct PlaybackOptionsTests {
         let options = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: [" avc1 ", "hevc"])
         #expect(options.supportedCodecs == ["avc1", "hevc"])
     }
+
+    // MARK: - 広告サーブテスト
+
+    @Test("PlaybackOptions.default は adServingEnabled が true である")
+    func defaultIsAdServingEnabled() {
+        // 検証: デフォルト設定で広告サーブが有効になっていること
+        let options = PlaybackOptions.default
+        #expect(options.adServingEnabled == true)
+    }
+
+    @Test("adServingEnabled=false で初期化すると広告サーブが無効になる")
+    func initWithAdServingDisabled() {
+        // 前提: 広告サーブを明示的に無効化したとき
+        // 検証: adServingEnabled が false であること
+        let options = PlaybackOptions(lowLatencyEnabled: true, supportedCodecs: ["avc1"], adServingEnabled: false)
+        #expect(options.adServingEnabled == false)
+    }
+
+    @Test("adServingEnabled を省略すると true がデフォルトになる")
+    func initWithoutAdServingArgumentDefaultsToTrue() {
+        // 前提: 既存コードの呼び出し形式（adServingEnabled 引数なし）で初期化したとき
+        // 検証: adServingEnabled がデフォルト値 true になること（後方互換性確認）
+        let options = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: ["avc1"])
+        #expect(options.adServingEnabled == true)
+    }
+
+    @Test("PlaybackOptions.default の全フィールドが期待値である")
+    func defaultHasAllExpectedValues() {
+        // 検証: デフォルト設定の 3 フィールドが全て意図した値になっていること（現状ロック）
+        let options = PlaybackOptions.default
+        #expect(options.lowLatencyEnabled == true)
+        #expect(options.supportedCodecs == ["avc1"])
+        #expect(options.adServingEnabled == true)
+    }
 }
