@@ -187,9 +187,18 @@ final class ChannelManager {
 
         // プリロード済みユーザーエモートをシードして初回ピッカー表示を高速化する
         // connect() より前にシードすることで、USERSTATE 到着前からエモートが利用可能になる
+        //
+        // プリロード完了済みの場合: setUserEmotes（isUserEmotesLoaded=true）で完全データをシード
+        // プリロード進行中の場合: seedUserEmotesFromPreload（フラグを立てない）で途中データをシード
+        //   → connect() の startFetchTasks が fetchUserEmotes で完全取得を引き継ぐ
+        let preloadComplete = await preloadEmoteStore.isUserEmotesFullyLoaded()
         let userEmotesSnapshot = await preloadEmoteStore.userEmotesSnapshot()
         if !userEmotesSnapshot.isEmpty {
-            await viewModel.emoteStore.setUserEmotes(userEmotesSnapshot)
+            if preloadComplete {
+                await viewModel.emoteStore.setUserEmotes(userEmotesSnapshot)
+            } else {
+                await viewModel.emoteStore.seedUserEmotesFromPreload(userEmotesSnapshot)
+            }
         }
 
         channels[normalized] = viewModel
