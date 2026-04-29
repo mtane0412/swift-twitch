@@ -63,6 +63,8 @@ final class StreamPlayerViewModel {
     private var timeControlObservation: NSKeyValueObservation?
     /// AVPlayerItemPlaybackStalledNotification 購読トークン（removeObserver 用）
     private var stalledObserver: NSObjectProtocol?
+    /// AVPlayerItem.status KVO 観察（readyToPlay で playImmediately を保証するため）
+    private var itemStatusObservation: NSKeyValueObservation?
     /// restoreSettingsIfNeeded の二重適用防止フラグ
     private var settingsRestored = false
 
@@ -202,6 +204,9 @@ final class StreamPlayerViewModel {
     /// stall 通知を受けたときの処理
     func handlePlaybackStalled() {
         isStalled = true
+        // automaticallyWaitsToMinimizeStalling = false のため stall 後に自動再開しない
+        // player.play() を明示的に呼んで再開を促す
+        player.play()
     }
 
     // MARK: - プライベートヘルパー
@@ -276,6 +281,16 @@ final class StreamPlayerViewModel {
                 self?.handlePlaybackStalled()
             }
         }
+
+        // 4. AVPlayerItem.status KVO: readyToPlay になったら playImmediately を再度呼んで再生を確実に開始する
+        // replaceCurrentItem 直後はまだ item が未準備のため playImmediately が無効になることがある
+        itemStatusObservation = player.currentItem?.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .readyToPlay else { return }
+            Task { @MainActor [weak self] in
+                guard let self, !self.isPaused else { return }
+                self.player.playImmediately(atRate: 1.0)
+            }
+        }
     }
 
     private func stopObservers() {
@@ -289,6 +304,8 @@ final class StreamPlayerViewModel {
             NotificationCenter.default.removeObserver(observer)
             stalledObserver = nil
         }
+        itemStatusObservation?.invalidate()
+        itemStatusObservation = nil
     }
 
     private func updateLiveEdgeLatency() {
