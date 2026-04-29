@@ -63,6 +63,8 @@ final class StreamPlayerViewModel {
     private var timeControlObservation: NSKeyValueObservation?
     /// AVPlayerItemPlaybackStalledNotification 購読トークン（removeObserver 用）
     private var stalledObserver: NSObjectProtocol?
+    /// restoreSettingsIfNeeded の二重適用防止フラグ
+    private var settingsRestored = false
 
     // MARK: - 初期化
 
@@ -162,6 +164,17 @@ final class StreamPlayerViewModel {
     /// ミュートをトグルする（volume の値は保持し、player.volume だけを 0 にする）
     func toggleMute() {
         isMuted.toggle()
+        applyEffectiveVolume()
+    }
+
+    /// 起動時に永続化された音量・ミュート設定を一度だけ適用する
+    ///
+    /// 2 回目以降の呼び出しは無視される（onAppear が複数回発火してもべき等に動作）。
+    func restoreSettingsIfNeeded(volume: Float, muted: Bool) {
+        guard !settingsRestored else { return }
+        settingsRestored = true
+        self.volume = min(max(volume, 0.0), 1.0)
+        self.isMuted = muted
         applyEffectiveVolume()
     }
 

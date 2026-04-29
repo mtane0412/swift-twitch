@@ -572,6 +572,30 @@ struct StreamPlayerViewModelTests {
         #expect(viewModel.volume == 0.8)
     }
 
+    // MARK: - 起動時設定復元テスト
+
+    @Test("restoreSettingsIfNeeded は volume と isMuted を player に適用する")
+    func restoreSettingsIfNeededAppliesSettings() {
+        // 前提: デフォルト状態の ViewModel に設定を復元する
+        // 検証: volume と isMuted が設定値になり player.volume も反映されること
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.restoreSettingsIfNeeded(volume: 0.3, muted: true)
+        #expect(viewModel.volume == 0.3)
+        #expect(viewModel.isMuted == true)
+        #expect(viewModel.player.volume == 0)
+    }
+
+    @Test("restoreSettingsIfNeeded を 2 回呼んでも 1 回目の値が保持される")
+    func restoreSettingsIfNeededIsIdempotent() {
+        // 前提: 1 回目に (0.3, muted) を適用した後、2 回目で別の値を渡す
+        // 検証: 2 回目の呼び出しは無視されること（起動時に一度だけ適用するため）
+        let viewModel = StreamPlayerViewModel(resolver: MockStreamPlaybackResolver())
+        viewModel.restoreSettingsIfNeeded(volume: 0.3, muted: false)
+        viewModel.restoreSettingsIfNeeded(volume: 0.8, muted: true)
+        #expect(viewModel.volume == 0.3)
+        #expect(viewModel.isMuted == false)
+    }
+
     // MARK: - 音量永続性テスト
 
     @Test("stop() を呼んでも volume と isMuted は維持される（ユーザー設定）")

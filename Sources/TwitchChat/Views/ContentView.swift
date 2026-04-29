@@ -91,13 +91,15 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 600, minHeight: 400)
-        .onChange(of: channelManager.selectedChannel) { _, newChannel in
-            // livePlayerEnabled かつチャンネルが切り替わった場合にのみ再生を開始する
-            guard livePlayerEnabled, let login = newChannel else {
-                if newChannel == nil { streamPlayer.stop() }
-                return
+        // selectedChannel が変わるたびに（初回表示時も含め）自動再生を実行する
+        // onChange と異なり task(id:) は初回レンダリング時にも発火するため確実に再生が始まる
+        .task(id: channelManager.selectedChannel) {
+            if let login = channelManager.selectedChannel {
+                guard livePlayerEnabled else { return }
+                await streamPlayer.load(login: login)
+            } else {
+                streamPlayer.stop()
             }
-            Task { await streamPlayer.load(login: login) }
         }
         .onChange(of: livePlayerEnabled) { _, enabled in
             // 機能を OFF にしたら再生を停止する
