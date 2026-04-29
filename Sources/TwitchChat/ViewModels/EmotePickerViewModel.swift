@@ -62,6 +62,12 @@ final class EmotePickerViewModel {
     /// 最後にセクションを構築したときのユーザーエモート ID セット
     private var lastBuiltUserIds: Set<String> = []
 
+    #if DEBUG
+    /// isAvailable のログ出力済みエモート ID セット（同一 ID の重複出力を防ぐ）
+    @ObservationIgnored
+    private var loggedAvailableIds: Set<String> = []
+    #endif
+
     // MARK: - 初期化
 
     /// EmotePickerViewModel を初期化する
@@ -120,6 +126,9 @@ final class EmotePickerViewModel {
                 allSections = buildSections(channel: channel, user: user, global: global)
             }
 
+            #if DEBUG
+            loggedAvailableIds.removeAll()
+            #endif
             applyFilter()
         }
     }
@@ -135,10 +144,38 @@ final class EmotePickerViewModel {
     /// - Parameter emote: 判定対象のエモート
     /// - Returns: 使用可能な場合は true
     func isAvailable(_ emote: HelixEmote) -> Bool {
-        if userEmoteIds.contains(emote.id) { return true }
-        guard let sets = userEmoteSets else { return true }
-        guard let emoteSetId = emote.emoteSetId else { return true }
-        return sets.contains(emoteSetId)
+        if userEmoteIds.contains(emote.id) {
+            #if DEBUG
+            if loggedAvailableIds.insert(emote.id).inserted {
+                print("[EmotePickerVM] available id=\(emote.id) name=\(emote.name) branch=userEmoteIds.hit result=true")
+            }
+            #endif
+            return true
+        }
+        guard let sets = userEmoteSets else {
+            #if DEBUG
+            if loggedAvailableIds.insert(emote.id).inserted {
+                print("[EmotePickerVM] available id=\(emote.id) name=\(emote.name) branch=userEmoteSets.nil result=true")
+            }
+            #endif
+            return true
+        }
+        guard let emoteSetId = emote.emoteSetId else {
+            #if DEBUG
+            if loggedAvailableIds.insert(emote.id).inserted {
+                print("[EmotePickerVM] available id=\(emote.id) name=\(emote.name) emoteSetId=nil branch=emoteSetId.nil result=true")
+            }
+            #endif
+            return true
+        }
+        let result = sets.contains(emoteSetId)
+        #if DEBUG
+        if loggedAvailableIds.insert(emote.id).inserted {
+            let branch = result ? "userEmoteSets.hit" : "userEmoteSets.miss"
+            print("[EmotePickerVM] available id=\(emote.id) name=\(emote.name) emoteSetId=\(emoteSetId) branch=\(branch) result=\(result)")
+        }
+        #endif
+        return result
     }
 
     // MARK: - プライベートメソッド
@@ -157,6 +194,14 @@ final class EmotePickerViewModel {
         await profileImageStore.fetchUsers(userIds: collectOwnerIds(channel: channel, user: user))
         lastBuiltChannelIds = Set(channel.map(\.id))
         lastBuiltUserIds    = Set(user.map(\.id))
+        #if DEBUG
+        loggedAvailableIds.removeAll()
+        print("[EmotePickerVM] load currentBroadcasterId=\(currentBroadcasterId ?? "nil") channel=\(channel.count) user=\(user.count) global=\(global.count)")
+        print("[EmotePickerVM] load userEmoteIds=\(userEmoteIds.count) userEmoteSets=\(userEmoteSets.map { String($0.count) } ?? "nil")")
+        if let sets = userEmoteSets, !sets.isEmpty {
+            print("[EmotePickerVM] load emote-sets: \(sets.sorted().joined(separator: ","))")
+        }
+        #endif
         allSections = buildSections(channel: channel, user: user, global: global)
         applyFilter()
     }
@@ -220,24 +265,48 @@ final class EmotePickerViewModel {
 
         for emote in channel where seen.insert(emote.id).inserted {
             currentChannelEmotes.append(emote)
+            #if DEBUG
+            print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → currentChannel(channel-ep)")
+            #endif
         }
-        for emote in user where seen.insert(emote.id).inserted {
+        for emote in user {
+            guard seen.insert(emote.id).inserted else {
+                #if DEBUG
+                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → skipped(seen)")
+                #endif
+                continue
+            }
             if emote.emoteType == "hypetrain" {
                 hypeEmotes.append(emote)
+                #if DEBUG
+                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → hypeTrain")
+                #endif
             } else if emote.emoteType == "globals" || globalIdSet.contains(emote.id) {
                 // globals タイプまたはグローバルエンドポイントに存在する ID は global セクションへ送る
                 // seen から除外して assembleSections の global 合算処理で拾う
                 seen.remove(emote.id)
                 otherEmotes.append(emote)
+                #if DEBUG
+                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → global")
+                #endif
             } else if let ownerId = emote.ownerId, ownerId == currentBroadcasterId {
                 currentChannelEmotes.append(emote)
+                #if DEBUG
+                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(ownerId) emoteSetId=\(emote.emoteSetId ?? "nil") → currentChannel(user-ep)")
+                #endif
             } else if let ownerId = emote.ownerId, ownerId != "0", !ownerId.isEmpty {
                 if subscribedByOwnerId[ownerId] == nil { subscribedOwnerIds.append(ownerId) }
                 subscribedByOwnerId[ownerId, default: []].append(emote)
+                #if DEBUG
+                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(ownerId) emoteSetId=\(emote.emoteSetId ?? "nil") → subscribedChannel(\(ownerId))")
+                #endif
             } else {
                 // ownerId なし / "0" / 空文字エモートは global セクションで処理するため seen から除外する
                 seen.remove(emote.id)
                 otherEmotes.append(emote)
+                #if DEBUG
+                print("[EmotePickerVM] classify id=\(emote.id) name=\(emote.name) emoteType=\(emote.emoteType ?? "nil") ownerId=\(emote.ownerId ?? "nil") emoteSetId=\(emote.emoteSetId ?? "nil") → global(no-owner)")
+                #endif
             }
         }
         return (currentChannelEmotes, hypeEmotes, subscribedOwnerIds, subscribedByOwnerId, otherEmotes)
