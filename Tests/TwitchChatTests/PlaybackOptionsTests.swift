@@ -33,4 +33,34 @@ struct PlaybackOptionsTests {
         let options = PlaybackOptions(lowLatencyEnabled: true, supportedCodecs: ["avc1", "hevc"])
         #expect(options.supportedCodecs == ["avc1", "hevc"])
     }
+
+    // MARK: - バリデーションテスト
+
+    @Test("supportedCodecs に空文字が含まれる場合は除去される")
+    func emptyStringCodecIsFiltered() {
+        // 前提: ["avc1", ""] のように空文字を含む配列を渡したとき
+        // 検証: supportedCodecs から空文字が除去されること
+        let options = PlaybackOptions(lowLatencyEnabled: true, supportedCodecs: ["avc1", ""])
+        #expect(options.supportedCodecs == ["avc1"])
+    }
+
+    @Test("supportedCodecs がスペースのみのコーデックを含む場合は除去される")
+    func whitespaceOnlyCodecIsFiltered() {
+        let options = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: ["  ", "avc1"])
+        #expect(options.supportedCodecs == ["avc1"])
+    }
+
+    @Test("supportedCodecs が全て無効な場合は avc1 にフォールバックする")
+    func emptyCodecsFallbackToAvc1() {
+        // 前提: 空配列または空文字のみを渡したとき
+        // 検証: supportedCodecs が ["avc1"] にフォールバックすること
+        let options = PlaybackOptions(lowLatencyEnabled: true, supportedCodecs: [])
+        #expect(options.supportedCodecs == ["avc1"])
+    }
+
+    @Test("supportedCodecs の各コーデックは前後のスペースがトリムされる")
+    func codecsAreTrimmed() {
+        let options = PlaybackOptions(lowLatencyEnabled: false, supportedCodecs: [" avc1 ", "hevc"])
+        #expect(options.supportedCodecs == ["avc1", "hevc"])
+    }
 }
